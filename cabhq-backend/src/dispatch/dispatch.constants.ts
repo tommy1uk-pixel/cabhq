@@ -1,0 +1,3 @@
+export const OFFER_TIMEOUT_SECONDS = 20;
+export const MAX_DRIVERS_TO_OFFER = 5;
+export const DRIVER_SEARCH_RADIUS_METERS = 25000;

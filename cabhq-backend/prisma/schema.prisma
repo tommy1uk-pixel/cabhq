@@ -1,0 +1,265 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  OPERATOR
+  DRIVER
+}
+
+enum DriverDocumentType {
+  DRIVING_LICENCE
+  DBS_CHECK
+  TAXI_BADGE
+  MEDICAL_CERTIFICATE
+  RIGHT_TO_WORK
+  INSURANCE
+  OTHER
+}
+
+enum VehicleDocumentType {
+  MOT_CERTIFICATE
+  INSURANCE
+  VEHICLE_INSPECTION
+  VEHICLE_LICENCE
+  LOG_BOOK
+  SERVICE_RECORD
+  TAX
+  OTHER
+}
+
+enum ComplianceDocumentStatus {
+  VALID
+  EXPIRING
+  EXPIRED
+  NO_EXPIRY
+}
+
+model Company {
+  id          String      @id @default(uuid())
+  name        String
+  createdAt   DateTime    @default(now())
+
+  users       User[]
+  drivers     Driver[]
+  bookings    Booking[]
+  routePrices RoutePrice[]
+  vehicles    Vehicle[]
+  shifts      DriverShift[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  role      Role     @default(OPERATOR)
+  createdAt DateTime @default(now())
+
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+}
+
+model Driver {
+  id             String    @id @default(uuid())
+  name           String
+  phone          String?
+  email          String?
+  pin            String
+  status         String    @default("AVAILABLE")
+
+  latitude       Float?
+  longitude      Float?
+  heading        Float?
+  speed          Float?
+  lastLocationAt DateTime?
+
+  licenceNumber  String?
+  badgeExpiry    DateTime?
+  dbsExpiry      DateTime?
+  licenceExpiry  DateTime?
+
+  createdAt      DateTime  @default(now())
+
+  companyId      String
+  company        Company   @relation(fields: [companyId], references: [id])
+
+  vehicle        Vehicle?
+  bookings       Booking[]
+  documents      DriverDocument[]
+  shifts         DriverShift[]
+}
+
+model DriverDocument {
+  id                        String                   @id @default(uuid())
+  driverId                  String
+  driver                    Driver                   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  documentType              DriverDocumentType
+  title                     String
+  fileName                  String
+  filePath                  String
+  mimeType                  String?
+  fileSize                  Int?
+
+  issueDate                 DateTime?
+  expiryDate                DateTime?
+  status                    ComplianceDocumentStatus @default(NO_EXPIRY)
+  notes                     String?
+
+  dbsUpdateServiceEnabled   Boolean                  @default(false)
+  dbsUpdateServiceReference String?
+  dbsUpdateServiceCheckedAt DateTime?
+
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+
+  @@index([driverId])
+  @@index([status])
+  @@index([expiryDate])
+}
+
+model Vehicle {
+  id                   String    @id @default(uuid())
+  reg                  String
+  make                 String?
+  model                String?
+  colour               String?
+  capacity             Int?      @default(4)
+  status               String    @default("ACTIVE")
+
+  plateNumber          String?
+  vin                  String?
+  motExpiry            DateTime?
+  insuranceExpiry      DateTime?
+  inspectionExpiry     DateTime?
+  vehicleLicenceExpiry DateTime?
+  taxExpiry            DateTime?
+  serviceDate          DateTime?
+  notes                String?
+
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  companyId            String
+  company              Company   @relation(fields: [companyId], references: [id])
+
+  driverId             String?   @unique
+  driver               Driver?   @relation(fields: [driverId], references: [id])
+
+  documents            VehicleDocument[]
+
+  @@index([companyId])
+  @@index([status])
+  @@index([reg])
+}
+
+model VehicleDocument {
+  id           String                   @id @default(uuid())
+  vehicleId    String
+  vehicle      Vehicle                  @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  documentType VehicleDocumentType
+  title        String
+  fileName     String
+  filePath     String
+  mimeType     String?
+  fileSize     Int?
+
+  issueDate    DateTime?
+  expiryDate   DateTime?
+  status       ComplianceDocumentStatus @default(NO_EXPIRY)
+  notes        String?
+
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+
+  @@index([vehicleId])
+  @@index([status])
+  @@index([expiryDate])
+}
+
+model Booking {
+  id              String         @id @default(uuid())
+  reference       String
+  pickup          String
+  dropoff         String
+  pickupLat       Float?
+  pickupLng       Float?
+  dropoffLat      Float?
+  dropoffLng      Float?
+  status          String
+  pickupTime      DateTime
+  pricingMode     String?
+  quotedPrice     Float?
+  calculatedFare  Float?
+  distanceMiles   Float?
+  durationMinutes Float?
+  createdAt       DateTime       @default(now())
+
+  companyId       String
+  company         Company        @relation(fields: [companyId], references: [id])
+
+  driverId        String?
+  driver          Driver?        @relation(fields: [driverId], references: [id])
+
+  events          BookingEvent[]
+
+  @@index([companyId])
+  @@index([driverId])
+  @@index([status])
+  @@index([pickupTime])
+}
+
+model BookingEvent {
+  id        String   @id @default(uuid())
+  bookingId String
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  message   String
+  createdAt DateTime @default(now())
+
+  @@index([bookingId])
+  @@index([createdAt])
+}
+
+model RoutePrice {
+  id          String   @id @default(uuid())
+  fromLabel   String
+  toLabel     String
+  fixedPrice  Float
+  createdAt   DateTime @default(now())
+
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+}
+
+model DriverShift {
+  id          String   @id @default(uuid())
+
+  driverId    String
+  driver      Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+
+  startedAt   DateTime
+  endedAt     DateTime?
+  startStatus String?
+  endStatus   String?
+  notes       String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([driverId])
+  @@index([companyId])
+  @@index([startedAt])
+  @@index([endedAt])
+}
