@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import AdminShell from '@/components/AdminShell';
 import { apiFetch } from '@/lib/api';
@@ -154,7 +154,7 @@ const driverDocumentTypeOptions: { value: DriverDocumentType; label: string }[] 
   { value: 'OTHER', label: 'Other' },
 ];
 
-export default function DriversPage() {
+function DriversPageContent() {
   const searchParams = useSearchParams();
   const queryDriverId = searchParams.get('driverId');
 
@@ -1853,3 +1853,11 @@ function getDriverDocumentTypeLabel(value: DriverDocumentType) {
 
 const inputClassName =
   'w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50';
+
+export default function DriversPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-white">Loading drivers...</div>}>
+      <DriversPageContent />
+    </Suspense>
+  );
+}
