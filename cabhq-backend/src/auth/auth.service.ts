@@ -15,23 +15,28 @@ export class AuthService {
     const rawPassword = password.trim();
 
     const user = await this.prisma.user.findUnique({
-      where: {
-        email: normalisedEmail,
-      },
-      include: {
-        company: true,
-      },
-    });
+  where: {
+    email: normalisedEmail,
+  },
+  include: {
+    company: true,
+  },
+});
 
-    if (!user) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
+console.log('LOGIN EMAIL:', normalisedEmail);
+console.log('USER FOUND:', !!user);
 
-    const passwordMatches = await bcrypt.compare(rawPassword, user.password);
+if (!user) {
+  throw new UnauthorizedException('Invalid email or password');
+}
 
-    if (!passwordMatches) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
+const passwordMatches = await bcrypt.compare(rawPassword, user.password);
+
+console.log('PASSWORD MATCHES:', passwordMatches);
+
+if (!passwordMatches) {
+  throw new UnauthorizedException('Invalid email or password');
+}
 
     const payload = {
       sub: user.id,
