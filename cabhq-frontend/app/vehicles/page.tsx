@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import AdminShell from '@/components/AdminShell';
 import { apiFetch } from '@/lib/api';
@@ -176,7 +176,7 @@ const vehicleDocumentTypeOptions: {
   { value: 'OTHER', label: 'Other' },
 ];
 
-export default function VehiclesPage() {
+function VehiclesPageContent() {
   const searchParams = useSearchParams();
   const queryVehicleId = searchParams.get('vehicleId');
 
@@ -1606,3 +1606,11 @@ function getVehicleDocumentTypeLabel(value: VehicleDocumentType) {
 
 const inputClassName =
   'w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50';
+
+  export default function VehiclesPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-white">Loading vehicles...</div>}>
+      <VehiclesPageContent />
+    </Suspense>
+  );
+}
