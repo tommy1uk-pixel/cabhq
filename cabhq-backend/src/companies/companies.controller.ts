@@ -26,4 +26,14 @@ export class CompaniesController {
   update(@Param('id') id: string, @Body() dto: UpdateCompanyDto) {
     return this.companiesService.update(id, dto);
   }
+
+  @Patch(':id/status')
+  updateStatus(
+    @Param('id') id: string,
+    @Body() body: { status: string },
+  ) {
+    return this.companiesService.update(id, {
+      status: body.status,
+    });
+  }
 }

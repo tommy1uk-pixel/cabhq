@@ -1,29 +1,95 @@
-import { Company } from './types';
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') ||
+  'http://localhost:3002';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+type ApiFetchOptions = {
+  useDriverToken?: boolean;
+  suppressAutoClear?: boolean;
+};
 
-export async function fetchCompanies(): Promise<Company[]> {
-  const res = await fetch(`${API_BASE}/companies`, {
-    cache: 'no-store',
-  });
+type ApiErrorResponse = {
+  message?: string | string[];
+};
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to fetch companies: ${res.status} ${text}`);
-  }
+function getStoredToken(useDriverToken?: boolean): string | null {
+  if (typeof window === 'undefined') return null;
 
-  return res.json();
+  return useDriverToken
+    ? localStorage.getItem('driverToken')
+    : localStorage.getItem('token');
 }
 
-export async function fetchCompany(id: string): Promise<Company> {
-  const res = await fetch(`${API_BASE}/companies/${id}`, {
-    cache: 'no-store',
-  });
+function clearStoredAuth(useDriverToken?: boolean): void {
+  if (typeof window === 'undefined') return;
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to fetch company: ${res.status} ${text}`);
+  if (useDriverToken) {
+    localStorage.removeItem('driverToken');
+    localStorage.removeItem('driver');
+  } else {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+  }
+}
+
+function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
+  return typeof value === 'object' && value !== null && 'message' in value;
+}
+
+export async function apiFetch<T = unknown>(
+  path: string,
+  init: RequestInit = {},
+  options?: ApiFetchOptions,
+): Promise<T> {
+  const token = getStoredToken(options?.useDriverToken);
+  const isFormData =
+    typeof FormData !== 'undefined' && init.body instanceof FormData;
+
+  const headers = new Headers(init.headers || {});
+
+  if (!isFormData && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
   }
 
-  return res.json();
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers,
+  });
+
+  const contentType = response.headers.get('content-type') || '';
+  let data: unknown = null;
+
+  if (contentType.includes('application/json')) {
+    data = (await response.json()) as unknown;
+  } else {
+    const text = await response.text();
+    data = text ? { message: text } : null;
+  }
+
+  if (!response.ok) {
+    let message = 'Request failed';
+
+    if (isApiErrorResponse(data)) {
+      if (Array.isArray(data.message)) {
+        message = data.message.join(', ');
+      } else if (typeof data.message === 'string' && data.message.trim()) {
+        message = data.message;
+      }
+    }
+
+    if (
+      !options?.suppressAutoClear &&
+      typeof window !== 'undefined' &&
+      (response.status === 401 || response.status === 403)
+    ) {
+      clearStoredAuth(options?.useDriverToken);
+    }
+
+    throw new Error(message);
+  }
+
+  return data as T;
 }

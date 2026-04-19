@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Company } from '@/lib/super-admin/types';
+import CompanyStatusBadge from './CompanyStatusBadge';
 
 export default function CompaniesTable({
   companies,
@@ -12,6 +13,7 @@ export default function CompaniesTable({
         <thead className="border-b border-slate-800 text-slate-400">
           <tr>
             <th className="px-4 py-3 text-left">Company</th>
+            <th className="px-4 py-3 text-left">Status</th>
             <th className="px-4 py-3 text-left">Created</th>
             <th className="px-4 py-3 text-right">Open</th>
           </tr>
@@ -20,7 +22,7 @@ export default function CompaniesTable({
         <tbody>
           {companies.length === 0 ? (
             <tr>
-              <td colSpan={3} className="px-4 py-8 text-center text-slate-400">
+              <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
                 No companies found.
               </td>
             </tr>
@@ -31,8 +33,14 @@ export default function CompaniesTable({
                   <div className="font-medium text-white">{company.name}</div>
                 </td>
 
+                <td className="px-4 py-4">
+                  <CompanyStatusBadge status={company.status} />
+                </td>
+
                 <td className="px-4 py-4 text-slate-300">
-                  {new Date(company.createdAt).toLocaleString()}
+                  {company.createdAt
+                    ? new Date(company.createdAt).toLocaleString()
+                    : '—'}
                 </td>
 
                 <td className="px-4 py-4 text-right">

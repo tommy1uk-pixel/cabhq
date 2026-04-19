@@ -3,6 +3,25 @@ import { fetchCompanies } from '@/lib/super-admin/api';
 import OverviewMetricCard from '@/components/super-admin/OverviewMetricCard';
 import OverviewPanel from '@/components/super-admin/OverviewPanel';
 import CompanyStatusBadge from '@/components/super-admin/CompanyStatusBadge';
+import type { Company } from '@/lib/super-admin/types';
+
+function getCompanyDisplayName(company: Company): string {
+  const displayName =
+    'displayName' in company && typeof company.displayName === 'string'
+      ? company.displayName
+      : null;
+
+  return displayName?.trim() || company.name;
+}
+
+function getCompanyLegalName(company: Company): string {
+  const legalName =
+    'legalName' in company && typeof company.legalName === 'string'
+      ? company.legalName
+      : null;
+
+  return legalName?.trim() || company.name;
+}
 
 export default async function SuperAdminHomePage() {
   const companies = await fetchCompanies();
@@ -29,6 +48,16 @@ export default async function SuperAdminHomePage() {
   );
 
   const newestCompanies = [...companies].slice(0, 5);
+
+  const statusBreakdown: [string, number][] = [
+    ['ACTIVE', activeCompanies],
+    ['PENDING', pendingCompanies],
+    ['SUSPENDED', suspendedCompanies],
+    [
+      'UNKNOWN',
+      companies.filter((c) => !c.status || c.status === 'UNKNOWN').length,
+    ],
+  ];
 
   return (
     <div className="space-y-8">
@@ -113,10 +142,10 @@ export default async function SuperAdminHomePage() {
                 >
                   <div>
                     <div className="font-medium text-white">
-                      {company.displayName || company.name}
+                      {getCompanyDisplayName(company)}
                     </div>
                     <div className="mt-1 text-xs text-slate-400">
-                      {company.legalName || company.name}
+                      {getCompanyLegalName(company)}
                     </div>
                   </div>
 
@@ -177,15 +206,7 @@ export default async function SuperAdminHomePage() {
       <section className="grid gap-6 xl:grid-cols-2">
         <OverviewPanel title="Company Status Breakdown">
           <div className="space-y-3">
-            {[
-              ['ACTIVE', activeCompanies],
-              ['PENDING', pendingCompanies],
-              ['SUSPENDED', suspendedCompanies],
-              [
-                'UNKNOWN',
-                companies.filter((c) => !c.status || c.status === 'UNKNOWN').length,
-              ],
-            ].map(([label, value]) => (
+            {statusBreakdown.map(([label, value]) => (
               <div
                 key={label}
                 className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3"

@@ -21,3 +21,6 @@ SET
   "vehicleLimit" = COALESCE("vehicleLimit", 25),
   "dispatcherSeatLimit" = COALESCE("dispatcherSeatLimit", 3),
   "updatedAt" = CURRENT_TIMESTAMP;
+
+CREATE UNIQUE INDEX IF NOT EXISTS "Company_code_key" ON "Company"("code");
+CREATE UNIQUE INDEX IF NOT EXISTS "Company_slug_key" ON "Company"("slug");

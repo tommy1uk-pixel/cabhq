@@ -9,8 +9,8 @@ datasource db {
 model Company {
   id                  String        @id @default(uuid())
   name                String
-  code                String?
-  slug                String?
+  code                String?       @unique
+  slug                String?       @unique
   status              String        @default("ACTIVE")
   contactName         String?
   contactEmail        String?
