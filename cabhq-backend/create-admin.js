@@ -12,7 +12,7 @@ const prisma = new PrismaClient({ adapter });
 
 async function main() {
   const email = 'admin@cabhq.com';
-  const password = 'Admin123!';
+  const password = 'Admin123!@';
 
   let company = await prisma.company.findFirst();
 
