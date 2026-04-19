@@ -7,15 +7,28 @@ datasource db {
 }
 
 model Company {
-  id          String        @id @default(uuid())
-  name        String
-  createdAt   DateTime      @default(now())
-  bookings    Booking[]
-  drivers     Driver[]
-  shifts      DriverShift[]
-  routePrices RoutePrice[]
-  users       User[]
-  vehicles    Vehicle[]
+  id                  String        @id @default(uuid())
+  name                String
+  code                String?
+  slug                String?
+  status              String        @default("ACTIVE")
+  contactName         String?
+  contactEmail        String?
+  contactPhone        String?
+  timezone            String        @default("Europe/London")
+  currency            String        @default("GBP")
+  driverLimit         Int           @default(25)
+  vehicleLimit        Int           @default(25)
+  dispatcherSeatLimit Int           @default(3)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @default(now())
+
+  bookings            Booking[]
+  drivers             Driver[]
+  shifts              DriverShift[]
+  routePrices         RoutePrice[]
+  users               User[]
+  vehicles            Vehicle[]
 }
 
 model User {
