@@ -23,11 +23,6 @@ export default function EditCompanyForm({
     contactName: company.contactName || '',
     contactEmail: company.contactEmail || '',
     contactPhone: company.contactPhone || '',
-    timezone: company.timezone || 'Europe/London',
-    currency: company.currency || 'GBP',
-    driverLimit: company.driverLimit ?? 25,
-    vehicleLimit: company.vehicleLimit ?? 25,
-    dispatcherSeatLimit: company.dispatcherSeatLimit ?? 3,
   });
 
   async function onSubmit(e: React.FormEvent) {
@@ -39,12 +34,7 @@ export default function EditCompanyForm({
       const res = await fetch(`${API_BASE}/companies/${company.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          driverLimit: Number(form.driverLimit),
-          vehicleLimit: Number(form.vehicleLimit),
-          dispatcherSeatLimit: Number(form.dispatcherSeatLimit),
-        }),
+        body: JSON.stringify(form),
       });
 
       const text = await res.text();
@@ -66,38 +56,32 @@ export default function EditCompanyForm({
   return (
     <form
       onSubmit={onSubmit}
-      className="space-y-6 rounded-2xl border border-slate-800 bg-slate-950 p-6"
+      className="space-y-8 rounded-3xl border border-slate-800 bg-slate-950 p-8"
     >
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-5 md:grid-cols-2">
         <Field label="Company name" value={form.name} onChange={(v) => setForm((p) => ({ ...p, name: v }))} />
         <Field label="Code" value={form.code} onChange={(v) => setForm((p) => ({ ...p, code: v }))} />
         <Field label="Slug" value={form.slug} onChange={(v) => setForm((p) => ({ ...p, slug: v }))} />
         <Field label="Contact name" value={form.contactName} onChange={(v) => setForm((p) => ({ ...p, contactName: v }))} />
         <Field label="Contact email" value={form.contactEmail} onChange={(v) => setForm((p) => ({ ...p, contactEmail: v }))} />
         <Field label="Contact phone" value={form.contactPhone} onChange={(v) => setForm((p) => ({ ...p, contactPhone: v }))} />
-        <Field label="Timezone" value={form.timezone} onChange={(v) => setForm((p) => ({ ...p, timezone: v }))} />
-        <Field label="Currency" value={form.currency} onChange={(v) => setForm((p) => ({ ...p, currency: v }))} />
 
         <label className="space-y-2">
-          <span className="text-sm text-slate-300">Status</span>
+          <span className="text-base text-slate-300">Status</span>
           <select
             value={form.status}
             onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
-            className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+            className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
           >
             <option value="ACTIVE">ACTIVE</option>
             <option value="SUSPENDED">SUSPENDED</option>
             <option value="PENDING">PENDING</option>
           </select>
         </label>
-
-        <NumberField label="Driver limit" value={form.driverLimit} onChange={(v) => setForm((p) => ({ ...p, driverLimit: v }))} />
-        <NumberField label="Vehicle limit" value={form.vehicleLimit} onChange={(v) => setForm((p) => ({ ...p, vehicleLimit: v }))} />
-        <NumberField label="Dispatcher seats" value={form.dispatcherSeatLimit} onChange={(v) => setForm((p) => ({ ...p, dispatcherSeatLimit: v }))} />
       </div>
 
       {error ? (
-        <div className="rounded-xl border border-red-800 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+        <div className="rounded-2xl border border-red-800 bg-red-950/30 px-5 py-4 text-base text-red-300">
           {error}
         </div>
       ) : null}
@@ -106,7 +90,7 @@ export default function EditCompanyForm({
         <button
           type="button"
           onClick={() => router.push(`/super-admin/companies/${company.id}`)}
-          className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-white"
+          className="rounded-xl border border-slate-700 px-5 py-3 text-sm font-medium text-white"
         >
           Cancel
         </button>
@@ -114,7 +98,7 @@ export default function EditCompanyForm({
         <button
           type="submit"
           disabled={loading}
-          className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
+          className="rounded-xl bg-white px-5 py-3 text-sm font-medium text-black disabled:opacity-50"
         >
           {loading ? 'Saving...' : 'Save changes'}
         </button>
@@ -134,33 +118,11 @@ function Field({
 }) {
   return (
     <label className="space-y-2">
-      <span className="text-sm text-slate-300">{label}</span>
+      <span className="text-base text-slate-300">{label}</span>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
-      />
-    </label>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="space-y-2">
-      <span className="text-sm text-slate-300">{label}</span>
-      <input
-        type="number"
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white"
+        className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
       />
     </label>
   );

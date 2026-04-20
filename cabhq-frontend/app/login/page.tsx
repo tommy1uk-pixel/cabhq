@@ -4,11 +4,11 @@ import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
 
 type LoginResponse = {
-  accessToken: string;
+  token: string;
   user: {
     id: string;
     email: string;
-    role: string;
+    role: 'SUPER_ADMIN' | 'ADMIN' | 'OPERATOR' | 'DRIVER';
     companyId: string;
     company?: {
       id: string;
@@ -17,9 +17,27 @@ type LoginResponse = {
   };
 };
 
+function getRedirectPath(role: LoginResponse['user']['role']) {
+  switch (role) {
+    case 'SUPER_ADMIN':
+      return '/super-admin';
+    case 'ADMIN':
+    case 'OPERATOR':
+      return '/dashboard';
+    case 'DRIVER':
+      return '/driver';
+    default:
+      return '/dashboard';
+  }
+}
+
+function setAuthCookie(token: string) {
+  document.cookie = `cabhq_token=${encodeURIComponent(token)}; path=/; max-age=${60 * 60 * 24 * 7}; samesite=lax`;
+}
+
 export default function LoginPage() {
-  const [email, setEmail] = useState('admin@cabhq.co.uk');
-  const [password, setPassword] = useState('Password123!');
+  const [email, setEmail] = useState('admin@cabhq.com');
+  const [password, setPassword] = useState('Temp123!');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -43,10 +61,12 @@ export default function LoginPage() {
         },
       );
 
-      localStorage.setItem('token', data.accessToken);
+      localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      setAuthCookie(data.token);
 
-      window.location.href = '/dashboard';
+      const redirectPath = getRedirectPath(data.user.role);
+      window.location.href = redirectPath;
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Invalid email or password';
@@ -73,7 +93,7 @@ export default function LoginPage() {
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@cabhq.co.uk"
+                placeholder="admin@cabhq.com"
                 className="w-full rounded-2xl border border-white/10 bg-[#dfe4ee] px-4 py-4 text-lg text-black outline-none transition focus:border-cyan-500"
                 required
               />

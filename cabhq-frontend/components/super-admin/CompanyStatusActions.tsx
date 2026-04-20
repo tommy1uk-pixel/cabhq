@@ -45,7 +45,7 @@ export default function CompanyStatusActions({
         <button
           disabled={loading}
           onClick={() => setStatus('ACTIVE')}
-          className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
+          className="rounded-xl bg-emerald-500 px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
         >
           Activate
         </button>
@@ -55,7 +55,7 @@ export default function CompanyStatusActions({
         <button
           disabled={loading}
           onClick={() => setStatus('SUSPENDED')}
-          className="rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
+          className="rounded-xl bg-red-500 px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
         >
           Suspend
         </button>
@@ -65,7 +65,7 @@ export default function CompanyStatusActions({
         <button
           disabled={loading}
           onClick={() => setStatus('PENDING')}
-          className="rounded-xl bg-amber-400 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
+          className="rounded-xl bg-amber-400 px-5 py-3 text-sm font-semibold text-black disabled:opacity-50"
         >
           Pending
         </button>

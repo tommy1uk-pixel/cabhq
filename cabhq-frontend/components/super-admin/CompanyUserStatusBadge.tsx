@@ -1,4 +1,4 @@
-export default function CompanyStatusBadge({
+export default function CompanyUserStatusBadge({
   status,
 }: {
   status?: string | null;
@@ -8,8 +8,6 @@ export default function CompanyStatusBadge({
   const styles: Record<string, string> = {
     ACTIVE:
       'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-    PENDING:
-      'bg-amber-500/15 text-amber-300 border-amber-500/30',
     SUSPENDED:
       'bg-red-500/15 text-red-300 border-red-500/30',
     UNKNOWN:
