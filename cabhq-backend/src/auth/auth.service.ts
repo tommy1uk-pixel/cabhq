@@ -1,81 +1,54 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly jwtService: JwtService,
+    private prisma: PrismaService,
+    private jwt: JwtService,
   ) {}
 
   async login(email: string, password: string) {
-    const normalisedEmail = email.trim().toLowerCase();
-    const rawPassword = password.trim();
-
     const user = await this.prisma.user.findUnique({
       where: {
-        email: normalisedEmail,
-      },
-      include: {
-        company: true,
+        email: email.trim().toLowerCase(),
       },
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Invalid credentials');
     }
 
-    const passwordMatches = await bcrypt.compare(rawPassword, user.password);
-
-    if (!passwordMatches) {
-      throw new UnauthorizedException('Invalid email or password');
+    if (user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('User suspended');
     }
 
-    const payload = {
+    const valid = await bcrypt.compare(password, user.password);
+
+    if (!valid) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const token = await this.jwt.signAsync({
       sub: user.id,
-      companyId: user.companyId,
       email: user.email,
       role: user.role,
-      type: 'USER' as const,
-    };
-
-    const accessToken = await this.jwtService.signAsync(payload);
+      companyId: user.companyId,
+    });
 
     return {
-      accessToken,
+      token,
       user: {
         id: user.id,
         email: user.email,
         role: user.role,
         companyId: user.companyId,
-        company: user.company,
       },
-    };
-  }
-
-  async me(userId: string, companyId: string) {
-    const user = await this.prisma.user.findFirst({
-      where: {
-        id: userId,
-        companyId,
-      },
-      include: {
-        company: true,
-      },
-    });
-
-    if (!user) {
-      throw new UnauthorizedException('User not found');
-    }
-
-    return {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      companyId: user.companyId,
-      company: user.company,
     };
   }
 }

@@ -1,0 +1,13 @@
+ALTER TABLE "Company"
+  ADD COLUMN IF NOT EXISTS "code" TEXT,
+  ADD COLUMN IF NOT EXISTS "slug" TEXT,
+  ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+  ADD COLUMN IF NOT EXISTS "contactName" TEXT,
+  ADD COLUMN IF NOT EXISTS "contactEmail" TEXT,
+  ADD COLUMN IF NOT EXISTS "contactPhone" TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS "Company_code_key" ON "Company"("code");
+CREATE UNIQUE INDEX IF NOT EXISTS "Company_slug_key" ON "Company"("slug");
+
+UPDATE "Company"
+SET "status" = COALESCE("status", 'ACTIVE');
