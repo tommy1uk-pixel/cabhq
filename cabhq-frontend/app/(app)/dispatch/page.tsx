@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { DivIcon, LatLngTuple, Map as LeafletMap } from 'leaflet';
-import { closeSocket, getSocket } from '../../lib/socket';
+import { closeSocket, getSocket } from '../../../lib/socket';
 import AddressAutofillInput, {
   type SelectedAddress,
 } from '@/components/AddressAutofillInput';
