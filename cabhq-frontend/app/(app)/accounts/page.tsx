@@ -1,310 +1,413 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import AdminShell from '@/components/AdminShell';
-import { apiFetch } from '@/lib/api';
-import { getStoredUser } from '@/lib/auth';
 
-type AccountProfile = {
-  id?: string;
-  companyName: string;
-  tradingName: string;
+type AccountStatus = 'ACTIVE' | 'ON_HOLD' | 'CLOSED';
+
+type AccountType =
+  | 'BUSINESS'
+  | 'SCHOOL'
+  | 'NHS'
+  | 'HOTEL'
+  | 'AGENCY'
+  | 'CORPORATE';
+
+type Account = {
+  id: string;
+  name: string;
+  type: AccountType;
+  status: AccountStatus;
   contactName: string;
   email: string;
   phone: string;
-  website: string;
-  supportEmail: string;
-  billingEmail: string;
-  addressLine1: string;
-  addressLine2: string;
-  city: string;
-  postcode: string;
-  country: string;
-  logoUrl: string;
-  primaryColor: string;
-  timezone: string;
-  currency: string;
-  bookingPrefix: string;
-  vatNumber: string;
-  companyNumber: string;
+  billingAddress: string;
+  paymentTermsDays: number;
+  creditLimit: number;
+  currentBalance: number;
+  invoiceCount: number;
+  tripsThisMonth: number;
+  monthlyRevenue: number;
+  notes?: string;
 };
 
-const initialForm: AccountProfile = {
-  companyName: '',
-  tradingName: '',
+type AccountFormState = {
+  name: string;
+  type: AccountType;
+  status: AccountStatus;
+  contactName: string;
+  email: string;
+  phone: string;
+  billingAddress: string;
+  paymentTermsDays: string;
+  creditLimit: string;
+  notes: string;
+};
+
+const initialAccounts: Account[] = [
+  {
+    id: '1',
+    name: 'Northside Medical Centre',
+    type: 'NHS',
+    status: 'ACTIVE',
+    contactName: 'Sarah Malik',
+    email: 'accounts@northsidemedical.co.uk',
+    phone: '02070001111',
+    billingAddress: '12 High Street, London',
+    paymentTermsDays: 30,
+    creditLimit: 5000,
+    currentBalance: 1280,
+    invoiceCount: 6,
+    tripsThisMonth: 44,
+    monthlyRevenue: 2160,
+    notes: 'Monthly invoice account',
+  },
+  {
+    id: '2',
+    name: 'Greenfield School Transport',
+    type: 'SCHOOL',
+    status: 'ACTIVE',
+    contactName: 'Peter Jones',
+    email: 'transport@greenfieldschool.co.uk',
+    phone: '02070002222',
+    billingAddress: '45 Station Road, Essex',
+    paymentTermsDays: 30,
+    creditLimit: 8000,
+    currentBalance: 3320,
+    invoiceCount: 11,
+    tripsThisMonth: 102,
+    monthlyRevenue: 4890,
+    notes: 'AM/PM school run contract',
+  },
+  {
+    id: '3',
+    name: 'City Stay Hotel',
+    type: 'HOTEL',
+    status: 'ON_HOLD',
+    contactName: 'Laura Price',
+    email: 'frontdesk@citystayhotel.co.uk',
+    phone: '02070003333',
+    billingAddress: '88 Central Avenue, Birmingham',
+    paymentTermsDays: 14,
+    creditLimit: 2500,
+    currentBalance: 2410,
+    invoiceCount: 4,
+    tripsThisMonth: 21,
+    monthlyRevenue: 1195,
+    notes: 'Hold new jobs if unpaid invoices increase',
+  },
+];
+
+const initialForm: AccountFormState = {
+  name: '',
+  type: 'BUSINESS',
+  status: 'ACTIVE',
   contactName: '',
   email: '',
   phone: '',
-  website: '',
-  supportEmail: '',
-  billingEmail: '',
-  addressLine1: '',
-  addressLine2: '',
-  city: '',
-  postcode: '',
-  country: 'United Kingdom',
-  logoUrl: '',
-  primaryColor: '#06b6d4',
-  timezone: 'Europe/London',
-  currency: 'GBP',
-  bookingPrefix: 'CAB',
-  vatNumber: '',
-  companyNumber: '',
+  billingAddress: '',
+  paymentTermsDays: '30',
+  creditLimit: '5000',
+  notes: '',
 };
 
+function formatCurrency(value: number) {
+  return `£${value.toFixed(2)}`;
+}
+
+function statusClasses(status: AccountStatus) {
+  if (status === 'ACTIVE') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  }
+
+  if (status === 'ON_HOLD') {
+    return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+  }
+
+  return 'border-red-500/30 bg-red-500/10 text-red-300';
+}
+
+function typeClasses(type: AccountType) {
+  const map: Record<AccountType, string> = {
+    BUSINESS: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300',
+    SCHOOL: 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300',
+    NHS: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+    HOTEL: 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-300',
+    AGENCY: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+    CORPORATE: 'border-sky-500/30 bg-sky-500/10 text-sky-300',
+  };
+
+  return map[type];
+}
+
 export default function AccountsPage() {
-  const user = getStoredUser();
+  const [accounts, setAccounts] = useState<Account[]>(initialAccounts);
+  const [search, setSearch] = useState('');
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
+    initialAccounts[0]?.id ?? null,
+  );
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [form, setForm] = useState<AccountFormState>(initialForm);
 
-  const [form, setForm] = useState<AccountProfile>(initialForm);
-  const [loading, setLoading] = useState(true);
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [savingBranding, setSavingBranding] = useState(false);
-  const [savingBusiness, setSavingBusiness] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const filteredAccounts = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return accounts;
 
-  useEffect(() => {
-    let mounted = true;
+    return accounts.filter((account) =>
+      [
+        account.name,
+        account.type,
+        account.status,
+        account.contactName,
+        account.email,
+        account.phone,
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [accounts, search]);
 
-    async function loadAccount() {
-      try {
-        setLoading(true);
-        setError('');
+  const selectedAccount = useMemo(
+    () =>
+      accounts.find((account) => account.id === selectedAccountId) ?? null,
+    [accounts, selectedAccountId],
+  );
 
-        const data = await apiFetch<Partial<AccountProfile>>('/companies/me');
+  const stats = useMemo(() => {
+    const active = accounts.filter((a) => a.status === 'ACTIVE').length;
+    const onHold = accounts.filter((a) => a.status === 'ON_HOLD').length;
+    const revenue = accounts.reduce((sum, a) => sum + a.monthlyRevenue, 0);
+    const outstanding = accounts.reduce((sum, a) => sum + a.currentBalance, 0);
 
-        if (!mounted) return;
-
-        setForm({
-          ...initialForm,
-          ...data,
-          companyName: data.companyName ?? '',
-          tradingName: data.tradingName ?? '',
-          contactName: data.contactName ?? '',
-          email: data.email ?? '',
-          phone: data.phone ?? '',
-          website: data.website ?? '',
-          supportEmail: data.supportEmail ?? '',
-          billingEmail: data.billingEmail ?? '',
-          addressLine1: data.addressLine1 ?? '',
-          addressLine2: data.addressLine2 ?? '',
-          city: data.city ?? '',
-          postcode: data.postcode ?? '',
-          country: data.country ?? 'United Kingdom',
-          logoUrl: data.logoUrl ?? '',
-          primaryColor: data.primaryColor ?? '#06b6d4',
-          timezone: data.timezone ?? 'Europe/London',
-          currency: data.currency ?? 'GBP',
-          bookingPrefix: data.bookingPrefix ?? 'CAB',
-          vatNumber: data.vatNumber ?? '',
-          companyNumber: data.companyNumber ?? '',
-        });
-      } catch (err) {
-        console.error(err);
-        setError('Failed to load account settings');
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    }
-
-    void loadAccount();
-
-    return () => {
-      mounted = false;
+    return {
+      total: accounts.length,
+      active,
+      onHold,
+      revenue,
+      outstanding,
     };
-  }, []);
+  }, [accounts]);
 
-  function setField<K extends keyof AccountProfile>(
+  function setField<K extends keyof AccountFormState>(
     key: K,
-    value: AccountProfile[K],
+    value: AccountFormState[K],
   ) {
     setForm((prev) => ({
       ...prev,
       [key]: value,
     }));
-    if (success) setSuccess('');
   }
 
-  async function saveSection(
-    section: 'profile' | 'branding' | 'business',
-    payload: Partial<AccountProfile>,
-  ) {
-    try {
-      setError('');
-      setSuccess('');
+  function resetForm() {
+    setForm(initialForm);
+    setEditingAccountId(null);
+  }
 
-      if (section === 'profile') setSavingProfile(true);
-      if (section === 'branding') setSavingBranding(true);
-      if (section === 'business') setSavingBusiness(true);
+  function submitAccount(e: React.FormEvent) {
+    e.preventDefault();
 
-      await apiFetch('/companies/me', {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
-      });
+    const payload: Account = {
+      id: editingAccountId ?? crypto.randomUUID(),
+      name: form.name.trim(),
+      type: form.type,
+      status: form.status,
+      contactName: form.contactName.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim(),
+      billingAddress: form.billingAddress.trim(),
+      paymentTermsDays: Number(form.paymentTermsDays || 30),
+      creditLimit: Number(form.creditLimit || 0),
+      currentBalance:
+        editingAccountId != null
+          ? accounts.find((a) => a.id === editingAccountId)?.currentBalance ?? 0
+          : 0,
+      invoiceCount:
+        editingAccountId != null
+          ? accounts.find((a) => a.id === editingAccountId)?.invoiceCount ?? 0
+          : 0,
+      tripsThisMonth:
+        editingAccountId != null
+          ? accounts.find((a) => a.id === editingAccountId)?.tripsThisMonth ?? 0
+          : 0,
+      monthlyRevenue:
+        editingAccountId != null
+          ? accounts.find((a) => a.id === editingAccountId)?.monthlyRevenue ?? 0
+          : 0,
+      notes: form.notes.trim(),
+    };
 
-      setSuccess('Account settings saved');
-    } catch (err) {
-      console.error(err);
-      setError('Failed to save account settings');
-    } finally {
-      if (section === 'profile') setSavingProfile(false);
-      if (section === 'branding') setSavingBranding(false);
-      if (section === 'business') setSavingBusiness(false);
+    if (!payload.name || !payload.contactName) return;
+
+    setAccounts((prev) => {
+      const exists = prev.some((a) => a.id === payload.id);
+      if (exists) {
+        return prev.map((a) => (a.id === payload.id ? payload : a));
+      }
+      return [payload, ...prev];
+    });
+
+    setSelectedAccountId(payload.id);
+    resetForm();
+  }
+
+  function startEdit(account: Account) {
+    setEditingAccountId(account.id);
+    setSelectedAccountId(account.id);
+    setForm({
+      name: account.name,
+      type: account.type,
+      status: account.status,
+      contactName: account.contactName,
+      email: account.email,
+      phone: account.phone,
+      billingAddress: account.billingAddress,
+      paymentTermsDays: String(account.paymentTermsDays),
+      creditLimit: String(account.creditLimit),
+      notes: account.notes ?? '',
+    });
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function deleteAccount(accountId: string) {
+    const confirmed = window.confirm('Delete this account?');
+    if (!confirmed) return;
+
+    setAccounts((prev) => prev.filter((a) => a.id !== accountId));
+
+    if (selectedAccountId === accountId) {
+      const remaining = accounts.filter((a) => a.id !== accountId);
+      setSelectedAccountId(remaining[0]?.id ?? null);
+    }
+
+    if (editingAccountId === accountId) {
+      resetForm();
     }
   }
-
-  const completion = useMemo(() => {
-    const required = [
-      form.companyName,
-      form.contactName,
-      form.email,
-      form.phone,
-      form.addressLine1,
-      form.city,
-      form.postcode,
-      form.bookingPrefix,
-    ];
-
-    const filled = required.filter((value) => value.trim().length > 0).length;
-    return Math.round((filled / required.length) * 100);
-  }, [
-    form.addressLine1,
-    form.bookingPrefix,
-    form.city,
-    form.companyName,
-    form.contactName,
-    form.email,
-    form.phone,
-    form.postcode,
-  ]);
 
   return (
     <AdminShell
       title="Accounts"
-      subtitle="Company profile, branding, billing contacts and platform settings"
+      subtitle="Account customers, billing terms, balances, contract work and monthly invoice clients."
     >
       <div className="space-y-6">
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <StatCard label="Total Accounts" value={stats.total} hint="All account customers" />
+          <StatCard label="Active" value={stats.active} hint="Currently trading" />
+          <StatCard label="On Hold" value={stats.onHold} hint="Payment or ops hold" />
           <StatCard
-            label="Company"
-            value={form.companyName || '—'}
-            hint="Main operator account"
+            label="Monthly Revenue"
+            value={formatCurrency(stats.revenue)}
+            hint="Current account revenue"
           />
           <StatCard
-            label="Profile Completion"
-            value={`${completion}%`}
-            hint="Core account fields"
-          />
-          <StatCard
-            label="Timezone"
-            value={form.timezone || '—'}
-            hint="Dispatch operating timezone"
-          />
-          <StatCard
-            label="Currency"
-            value={form.currency || '—'}
-            hint="Pricing display currency"
-          />
-          <StatCard
-            label="Booking Prefix"
-            value={form.bookingPrefix || '—'}
-            hint="Reference prefix"
+            label="Outstanding"
+            value={formatCurrency(stats.outstanding)}
+            hint="Open balance"
           />
         </section>
 
-        {(error || success) && (
-          <div
-            className={`rounded-2xl border px-4 py-3 text-sm ${
-              error
-                ? 'border-red-500/30 bg-red-500/10 text-red-200'
-                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-            }`}
-          >
-            {error || success}
-          </div>
-        )}
-
-        <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <section className="space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-              <div className="mb-5 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-2xl font-bold">Company Profile</h2>
-                  <p className="mt-1 text-sm text-white/60">
-                    Main account details used across dispatch, reporting and contact screens.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    void saveSection('profile', {
-                      companyName: form.companyName,
-                      tradingName: form.tradingName,
-                      contactName: form.contactName,
-                      email: form.email,
-                      phone: form.phone,
-                      website: form.website,
-                      supportEmail: form.supportEmail,
-                      billingEmail: form.billingEmail,
-                    })
-                  }
-                  disabled={loading || savingProfile}
-                  className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingProfile ? 'Saving...' : 'Save Profile'}
-                </button>
+        <div className="grid gap-6 xl:grid-cols-[430px_1fr]">
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">
+                  {editingAccountId ? 'Edit Account' : 'Create Account'}
+                </h2>
+                <p className="mt-1 text-sm text-white/60">
+                  Add account customers for invoicing, contracts and priority jobs.
+                </p>
               </div>
 
-              {loading ? (
-                <LoadingBlock label="Loading company profile..." />
-              ) : (
+              {editingAccountId ? (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white/80 transition hover:bg-white/10"
+                >
+                  Cancel edit
+                </button>
+              ) : null}
+            </div>
+
+            <form onSubmit={submitAccount} className="space-y-5">
+              <div className="grid gap-4">
+                <Field
+                  label="Account Name *"
+                  input={
+                    <input
+                      value={form.name}
+                      onChange={(e) => setField('name', e.target.value)}
+                      placeholder="Northside Medical Centre"
+                      required
+                      className={inputClassName}
+                    />
+                  }
+                />
+
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field
-                    label="Company Name"
+                    label="Account Type"
                     input={
-                      <input
-                        value={form.companyName}
-                        onChange={(e) => setField('companyName', e.target.value)}
+                      <select
+                        value={form.type}
+                        onChange={(e) =>
+                          setField('type', e.target.value as AccountType)
+                        }
                         className={inputClassName}
-                        placeholder="CabHQ Cars Ltd"
-                      />
+                      >
+                        <option value="BUSINESS">BUSINESS</option>
+                        <option value="SCHOOL">SCHOOL</option>
+                        <option value="NHS">NHS</option>
+                        <option value="HOTEL">HOTEL</option>
+                        <option value="AGENCY">AGENCY</option>
+                        <option value="CORPORATE">CORPORATE</option>
+                      </select>
                     }
                   />
 
                   <Field
-                    label="Trading Name"
+                    label="Status"
                     input={
-                      <input
-                        value={form.tradingName}
-                        onChange={(e) => setField('tradingName', e.target.value)}
+                      <select
+                        value={form.status}
+                        onChange={(e) =>
+                          setField('status', e.target.value as AccountStatus)
+                        }
                         className={inputClassName}
-                        placeholder="CabHQ"
-                      />
+                      >
+                        <option value="ACTIVE">ACTIVE</option>
+                        <option value="ON_HOLD">ON_HOLD</option>
+                        <option value="CLOSED">CLOSED</option>
+                      </select>
                     }
                   />
+                </div>
 
-                  <Field
-                    label="Primary Contact"
-                    input={
-                      <input
-                        value={form.contactName}
-                        onChange={(e) => setField('contactName', e.target.value)}
-                        className={inputClassName}
-                        placeholder="Operations Manager"
-                      />
-                    }
-                  />
+                <Field
+                  label="Contact Name *"
+                  input={
+                    <input
+                      value={form.contactName}
+                      onChange={(e) => setField('contactName', e.target.value)}
+                      placeholder="Sarah Malik"
+                      required
+                      className={inputClassName}
+                    />
+                  }
+                />
 
+                <div className="grid gap-4 md:grid-cols-2">
                   <Field
-                    label="Main Email"
+                    label="Email"
                     input={
                       <input
                         type="email"
                         value={form.email}
                         onChange={(e) => setField('email', e.target.value)}
+                        placeholder="accounts@company.co.uk"
                         className={inputClassName}
-                        placeholder="ops@company.com"
                       />
                     }
                   />
@@ -315,361 +418,245 @@ export default function AccountsPage() {
                       <input
                         value={form.phone}
                         onChange={(e) => setField('phone', e.target.value)}
+                        placeholder="0207..."
                         className={inputClassName}
-                        placeholder="020..."
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Website"
-                    input={
-                      <input
-                        value={form.website}
-                        onChange={(e) => setField('website', e.target.value)}
-                        className={inputClassName}
-                        placeholder="https://..."
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Support Email"
-                    input={
-                      <input
-                        type="email"
-                        value={form.supportEmail}
-                        onChange={(e) => setField('supportEmail', e.target.value)}
-                        className={inputClassName}
-                        placeholder="support@company.com"
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Billing Email"
-                    input={
-                      <input
-                        type="email"
-                        value={form.billingEmail}
-                        onChange={(e) => setField('billingEmail', e.target.value)}
-                        className={inputClassName}
-                        placeholder="billing@company.com"
                       />
                     }
                   />
                 </div>
-              )}
-            </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-              <div className="mb-5 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-2xl font-bold">Business Details</h2>
-                  <p className="mt-1 text-sm text-white/60">
-                    Legal and operational settings used across your platform.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    void saveSection('business', {
-                      addressLine1: form.addressLine1,
-                      addressLine2: form.addressLine2,
-                      city: form.city,
-                      postcode: form.postcode,
-                      country: form.country,
-                      timezone: form.timezone,
-                      currency: form.currency,
-                      bookingPrefix: form.bookingPrefix,
-                      vatNumber: form.vatNumber,
-                      companyNumber: form.companyNumber,
-                    })
+                <Field
+                  label="Billing Address"
+                  input={
+                    <textarea
+                      rows={3}
+                      value={form.billingAddress}
+                      onChange={(e) => setField('billingAddress', e.target.value)}
+                      placeholder="Billing address"
+                      className={`${inputClassName} resize-none`}
+                    />
                   }
-                  disabled={loading || savingBusiness}
-                  className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingBusiness ? 'Saving...' : 'Save Business'}
-                </button>
-              </div>
+                />
 
-              {loading ? (
-                <LoadingBlock label="Loading business settings..." />
-              ) : (
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field
-                    label="Address Line 1"
+                    label="Payment Terms (days)"
                     input={
                       <input
-                        value={form.addressLine1}
-                        onChange={(e) => setField('addressLine1', e.target.value)}
-                        className={inputClassName}
-                        placeholder="123 High Street"
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Address Line 2"
-                    input={
-                      <input
-                        value={form.addressLine2}
-                        onChange={(e) => setField('addressLine2', e.target.value)}
-                        className={inputClassName}
-                        placeholder="Suite / Floor / Unit"
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="City"
-                    input={
-                      <input
-                        value={form.city}
-                        onChange={(e) => setField('city', e.target.value)}
-                        className={inputClassName}
-                        placeholder="London"
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Postcode"
-                    input={
-                      <input
-                        value={form.postcode}
-                        onChange={(e) => setField('postcode', e.target.value)}
-                        className={inputClassName}
-                        placeholder="SW1A 1AA"
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Country"
-                    input={
-                      <input
-                        value={form.country}
-                        onChange={(e) => setField('country', e.target.value)}
-                        className={inputClassName}
-                        placeholder="United Kingdom"
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Timezone"
-                    input={
-                      <select
-                        value={form.timezone}
-                        onChange={(e) => setField('timezone', e.target.value)}
-                        className={inputClassName}
-                      >
-                        <option value="Europe/London">Europe/London</option>
-                        <option value="Europe/Dublin">Europe/Dublin</option>
-                        <option value="Europe/Paris">Europe/Paris</option>
-                        <option value="UTC">UTC</option>
-                      </select>
-                    }
-                  />
-
-                  <Field
-                    label="Currency"
-                    input={
-                      <select
-                        value={form.currency}
-                        onChange={(e) => setField('currency', e.target.value)}
-                        className={inputClassName}
-                      >
-                        <option value="GBP">GBP</option>
-                        <option value="EUR">EUR</option>
-                        <option value="USD">USD</option>
-                      </select>
-                    }
-                  />
-
-                  <Field
-                    label="Booking Prefix"
-                    input={
-                      <input
-                        value={form.bookingPrefix}
+                        type="number"
+                        min="0"
+                        value={form.paymentTermsDays}
                         onChange={(e) =>
-                          setField('bookingPrefix', e.target.value.toUpperCase())
+                          setField('paymentTermsDays', e.target.value)
                         }
                         className={inputClassName}
-                        placeholder="CAB"
                       />
                     }
                   />
 
                   <Field
-                    label="VAT Number"
+                    label="Credit Limit"
                     input={
                       <input
-                        value={form.vatNumber}
-                        onChange={(e) => setField('vatNumber', e.target.value)}
+                        type="number"
+                        min="0"
+                        value={form.creditLimit}
+                        onChange={(e) => setField('creditLimit', e.target.value)}
                         className={inputClassName}
-                        placeholder="GB..."
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Company Number"
-                    input={
-                      <input
-                        value={form.companyNumber}
-                        onChange={(e) => setField('companyNumber', e.target.value)}
-                        className={inputClassName}
-                        placeholder="12345678"
                       />
                     }
                   />
                 </div>
-              )}
-            </div>
+
+                <Field
+                  label="Notes"
+                  input={
+                    <textarea
+                      rows={4}
+                      value={form.notes}
+                      onChange={(e) => setField('notes', e.target.value)}
+                      placeholder="Invoice notes, contract notes, restrictions..."
+                      className={`${inputClassName} resize-none`}
+                    />
+                  }
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500"
+              >
+                {editingAccountId ? 'Save Account Changes' : 'Create Account'}
+              </button>
+            </form>
           </section>
 
-          <section className="space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-              <div className="mb-5 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-2xl font-bold">Branding</h2>
-                  <p className="mt-1 text-sm text-white/60">
-                    Basic branding shown across the platform and customer-facing touchpoints.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    void saveSection('branding', {
-                      logoUrl: form.logoUrl,
-                      primaryColor: form.primaryColor,
-                    })
-                  }
-                  disabled={loading || savingBranding}
-                  className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {savingBranding ? 'Saving...' : 'Save Branding'}
-                </button>
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+            <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-2xl font-bold">Accounts</h2>
+                <p className="mt-1 text-sm text-white/60">
+                  Account customer list with balances, terms and invoice visibility.
+                </p>
               </div>
 
-              {loading ? (
-                <LoadingBlock label="Loading branding..." />
-              ) : (
-                <div className="space-y-5">
-                  <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-5">
-                    <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/60">
-                      Preview
-                    </p>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search accounts..."
+                className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50 lg:w-[300px]"
+              />
+            </div>
 
-                    <div className="flex items-center gap-4">
-                      <div
-                        className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 text-lg font-bold text-white"
-                        style={{ backgroundColor: form.primaryColor || '#06b6d4' }}
-                      >
-                        {form.companyName?.trim()?.slice(0, 2).toUpperCase() || 'CH'}
+            {filteredAccounts.length === 0 ? (
+              <div className="rounded-2xl bg-[#0b1728] p-6 text-white/60">
+                No accounts found.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {filteredAccounts.map((account) => {
+                  const isSelected = selectedAccountId === account.id;
+
+                  return (
+                    <div
+                      key={account.id}
+                      className={`rounded-2xl border p-5 transition ${
+                        isSelected
+                          ? 'border-cyan-500/50 bg-[#0c1b2c]'
+                          : 'border-white/10 bg-[#0b1728]'
+                      }`}
+                    >
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div
+                          className="min-w-0 cursor-pointer"
+                          onClick={() =>
+                            setSelectedAccountId((current) =>
+                              current === account.id ? null : account.id,
+                            )
+                          }
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-xl font-bold">{account.name}</h3>
+
+                            <span
+                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${typeClasses(
+                                account.type,
+                              )}`}
+                            >
+                              {account.type}
+                            </span>
+
+                            <span
+                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClasses(
+                                account.status,
+                              )}`}
+                            >
+                              {account.status.replace('_', ' ')}
+                            </span>
+                          </div>
+
+                          <p className="mt-2 text-sm text-white/70">
+                            {account.contactName} · {account.email || 'No email'} ·{' '}
+                            {account.phone || 'No phone'}
+                          </p>
+
+                          <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/50">
+                            <span>Invoices: {account.invoiceCount}</span>
+                            <span>Trips this month: {account.tripsThisMonth}</span>
+                            <span>Terms: {account.paymentTermsDays} days</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startEdit(account)}
+                            className="rounded-xl bg-cyan-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => deleteAccount(account.id)}
+                            className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
 
-                      <div>
-                        <p className="text-lg font-semibold text-white">
-                          {form.companyName || 'Your Company'}
-                        </p>
-                        <p className="text-sm text-white/50">
-                          {form.tradingName || 'Trading name'}
-                        </p>
-                      </div>
+                      {isSelected ? (
+                        <div className="mt-5 grid gap-4 border-t border-white/10 pt-5 xl:grid-cols-3">
+                          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                            <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                              Billing
+                            </h4>
+
+                            <DetailRow
+                              label="Current Balance"
+                              value={formatCurrency(account.currentBalance)}
+                            />
+                            <DetailRow
+                              label="Credit Limit"
+                              value={formatCurrency(account.creditLimit)}
+                            />
+                            <DetailRow
+                              label="Monthly Revenue"
+                              value={formatCurrency(account.monthlyRevenue)}
+                            />
+                            <DetailRow
+                              label="Payment Terms"
+                              value={`${account.paymentTermsDays} days`}
+                            />
+                          </div>
+
+                          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                            <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                              Contact
+                            </h4>
+
+                            <DetailRow label="Contact" value={account.contactName} />
+                            <DetailRow label="Email" value={account.email || '—'} />
+                            <DetailRow label="Phone" value={account.phone || '—'} />
+                            <DetailRow
+                              label="Address"
+                              value={account.billingAddress || '—'}
+                            />
+                          </div>
+
+                          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                            <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                              Usage
+                            </h4>
+
+                            <DetailRow
+                              label="Trips This Month"
+                              value={String(account.tripsThisMonth)}
+                            />
+                            <DetailRow
+                              label="Invoices"
+                              value={String(account.invoiceCount)}
+                            />
+                            <DetailRow label="Status" value={account.status} />
+                            <DetailRow label="Type" value={account.type} />
+                          </div>
+
+                          {account.notes ? (
+                            <div className="xl:col-span-3 rounded-2xl border border-white/10 bg-black/20 p-4">
+                              <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/70">
+                                Notes
+                              </h4>
+                              <p className="text-sm text-white/70">{account.notes}</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
-                  </div>
-
-                  <Field
-                    label="Logo URL"
-                    input={
-                      <input
-                        value={form.logoUrl}
-                        onChange={(e) => setField('logoUrl', e.target.value)}
-                        className={inputClassName}
-                        placeholder="https://yourdomain.com/logo.png"
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Primary Brand Colour"
-                    input={
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="color"
-                          value={form.primaryColor}
-                          onChange={(e) => setField('primaryColor', e.target.value)}
-                          className="h-12 w-16 rounded-xl border border-white/10 bg-[#0b1728]"
-                        />
-                        <input
-                          value={form.primaryColor}
-                          onChange={(e) => setField('primaryColor', e.target.value)}
-                          className={inputClassName}
-                          placeholder="#06b6d4"
-                        />
-                      </div>
-                    }
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-              <h2 className="text-2xl font-bold">Account Snapshot</h2>
-              <p className="mt-1 text-sm text-white/60">
-                Quick view of the current signed-in operator account.
-              </p>
-
-              <div className="mt-5 space-y-3">
-                <DetailRow label="User Email" value={user?.email || '—'} />
-                <DetailRow label="Role" value={user?.role || '—'} />
-                <DetailRow
-                  label="Company ID"
-                  value={user?.companyId || '—'}
-                />
-                <DetailRow
-                  label="Platform"
-                  value="CabHQ Operator Portal"
-                />
+                  );
+                })}
               </div>
-            </div>
-
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
-              <h2 className="text-2xl font-bold">Recommended Next Steps</h2>
-              <p className="mt-1 text-sm text-white/60">
-                Useful account setup items to complete.
-              </p>
-
-              <div className="mt-5 grid gap-3">
-                <ChecklistItem
-                  label="Complete company contact details"
-                  complete={Boolean(
-                    form.companyName && form.contactName && form.email && form.phone,
-                  )}
-                />
-                <ChecklistItem
-                  label="Set business address"
-                  complete={Boolean(form.addressLine1 && form.city && form.postcode)}
-                />
-                <ChecklistItem
-                  label="Set booking prefix"
-                  complete={Boolean(form.bookingPrefix)}
-                />
-                <ChecklistItem
-                  label="Set billing email"
-                  complete={Boolean(form.billingEmail)}
-                />
-                <ChecklistItem
-                  label="Choose brand colour"
-                  complete={Boolean(form.primaryColor)}
-                />
-              </div>
-            </div>
+            )}
           </section>
         </div>
       </div>
@@ -683,13 +670,13 @@ function StatCard({
   hint,
 }: {
   label: string;
-  value: string;
+  value: string | number;
   hint: string;
 }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
       <p className="text-sm font-medium text-white/60">{label}</p>
-      <p className="mt-3 truncate text-2xl font-bold text-white">{value}</p>
+      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
       <p className="mt-2 text-xs text-white/45">{hint}</p>
     </div>
   );
@@ -720,38 +707,9 @@ function DetailRow({
   return (
     <div className="flex items-start justify-between gap-4 border-b border-white/5 py-2 last:border-b-0">
       <span className="text-sm text-white/50">{label}</span>
-      <span className="text-right text-sm text-white/85">{value}</span>
-    </div>
-  );
-}
-
-function ChecklistItem({
-  label,
-  complete,
-}: {
-  label: string;
-  complete: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3">
-      <span className="text-sm text-white/80">{label}</span>
-      <span
-        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-          complete
-            ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-            : 'border border-amber-500/30 bg-amber-500/10 text-amber-300'
-        }`}
-      >
-        {complete ? 'Done' : 'Pending'}
+      <span className="max-w-[60%] text-right text-sm text-white/85">
+        {value}
       </span>
-    </div>
-  );
-}
-
-function LoadingBlock({ label }: { label: string }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-6 text-sm text-white/60">
-      {label}
     </div>
   );
 }
