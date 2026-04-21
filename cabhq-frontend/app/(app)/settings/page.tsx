@@ -23,6 +23,8 @@ type SettingsForm = {
   completedJobsCompactMode: boolean;
 };
 
+type SaveSectionKey = 'operations' | 'notifications' | 'bookingRules';
+
 const initialForm: SettingsForm = {
   dispatchAutoRefreshSeconds: 10,
   driverTrackingIntervalSeconds: 10,
@@ -45,9 +47,11 @@ const initialForm: SettingsForm = {
 export default function SettingsPage() {
   const [form, setForm] = useState<SettingsForm>(initialForm);
   const [loading, setLoading] = useState(true);
-  const [savingOperations, setSavingOperations] = useState(false);
-  const [savingNotifications, setSavingNotifications] = useState(false);
-  const [savingBookingRules, setSavingBookingRules] = useState(false);
+  const [saving, setSaving] = useState<Record<SaveSectionKey, boolean>>({
+    operations: false,
+    notifications: false,
+    bookingRules: false,
+  });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -92,20 +96,18 @@ export default function SettingsPage() {
       ...prev,
       [key]: value,
     }));
+
     if (success) setSuccess('');
   }
 
   async function saveSection(
-    type: 'operations' | 'notifications' | 'bookingRules',
+    section: SaveSectionKey,
     payload: Partial<SettingsForm>,
   ) {
     try {
       setError('');
       setSuccess('');
-
-      if (type === 'operations') setSavingOperations(true);
-      if (type === 'notifications') setSavingNotifications(true);
-      if (type === 'bookingRules') setSavingBookingRules(true);
+      setSaving((prev) => ({ ...prev, [section]: true }));
 
       await apiFetch('/settings', {
         method: 'PATCH',
@@ -117,9 +119,7 @@ export default function SettingsPage() {
       console.error(err);
       setError('Failed to save settings');
     } finally {
-      if (type === 'operations') setSavingOperations(false);
-      if (type === 'notifications') setSavingNotifications(false);
-      if (type === 'bookingRules') setSavingBookingRules(false);
+      setSaving((prev) => ({ ...prev, [section]: false }));
     }
   }
 
@@ -136,6 +136,31 @@ export default function SettingsPage() {
     form.dispatchAutoRefreshSeconds,
     form.driverTrackingIntervalSeconds,
   ]);
+
+  const operationsPayload: Partial<SettingsForm> = {
+    dispatchAutoRefreshSeconds: form.dispatchAutoRefreshSeconds,
+    driverTrackingIntervalSeconds: form.driverTrackingIntervalSeconds,
+    autoDispatchEnabled: form.autoDispatchEnabled,
+    autoDispatchOfferTimeoutSeconds: form.autoDispatchOfferTimeoutSeconds,
+    allowManualDispatchOverride: form.allowManualDispatchOverride,
+    requireDriverPinLogin: form.requireDriverPinLogin,
+    allowDriverShiftStartWithoutDocs: form.allowDriverShiftStartWithoutDocs,
+    defaultTimezone: form.defaultTimezone,
+    defaultCurrency: form.defaultCurrency,
+    defaultCountry: form.defaultCountry,
+  };
+
+  const notificationsPayload: Partial<SettingsForm> = {
+    notifyDriversForNewJobs: form.notifyDriversForNewJobs,
+    notifyOperatorsForCancelledJobs: form.notifyOperatorsForCancelledJobs,
+  };
+
+  const bookingRulesPayload: Partial<SettingsForm> = {
+    bookingsRequireQuotedPrice: form.bookingsRequireQuotedPrice,
+    bookingsRequirePassengerCount: form.bookingsRequirePassengerCount,
+    showCompletedJobsOnDispatch: form.showCompletedJobsOnDispatch,
+    completedJobsCompactMode: form.completedJobsCompactMode,
+  };
 
   return (
     <AdminShell
@@ -190,28 +215,11 @@ export default function SettingsPage() {
 
               <button
                 type="button"
-                disabled={loading || savingOperations}
-                onClick={() =>
-                  void saveSection('operations', {
-                    dispatchAutoRefreshSeconds: form.dispatchAutoRefreshSeconds,
-                    driverTrackingIntervalSeconds:
-                      form.driverTrackingIntervalSeconds,
-                    autoDispatchEnabled: form.autoDispatchEnabled,
-                    autoDispatchOfferTimeoutSeconds:
-                      form.autoDispatchOfferTimeoutSeconds,
-                    allowManualDispatchOverride:
-                      form.allowManualDispatchOverride,
-                    requireDriverPinLogin: form.requireDriverPinLogin,
-                    allowDriverShiftStartWithoutDocs:
-                      form.allowDriverShiftStartWithoutDocs,
-                    defaultTimezone: form.defaultTimezone,
-                    defaultCurrency: form.defaultCurrency,
-                    defaultCountry: form.defaultCountry,
-                  })
-                }
+                disabled={loading || saving.operations}
+                onClick={() => void saveSection('operations', operationsPayload)}
                 className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {savingOperations ? 'Saving...' : 'Save Operations'}
+                {saving.operations ? 'Saving...' : 'Save Operations'}
               </button>
             </div>
 
@@ -376,17 +384,13 @@ export default function SettingsPage() {
 
                 <button
                   type="button"
-                  disabled={loading || savingNotifications}
+                  disabled={loading || saving.notifications}
                   onClick={() =>
-                    void saveSection('notifications', {
-                      notifyDriversForNewJobs: form.notifyDriversForNewJobs,
-                      notifyOperatorsForCancelledJobs:
-                        form.notifyOperatorsForCancelledJobs,
-                    })
+                    void saveSection('notifications', notificationsPayload)
                   }
                   className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {savingNotifications ? 'Saving...' : 'Save Notifications'}
+                  {saving.notifications ? 'Saving...' : 'Save Notifications'}
                 </button>
               </div>
 
@@ -426,19 +430,13 @@ export default function SettingsPage() {
 
                 <button
                   type="button"
-                  disabled={loading || savingBookingRules}
+                  disabled={loading || saving.bookingRules}
                   onClick={() =>
-                    void saveSection('bookingRules', {
-                      bookingsRequireQuotedPrice: form.bookingsRequireQuotedPrice,
-                      bookingsRequirePassengerCount:
-                        form.bookingsRequirePassengerCount,
-                      showCompletedJobsOnDispatch: form.showCompletedJobsOnDispatch,
-                      completedJobsCompactMode: form.completedJobsCompactMode,
-                    })
+                    void saveSection('bookingRules', bookingRulesPayload)
                   }
                   className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {savingBookingRules ? 'Saving...' : 'Save Booking Rules'}
+                  {saving.bookingRules ? 'Saving...' : 'Save Booking Rules'}
                 </button>
               </div>
 
