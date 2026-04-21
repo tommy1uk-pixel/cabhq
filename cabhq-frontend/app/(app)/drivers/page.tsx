@@ -144,15 +144,16 @@ const initialDocumentForm: DriverDocumentFormState = {
   file: null,
 };
 
-const driverDocumentTypeOptions: { value: DriverDocumentType; label: string }[] = [
-  { value: 'DRIVING_LICENCE', label: 'Driving Licence' },
-  { value: 'DBS_CHECK', label: 'DBS Check' },
-  { value: 'TAXI_BADGE', label: 'Taxi Badge' },
-  { value: 'MEDICAL_CERTIFICATE', label: 'Medical Certificate' },
-  { value: 'RIGHT_TO_WORK', label: 'Right to Work' },
-  { value: 'INSURANCE', label: 'Insurance' },
-  { value: 'OTHER', label: 'Other' },
-];
+const driverDocumentTypeOptions: { value: DriverDocumentType; label: string }[] =
+  [
+    { value: 'DRIVING_LICENCE', label: 'Driving Licence' },
+    { value: 'DBS_CHECK', label: 'DBS Check' },
+    { value: 'TAXI_BADGE', label: 'Taxi Badge' },
+    { value: 'MEDICAL_CERTIFICATE', label: 'Medical Certificate' },
+    { value: 'RIGHT_TO_WORK', label: 'Right to Work' },
+    { value: 'INSURANCE', label: 'Insurance' },
+    { value: 'OTHER', label: 'Other' },
+  ];
 
 function DriversPageContent() {
   const searchParams = useSearchParams();
@@ -164,8 +165,8 @@ function DriversPageContent() {
 
   const [form, setForm] = useState<DriverFormState>(initialDriverForm);
   const [editingDriverId, setEditingDriverId] = useState<string | null>(null);
-
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
   const [documentForms, setDocumentForms] = useState<
     Record<string, DriverDocumentFormState>
@@ -189,6 +190,10 @@ function DriversPageContent() {
     null,
   );
   const [removingDocumentId, setRemovingDocumentId] = useState<string | null>(null);
+
+  const sortDrivers = useCallback((list: Driver[]) => {
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, []);
 
   const selectedDriver = useMemo(
     () => drivers.find((driver) => driver.id === selectedDriverId) ?? null,
@@ -225,21 +230,33 @@ function DriversPageContent() {
     [drivers],
   );
 
-  const sortDrivers = useCallback((list: Driver[]) => {
-    return [...list].sort((a, b) => a.name.localeCompare(b.name));
-  }, []);
+  const filteredDrivers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return drivers;
+
+    return drivers.filter((driver) =>
+      [
+        driver.name,
+        driver.phone,
+        driver.email,
+        driver.pin,
+        driver.status,
+        driver.licenceNumber,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q)),
+    );
+  }, [drivers, search]);
 
   const upsertDriver = useCallback(
     (driver: Driver) => {
       setDrivers((current) => {
         const exists = current.some((item) => item.id === driver.id);
-        if (!exists) {
-          return sortDrivers([...current, driver]);
-        }
+        const next = exists
+          ? current.map((item) => (item.id === driver.id ? driver : item))
+          : [...current, driver];
 
-        return sortDrivers(
-          current.map((item) => (item.id === driver.id ? driver : item)),
-        );
+        return sortDrivers(next);
       });
 
       setSelectedDriverId((current) => current ?? driver.id);
@@ -265,23 +282,24 @@ function DriversPageContent() {
 
       const data = await apiFetch<Driver[]>('/drivers');
       const nextDrivers = Array.isArray(data) ? data : [];
+      const sortedDrivers = sortDrivers(nextDrivers);
 
-      setDrivers(sortDrivers(nextDrivers));
+      setDrivers(sortedDrivers);
 
-      if (nextDrivers.length > 0) {
+      if (sortedDrivers.length > 0) {
         setSelectedDriverId((current) => {
           if (
             queryDriverId &&
-            nextDrivers.some((driver) => driver.id === queryDriverId)
+            sortedDrivers.some((driver) => driver.id === queryDriverId)
           ) {
             return queryDriverId;
           }
 
-          if (current && nextDrivers.some((driver) => driver.id === current)) {
+          if (current && sortedDrivers.some((driver) => driver.id === current)) {
             return current;
           }
 
-          return nextDrivers[0].id;
+          return sortedDrivers[0].id;
         });
       } else {
         setSelectedDriverId(null);
@@ -593,7 +611,7 @@ function DriversPageContent() {
         setUploadingDriverId(null);
       }
     },
-    [fetchDriver, resetDocumentForm, upsertDriver, documentForms],
+    [documentForms, fetchDriver, resetDocumentForm, upsertDriver],
   );
 
   const removeDocument = useCallback(
@@ -634,13 +652,16 @@ function DriversPageContent() {
           <StatCard label="Blocked" value={blockedDrivers.length} hint="Cannot be dispatched" />
           <StatCard
             label="Documents"
-            value={drivers.reduce((count, driver) => count + (driver.documents?.length ?? 0), 0)}
+            value={drivers.reduce(
+              (count, driver) => count + (driver.documents?.length ?? 0),
+              0,
+            )}
             hint="Uploaded compliance files"
           />
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[430px_1fr]">
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-2xl font-bold">
@@ -805,17 +826,27 @@ function DriversPageContent() {
             </form>
           </section>
 
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-            <div className="mb-5 flex items-center justify-between gap-3">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
+            <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-2xl font-bold">Drivers</h2>
                 <p className="mt-1 text-sm text-white/60">
                   Driver records, shift controls, dispatch controls and compliance visibility.
                 </p>
               </div>
-              <div className="rounded-xl border border-white/10 bg-[#0b1728] px-3 py-2 text-sm text-white/70">
-                On shift:{' '}
-                <span className="font-semibold text-white">{onShiftDrivers.length}</span>
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="rounded-xl border border-white/10 bg-[#0b1728] px-3 py-2 text-sm text-white/70">
+                  On shift:{' '}
+                  <span className="font-semibold text-white">{onShiftDrivers.length}</span>
+                </div>
+
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search drivers..."
+                  className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50 sm:w-[240px]"
+                />
               </div>
             </div>
 
@@ -823,13 +854,13 @@ function DriversPageContent() {
               <div className="rounded-2xl bg-[#0b1728] p-6 text-white/70">
                 Loading drivers...
               </div>
-            ) : drivers.length === 0 ? (
+            ) : filteredDrivers.length === 0 ? (
               <div className="rounded-2xl bg-[#0b1728] p-6 text-white/70">
-                No drivers added yet.
+                No drivers found.
               </div>
             ) : (
               <div className="space-y-4">
-                {drivers.map((driver) => {
+                {filteredDrivers.map((driver) => {
                   const documentForm = getDocumentForm(driver.id);
                   const isSelected = selectedDriverId === driver.id;
                   const driverBlocked = driver.dispatch?.assignable === false;
@@ -1164,7 +1195,8 @@ function DriversPageContent() {
                               </button>
                             </div>
 
-                            {loadingShiftHistoryId === driver.id && !shiftHistory[driver.id] ? (
+                            {loadingShiftHistoryId === driver.id &&
+                            !shiftHistory[driver.id] ? (
                               <div className="rounded-xl bg-[#07111f] p-4 text-sm text-white/60">
                                 Loading shift history...
                               </div>
@@ -1517,7 +1549,7 @@ function DriversPageContent() {
         </div>
 
         {selectedDriver ? (
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-2xl font-bold">
@@ -1603,7 +1635,7 @@ function StatCard({
   hint: string;
 }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
       <p className="text-sm font-medium text-white/60">{label}</p>
       <p className="mt-3 text-3xl font-bold text-white">{value}</p>
       <p className="mt-2 text-xs text-white/45">{hint}</p>
@@ -1645,7 +1677,9 @@ function StatusBadge({ value }: { value: string }) {
   const normalised = value?.toUpperCase?.() || '';
 
   const classes =
-    normalised === 'AVAILABLE' || normalised === 'ONLINE' || normalised === 'ON_DUTY'
+    normalised === 'AVAILABLE' ||
+    normalised === 'ONLINE' ||
+    normalised === 'ON_DUTY'
       ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
       : normalised === 'BUSY'
         ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300'

@@ -194,13 +194,21 @@ function VehiclesPageContent() {
   const [documentForms, setDocumentForms] = useState<
     Record<string, VehicleDocumentFormState>
   >({});
-  const [uploadingVehicleId, setUploadingVehicleId] = useState<string | null>(null);
-  const [deletingVehicleId, setDeletingVehicleId] = useState<string | null>(null);
-  const [statusSavingVehicleId, setStatusSavingVehicleId] = useState<string | null>(
+  const [uploadingVehicleId, setUploadingVehicleId] = useState<string | null>(
     null,
   );
-  const [assigningVehicleId, setAssigningVehicleId] = useState<string | null>(null);
-  const [removingDocumentId, setRemovingDocumentId] = useState<string | null>(null);
+  const [deletingVehicleId, setDeletingVehicleId] = useState<string | null>(
+    null,
+  );
+  const [statusSavingVehicleId, setStatusSavingVehicleId] = useState<
+    string | null
+  >(null);
+  const [assigningVehicleId, setAssigningVehicleId] = useState<string | null>(
+    null,
+  );
+  const [removingDocumentId, setRemovingDocumentId] = useState<string | null>(
+    null,
+  );
 
   const selectedVehicle = useMemo(
     () => vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null,
@@ -235,30 +243,32 @@ function VehiclesPageContent() {
     const expiredCoreItems = nextVehicles.reduce(
       (count, vehicle) =>
         count +
-        (vehicle.coreCompliance?.filter((item) => item.status === 'EXPIRED').length ??
-          0),
+        (vehicle.coreCompliance?.filter((item) => item.status === 'EXPIRED')
+          .length ?? 0),
       0,
     );
 
     const expiringSoonCoreItems = nextVehicles.reduce(
       (count, vehicle) =>
         count +
-        (vehicle.coreCompliance?.filter((item) => item.status === 'EXPIRING').length ??
-          0),
+        (vehicle.coreCompliance?.filter((item) => item.status === 'EXPIRING')
+          .length ?? 0),
       0,
     );
 
     const expiredDocuments = nextVehicles.reduce(
       (count, vehicle) =>
         count +
-        (vehicle.documents?.filter((doc) => doc.status === 'EXPIRED').length ?? 0),
+        (vehicle.documents?.filter((doc) => doc.status === 'EXPIRED').length ??
+          0),
       0,
     );
 
     const expiringSoonDocuments = nextVehicles.reduce(
       (count, vehicle) =>
         count +
-        (vehicle.documents?.filter((doc) => doc.status === 'EXPIRING').length ?? 0),
+        (vehicle.documents?.filter((doc) => doc.status === 'EXPIRING').length ??
+          0),
       0,
     );
 
@@ -266,10 +276,12 @@ function VehiclesPageContent() {
       totalVehicles: nextVehicles.length,
       activeVehicles: nextVehicles.filter((vehicle) => vehicle.status === 'ACTIVE')
         .length,
-      offRoadVehicles: nextVehicles.filter((vehicle) => vehicle.status === 'OFF_ROAD')
-        .length,
-      inactiveVehicles: nextVehicles.filter((vehicle) => vehicle.status === 'INACTIVE')
-        .length,
+      offRoadVehicles: nextVehicles.filter(
+        (vehicle) => vehicle.status === 'OFF_ROAD',
+      ).length,
+      inactiveVehicles: nextVehicles.filter(
+        (vehicle) => vehicle.status === 'INACTIVE',
+      ).length,
       expiredCoreItems,
       expiringSoonCoreItems,
       expiredDocuments,
@@ -661,16 +673,8 @@ function VehiclesPageContent() {
             hint="Fleet records"
           />
           <StatCard label="Clear" value={clearVehicles.length} hint="Dispatch ready" />
-          <StatCard
-            label="Expiring"
-            value={expiringVehicles.length}
-            hint="Attention soon"
-          />
-          <StatCard
-            label="Blocked"
-            value={blockedVehicles.length}
-            hint="Cannot be dispatched"
-          />
+          <StatCard label="Expiring" value={expiringVehicles.length} hint="Attention soon" />
+          <StatCard label="Blocked" value={blockedVehicles.length} hint="Cannot be dispatched" />
           <StatCard
             label="Documents"
             value={vehicles.reduce(
@@ -1065,9 +1069,10 @@ function VehiclesPageContent() {
                               <DetailRow label="Registration" value={vehicle.reg} />
                               <DetailRow
                                 label="Make / Model"
-                                value={[vehicle.make, vehicle.model]
-                                  .filter(Boolean)
-                                  .join(' ') || '—'}
+                                value={
+                                  [vehicle.make, vehicle.model].filter(Boolean).join(' ') ||
+                                  '—'
+                                }
                               />
                               <DetailRow label="Colour" value={vehicle.colour || '—'} />
                               <DetailRow
@@ -1321,10 +1326,8 @@ function VehiclesPageContent() {
                                           </div>
 
                                           <p className="mt-1 text-sm text-white/60">
-                                            {getVehicleDocumentTypeLabel(
-                                              document.documentType,
-                                            )}{' '}
-                                            · {document.fileName}
+                                            {getVehicleDocumentTypeLabel(document.documentType)} ·{' '}
+                                            {document.fileName}
                                           </p>
 
                                           <div className="mt-3 grid gap-2 text-xs text-white/50 md:grid-cols-2">
@@ -1607,7 +1610,7 @@ function getVehicleDocumentTypeLabel(value: VehicleDocumentType) {
 const inputClassName =
   'w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50';
 
-  export default function VehiclesPage() {
+export default function VehiclesPage() {
   return (
     <Suspense fallback={<div className="p-6 text-white">Loading vehicles...</div>}>
       <VehiclesPageContent />
