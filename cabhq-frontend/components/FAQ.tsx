@@ -5,29 +5,34 @@ import Reveal from "./Reveal";
 
 const faqs = [
   {
-    question: "Is CabHQ for local taxi firms or larger fleets?",
+    question: "Who is CABHQ built for?",
     answer:
-      "CabHQ is designed for both. Smaller operators can use it to modernise dispatch, while larger or growing fleets can use it to scale workflow, live tracking and customer communication.",
+      "CABHQ is built for taxi firms, private hire operators, airport transfer companies and growing fleets that need better dispatch control and modern systems.",
   },
   {
-    question: "Does CabHQ support driver and passenger apps?",
+    question: "Do you offer a free trial?",
     answer:
-      "Yes. CabHQ is built around a connected operator, driver and passenger model so the whole journey is handled in one system rather than separate tools.",
+      "Yes. Our Starter and Growth plans include a 14-day free trial so you can test CABHQ in a live environment before committing.",
   },
   {
-    question: "Can it handle airport transfers and account work?",
+    question: "Can I move from paper systems or old software?",
     answer:
-      "Yes. CabHQ is well suited to airport transfers, account journeys, scheduled bookings and day-to-day taxi dispatch operations.",
+      "Yes. We designed CABHQ to help operators move away from spreadsheets, outdated dispatch tools and manual admin processes.",
   },
   {
-    question: "Can pricing be customised for larger operators?",
+    question: "Does CABHQ include driver tracking?",
     answer:
-      "Yes. Enterprise pricing can be tailored around fleet size, rollout scope, white-label requirements and custom features.",
+      "Yes. You can monitor live driver positions, availability and booking activity through the dispatch dashboard.",
   },
   {
-    question: "Will CabHQ support roles and permissions?",
+    question: "Can it manage future bookings and airport jobs?",
     answer:
-      "Yes. The product is being structured around role-based access such as super admin, company admin, dispatcher, driver and account user.",
+      "Yes. CABHQ supports scheduled bookings, pre-booked work, airport transfers and repeat account journeys.",
+  },
+  {
+    question: "Is there custom pricing for bigger fleets?",
+    answer:
+      "Yes. Enterprise plans are tailored for larger operators, multi-site companies and custom rollout requirements.",
   },
 ];
 
@@ -36,19 +41,21 @@ export default function FAQ() {
 
   return (
     <Reveal>
-      <section className="mx-auto max-w-5xl px-6 py-20 md:py-28">
+      <section
+        id="faq"
+        className="mx-auto max-w-5xl px-6 py-20 md:py-28"
+      >
         <div className="mb-12 text-center">
-          <div className="mb-4 inline-flex items-center rounded-full border border-blue-400/20 bg-white/5 px-4 py-2 text-sm text-blue-200 shadow-lg shadow-blue-500/10">
+          <div className="mb-4 inline-flex rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-300">
             FAQ
           </div>
 
-          <h2 className="mb-4 text-4xl font-bold leading-tight md:text-5xl">
-            Common questions before booking a demo
+          <h2 className="mb-4 text-4xl font-black leading-tight md:text-6xl">
+            Questions Operators Usually Ask
           </h2>
 
           <p className="mx-auto max-w-2xl text-lg text-white/70">
-            Clear answers to the things operators usually want to know before
-            moving forward.
+            Clear answers before you start your free trial or request a demo.
           </p>
         </div>
 
@@ -66,14 +73,17 @@ export default function FAQ() {
                   onClick={() => setOpenIndex(isOpen ? -1 : index)}
                   className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left"
                 >
-                  <span className="text-lg font-semibold">{faq.question}</span>
+                  <span className="text-lg font-semibold text-white">
+                    {faq.question}
+                  </span>
+
                   <span className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-[#0b1728] text-xl text-white/70">
                     {isOpen ? "−" : "+"}
                   </span>
                 </button>
 
                 {isOpen && (
-                  <div className="border-t border-white/10 px-6 py-5 text-white/70">
+                  <div className="border-t border-white/10 px-6 py-5 leading-8 text-white/70">
                     {faq.answer}
                   </div>
                 )}
