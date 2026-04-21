@@ -23,6 +23,20 @@ export default function EditCompanyForm({
     contactName: company.contactName || '',
     contactEmail: company.contactEmail || '',
     contactPhone: company.contactPhone || '',
+    timezone: company.timezone || 'Europe/London',
+    currency: company.currency || 'GBP',
+    driverLimit: company.driverLimit ?? 10,
+    vehicleLimit: company.vehicleLimit ?? 10,
+    dispatcherSeatLimit: company.dispatcherSeatLimit ?? 3,
+    billingPlan: company.billingPlan || 'STARTER',
+    billingStatus: company.billingStatus || 'TRIAL',
+    trialEndsAt: company.trialEndsAt ? company.trialEndsAt.slice(0, 10) : '',
+    subscriptionStartsAt: company.subscriptionStartsAt
+      ? company.subscriptionStartsAt.slice(0, 10)
+      : '',
+    subscriptionEndsAt: company.subscriptionEndsAt
+      ? company.subscriptionEndsAt.slice(0, 10)
+      : '',
   });
 
   async function onSubmit(e: React.FormEvent) {
@@ -34,7 +48,15 @@ export default function EditCompanyForm({
       const res = await fetch(`${API_BASE}/companies/${company.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          driverLimit: Number(form.driverLimit),
+          vehicleLimit: Number(form.vehicleLimit),
+          dispatcherSeatLimit: Number(form.dispatcherSeatLimit),
+          trialEndsAt: form.trialEndsAt || null,
+          subscriptionStartsAt: form.subscriptionStartsAt || null,
+          subscriptionEndsAt: form.subscriptionEndsAt || null,
+        }),
       });
 
       const text = await res.text();
@@ -65,19 +87,37 @@ export default function EditCompanyForm({
         <Field label="Contact name" value={form.contactName} onChange={(v) => setForm((p) => ({ ...p, contactName: v }))} />
         <Field label="Contact email" value={form.contactEmail} onChange={(v) => setForm((p) => ({ ...p, contactEmail: v }))} />
         <Field label="Contact phone" value={form.contactPhone} onChange={(v) => setForm((p) => ({ ...p, contactPhone: v }))} />
+        <Field label="Timezone" value={form.timezone} onChange={(v) => setForm((p) => ({ ...p, timezone: v }))} />
+        <Field label="Currency" value={form.currency} onChange={(v) => setForm((p) => ({ ...p, currency: v }))} />
 
-        <label className="space-y-2">
-          <span className="text-base text-slate-300">Status</span>
-          <select
-            value={form.status}
-            onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
-            className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
-          >
-            <option value="ACTIVE">ACTIVE</option>
-            <option value="SUSPENDED">SUSPENDED</option>
-            <option value="PENDING">PENDING</option>
-          </select>
-        </label>
+        <SelectField
+          label="Status"
+          value={form.status}
+          onChange={(v) => setForm((p) => ({ ...p, status: v }))}
+          options={['PENDING', 'ACTIVE', 'SUSPENDED']}
+        />
+
+        <NumberField label="Driver limit" value={form.driverLimit} onChange={(v) => setForm((p) => ({ ...p, driverLimit: v }))} />
+        <NumberField label="Vehicle limit" value={form.vehicleLimit} onChange={(v) => setForm((p) => ({ ...p, vehicleLimit: v }))} />
+        <NumberField label="Dispatcher seats" value={form.dispatcherSeatLimit} onChange={(v) => setForm((p) => ({ ...p, dispatcherSeatLimit: v }))} />
+
+        <SelectField
+          label="Billing plan"
+          value={form.billingPlan}
+          onChange={(v) => setForm((p) => ({ ...p, billingPlan: v }))}
+          options={['STARTER', 'GROWTH', 'PRO', 'ENTERPRISE']}
+        />
+
+        <SelectField
+          label="Billing status"
+          value={form.billingStatus}
+          onChange={(v) => setForm((p) => ({ ...p, billingStatus: v }))}
+          options={['TRIAL', 'ACTIVE', 'PAST_DUE', 'CANCELLED']}
+        />
+
+        <DateField label="Trial ends at" value={form.trialEndsAt} onChange={(v) => setForm((p) => ({ ...p, trialEndsAt: v }))} />
+        <DateField label="Subscription starts at" value={form.subscriptionStartsAt} onChange={(v) => setForm((p) => ({ ...p, subscriptionStartsAt: v }))} />
+        <DateField label="Subscription ends at" value={form.subscriptionEndsAt} onChange={(v) => setForm((p) => ({ ...p, subscriptionEndsAt: v }))} />
       </div>
 
       {error ? (
@@ -120,6 +160,79 @@ function Field({
     <label className="space-y-2">
       <span className="text-base text-slate-300">{label}</span>
       <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
+      />
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="text-base text-slate-300">{label}</span>
+      <input
+        type="number"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="text-base text-slate-300">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
+      >
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function DateField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="text-base text-slate-300">{label}</span>
+      <input
+        type="date"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"

@@ -20,6 +20,11 @@ export interface Company {
   driverLimit?: number | null;
   vehicleLimit?: number | null;
   dispatcherSeatLimit?: number | null;
+  billingPlan?: 'STARTER' | 'GROWTH' | 'PRO' | 'ENTERPRISE' | null;
+  billingStatus?: 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'CANCELLED' | null;
+  trialEndsAt?: string | null;
+  subscriptionStartsAt?: string | null;
+  subscriptionEndsAt?: string | null;
   createdAt: string;
   updatedAt?: string | null;
   users?: CompanyUser[];

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Company } from '@/lib/super-admin/types';
 import CompanyStatusBadge from './CompanyStatusBadge';
+import CompanyBillingBadge from './CompanyBillingBadge';
 
 export default function CompaniesTable({
   companies,
@@ -14,6 +15,8 @@ export default function CompaniesTable({
           <tr>
             <th className="px-6 py-4 text-left text-sm font-semibold">Company</th>
             <th className="px-6 py-4 text-left text-sm font-semibold">Status</th>
+            <th className="px-6 py-4 text-left text-sm font-semibold">Billing</th>
+            <th className="px-6 py-4 text-left text-sm font-semibold">Plan</th>
             <th className="px-6 py-4 text-left text-sm font-semibold">Created</th>
             <th className="px-6 py-4 text-right text-sm font-semibold">Open</th>
           </tr>
@@ -22,7 +25,7 @@ export default function CompaniesTable({
         <tbody>
           {companies.length === 0 ? (
             <tr>
-              <td colSpan={4} className="px-6 py-10 text-center text-base text-slate-400">
+              <td colSpan={6} className="px-6 py-10 text-center text-base text-slate-400">
                 No companies found.
               </td>
             </tr>
@@ -40,6 +43,14 @@ export default function CompaniesTable({
 
                 <td className="px-6 py-5">
                   <CompanyStatusBadge status={company.status} />
+                </td>
+
+                <td className="px-6 py-5">
+                  <CompanyBillingBadge status={company.billingStatus} />
+                </td>
+
+                <td className="px-6 py-5 text-base text-slate-300">
+                  {company.billingPlan || 'STARTER'}
                 </td>
 
                 <td className="px-6 py-5 text-base text-slate-300">
