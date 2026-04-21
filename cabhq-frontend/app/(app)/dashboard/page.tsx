@@ -36,20 +36,20 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <section className="overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#0b1220] via-[#0e1628] to-[#08101d]">
+      <section className="overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(6,182,212,0.14),transparent_30%),linear-gradient(135deg,#081120_0%,#0c1527_55%,#07101c_100%)]">
         <div className="flex flex-col gap-8 px-6 py-7 lg:flex-row lg:items-center lg:justify-between lg:px-8 lg:py-8">
           <div className="max-w-3xl">
             <div className="inline-flex rounded-full border border-cyan-500/25 bg-cyan-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
-              CabHQ Operator Dashboard
+              CabHQ Operations Centre
             </div>
 
-            <h1 className="mt-5 text-3xl font-bold tracking-tight text-white md:text-5xl">
+            <h1 className="mt-5 text-3xl font-black tracking-tight text-white md:text-5xl">
               Welcome back
             </h1>
 
             <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
-              Run dispatch, monitor drivers, manage fleet records and keep the
-              operation moving from one control panel.
+              Control dispatch, monitor live activity, manage drivers and keep
+              the whole operation moving from one dashboard.
             </p>
 
             <div className="mt-5 flex flex-wrap gap-3 text-sm">
@@ -64,7 +64,7 @@ export default function DashboardPage() {
           <div className="flex flex-wrap gap-3">
             <Link
               href="/dispatch"
-              className="rounded-2xl bg-cyan-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-cyan-500"
+              className="rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-black transition hover:bg-cyan-400"
             >
               Open Dispatch
             </Link>
@@ -86,21 +86,25 @@ export default function DashboardPage() {
           label="Jobs Today"
           value="24"
           subtext="Scheduled and active jobs"
+          tone="cyan"
         />
         <MetricCard
           label="Pending Jobs"
           value="5"
           subtext="Waiting for assignment"
+          tone="amber"
         />
         <MetricCard
           label="Drivers Online"
           value="12"
           subtext="Currently available or active"
+          tone="emerald"
         />
         <MetricCard
           label="Vehicles Active"
           value="9"
           subtext="Operational fleet right now"
+          tone="violet"
         />
       </section>
 
@@ -178,6 +182,38 @@ export default function DashboardPage() {
           </div>
         </div>
       </section>
+
+      <section className="grid gap-6 lg:grid-cols-3">
+        <DashboardPanel
+          title="Driver Status"
+          subtitle="Live workforce overview"
+          items={[
+            { label: 'Available', value: '7' },
+            { label: 'Busy', value: '4' },
+            { label: 'Off Duty', value: '3' },
+          ]}
+        />
+
+        <DashboardPanel
+          title="Booking Mix"
+          subtitle="Current job composition"
+          items={[
+            { label: 'Pre-booked', value: '11' },
+            { label: 'ASAP', value: '8' },
+            { label: 'Airport', value: '5' },
+          ]}
+        />
+
+        <DashboardPanel
+          title="Compliance Watch"
+          subtitle="Upcoming attention points"
+          items={[
+            { label: 'MOT Due', value: '2' },
+            { label: 'Insurance Due', value: '1' },
+            { label: 'Badge Alerts', value: '3' },
+          ]}
+        />
+      </section>
     </div>
   );
 }
@@ -194,17 +230,28 @@ function MetricCard({
   label,
   value,
   subtext,
+  tone,
 }: {
   label: string;
   value: string;
   subtext: string;
+  tone: 'cyan' | 'amber' | 'emerald' | 'violet';
 }) {
+  const toneMap = {
+    cyan: 'from-cyan-500/10 to-transparent border-cyan-500/20',
+    amber: 'from-amber-500/10 to-transparent border-amber-500/20',
+    emerald: 'from-emerald-500/10 to-transparent border-emerald-500/20',
+    violet: 'from-violet-500/10 to-transparent border-violet-500/20',
+  };
+
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+    <div
+      className={`rounded-3xl border bg-gradient-to-br ${toneMap[tone]} p-5`}
+    >
       <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
         {label}
       </div>
-      <div className="mt-3 text-4xl font-bold tracking-tight text-white">
+      <div className="mt-3 text-4xl font-black tracking-tight text-white">
         {value}
       </div>
       <div className="mt-3 text-sm text-slate-400">{subtext}</div>
@@ -284,6 +331,35 @@ function SnapshotRow({
     <div className="flex items-center justify-between border-b border-white/10 pb-4 last:border-b-0 last:pb-0">
       <div className="text-sm text-slate-400">{label}</div>
       <div className="text-lg font-semibold text-white">{value}</div>
+    </div>
+  );
+}
+
+function DashboardPanel({
+  title,
+  subtitle,
+  items,
+}: {
+  title: string;
+  subtitle: string;
+  items: { label: string; value: string }[];
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
+      <h2 className="text-2xl font-bold text-white">{title}</h2>
+      <p className="mt-2 text-sm text-slate-400">{subtitle}</p>
+
+      <div className="mt-6 space-y-4">
+        {items.map((item) => (
+          <div
+            key={item.label}
+            className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-4 py-3"
+          >
+            <span className="text-sm text-slate-400">{item.label}</span>
+            <span className="text-lg font-semibold text-white">{item.value}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

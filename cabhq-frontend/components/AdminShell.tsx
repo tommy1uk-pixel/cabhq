@@ -1,40 +1,39 @@
 'use client';
 
-import { ReactNode } from 'react';
-import AdminNav from './AdminNav';
-
 type AdminShellProps = {
   title: string;
   subtitle?: string;
-  children: ReactNode;
+  children: React.ReactNode;
+  actions?: React.ReactNode;
 };
 
 export default function AdminShell({
   title,
   subtitle,
   children,
+  actions,
 }: AdminShellProps) {
   return (
-    <main className="min-h-screen bg-[#07111f] text-white">
-      <div className="mx-auto max-w-[1800px] px-6 py-8">
-        <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
-          <AdminNav />
-
-          <section className="min-w-0">
-            <div className="mb-6 rounded-3xl border border-white/10 bg-white/5 p-6">
-              <p className="text-xs uppercase tracking-[0.25em] text-white/35">
-                CabHQ Control
-              </p>
-              <h1 className="mt-2 text-4xl font-bold">{title}</h1>
-              {subtitle ? (
-                <p className="mt-2 text-white/55">{subtitle}</p>
-              ) : null}
+    <div className="min-h-screen bg-[#060b16] text-white">
+      <div className="mx-auto w-full max-w-[1800px] px-4 py-4 sm:px-6 sm:py-6 xl:px-8">
+        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-300/70">
+              CabHQ
             </div>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">
+              {title}
+            </h1>
+            {subtitle ? (
+              <p className="mt-2 max-w-3xl text-sm text-white/60">{subtitle}</p>
+            ) : null}
+          </div>
 
-            {children}
-          </section>
+          {actions ? <div className="flex flex-wrap gap-3">{actions}</div> : null}
         </div>
+
+        {children}
       </div>
-    </main>
+    </div>
   );
 }
