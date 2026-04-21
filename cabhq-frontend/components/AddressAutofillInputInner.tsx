@@ -45,14 +45,22 @@ type IdealResolvedAddress = {
   county?: string;
   postcode?: string;
   organisation_name?: string;
-  udprn?: string;
 };
 
 type IdealResolveResponse = {
   result?: IdealResolvedAddress;
 };
 
+type MapboxFeature = {
+  center?: [number, number] | number[] | null;
+};
+
+type MapboxResponse = {
+  features?: MapboxFeature[];
+};
+
 const IDEAL_API_KEY = process.env.NEXT_PUBLIC_IDEAL_POSTCODES_API_KEY ?? '';
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ?? '';
 
 export default function AddressAutofillInputInner({
   label,
@@ -172,6 +180,41 @@ export default function AddressAutofillInputInner({
     };
   }, [value]);
 
+  async function geocodeWithMapbox(address: string) {
+    if (!MAPBOX_TOKEN) {
+      return { lat: null, lng: null };
+    }
+
+    const url = new URL(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
+        address,
+      )}.json`,
+    );
+
+    url.searchParams.set('access_token', MAPBOX_TOKEN);
+    url.searchParams.set('autocomplete', 'false');
+    url.searchParams.set('country', 'gb');
+    url.searchParams.set('language', 'en');
+    url.searchParams.set('limit', '1');
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+    });
+
+    if (!response.ok) {
+      return { lat: null, lng: null };
+    }
+
+    const data: MapboxResponse = await response.json();
+    const feature = Array.isArray(data.features) ? data.features[0] : undefined;
+    const center = Array.isArray(feature?.center) ? feature?.center : null;
+
+    const lng = typeof center?.[0] === 'number' ? center[0] : null;
+    const lat = typeof center?.[1] === 'number' ? center[1] : null;
+
+    return { lat, lng };
+  }
+
   async function selectItem(item: Suggestion) {
     try {
       setSelecting(true);
@@ -202,11 +245,13 @@ export default function AddressAutofillInputInner({
       const fullAddress = formatResolvedAddress(result) || item.label;
       const postcode = result?.postcode?.trim() || item.postcode || null;
 
+      const coords = await geocodeWithMapbox(fullAddress);
+
       onChangeValue(fullAddress);
       onSelectAddress({
         label: fullAddress,
-        lat: null,
-        lng: null,
+        lat: coords.lat,
+        lng: coords.lng,
         postcode,
         placeName: result?.organisation_name?.trim() || item.placeName || null,
       });
@@ -283,7 +328,9 @@ export default function AddressAutofillInputInner({
       ) : null}
 
       {selecting ? (
-        <div className="mt-2 text-xs text-white/50">Loading selected address...</div>
+        <div className="mt-2 text-xs text-white/50">
+          Loading selected address...
+        </div>
       ) : null}
 
       {!loading && !selecting && error ? (
@@ -308,7 +355,9 @@ export default function AddressAutofillInputInner({
                   active ? 'bg-white/10' : 'hover:bg-white/5'
                 }`}
               >
-                <div className="text-sm font-medium text-white">{item.label}</div>
+                <div className="text-sm font-medium text-white">
+                  {item.label}
+                </div>
                 <div className="mt-1 text-xs text-cyan-300/80">
                   {item.postcode || 'Select address'}
                 </div>
@@ -339,9 +388,6 @@ function formatResolvedAddress(address?: IdealResolvedAddress) {
 }
 
 function extractPostcode(text: string) {
-  const match = text.match(
-    /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i,
-  );
-
+  const match = text.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i);
   return match ? match[0].toUpperCase() : null;
 }
