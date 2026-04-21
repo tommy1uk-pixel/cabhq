@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { DivIcon, LatLngTuple, Map as LeafletMap } from 'leaflet';
-import { closeSocket, getSocket } from '../../lib/socket';
+import { closeSocket, getSocket } from '@/lib/socket';
 import AddressAutofillInput, {
   type SelectedAddress,
 } from '@/components/AddressAutofillInput';
@@ -224,10 +224,10 @@ export default function DispatchPage() {
         const color = blocked
           ? '#ef4444'
           : busy
-          ? '#f59e0b'
-          : available
-          ? '#10b981'
-          : '#06b6d4';
+            ? '#f59e0b'
+            : available
+              ? '#10b981'
+              : '#06b6d4';
 
         return L.divIcon({
           className: '',
@@ -273,6 +273,7 @@ export default function DispatchPage() {
     }
 
     void loadLeaflet();
+
     return () => {
       mounted = false;
     };
@@ -295,6 +296,7 @@ export default function DispatchPage() {
     ) {
       return null;
     }
+
     return [
       selectedBooking.pickupLatitude,
       selectedBooking.pickupLongitude,
@@ -308,6 +310,7 @@ export default function DispatchPage() {
     ) {
       return null;
     }
+
     return [
       selectedBooking.dropoffLatitude,
       selectedBooking.dropoffLongitude,
@@ -316,12 +319,14 @@ export default function DispatchPage() {
 
   const mapCenter = useMemo<LatLngTuple>(() => {
     if (selectedPickupPosition) return selectedPickupPosition;
+
     if (liveDrivers.length > 0) {
       return [
         liveDrivers[0].latitude as number,
         liveDrivers[0].longitude as number,
       ] as LatLngTuple;
     }
+
     return [51.5074, -0.1278] as LatLngTuple;
   }, [liveDrivers, selectedPickupPosition]);
 
@@ -363,6 +368,7 @@ export default function DispatchPage() {
 
     const data = (await response.json()) as Booking[];
     const nextBookings = Array.isArray(data) ? data : [];
+
     setBookings(nextBookings);
 
     setSelectedBooking((prev) => {
@@ -428,7 +434,7 @@ export default function DispatchPage() {
     };
 
     void load();
-  }, [token, loadBookings, loadDrivers]);
+  }, [token, loadBookings, loadDrivers, selectedBooking]);
 
   useEffect(() => {
     if (!token) return;
@@ -638,7 +644,8 @@ export default function DispatchPage() {
           <div>
             <h2 className="text-xl font-semibold">Add Job</h2>
             <p className="mt-1 text-sm text-gray-400">
-              Create a booking directly from dispatch. New jobs will auto-focus on the map.
+              Create a booking directly from dispatch. New jobs auto-focus on the
+              map.
             </p>
           </div>
         </div>
@@ -950,6 +957,7 @@ export default function DispatchPage() {
               <div className="text-sm text-gray-400">
                 {getPickupLabel(b)} → {getDropoffLabel(b)}
               </div>
+
               {getPickupTimeLabel(b) ? (
                 <div className="mt-1 text-sm text-gray-500">
                   Pickup: {formatDateTime(getPickupTimeLabel(b))}
@@ -969,6 +977,7 @@ export default function DispatchPage() {
                   <div className="space-y-2">
                     {b.suggestedDrivers.slice(0, 3).map((suggested, index) => {
                       const key = `${b.id}:${suggested.id}`;
+
                       return (
                         <div
                           key={suggested.id}
