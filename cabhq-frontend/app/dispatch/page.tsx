@@ -102,6 +102,7 @@ type BookingFormState = {
   customerPhone: string;
   pickupAddress: string;
   dropoffAddress: string;
+  whenType: 'ASAP' | 'SCHEDULED';
   pickupAt: string;
   passengerCount: number;
   quotedPrice: string;
@@ -117,6 +118,7 @@ const initialForm: BookingFormState = {
   customerPhone: '',
   pickupAddress: '',
   dropoffAddress: '',
+  whenType: 'ASAP',
   pickupAt: '',
   passengerCount: 1,
   quotedPrice: '',
@@ -173,6 +175,16 @@ function formatDateTime(value?: string | null) {
 function formatDistance(value?: number | null) {
   if (value == null) return '—';
   return `${value.toFixed(2)} mi`;
+}
+
+function toDateTimeLocalValue(date = new Date()) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  const mm = pad(date.getMonth() + 1);
+  const dd = pad(date.getDate());
+  const hh = pad(date.getHours());
+  const min = pad(date.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
 }
 
 function Card({ label, value }: { label: string; value: number }) {
@@ -547,19 +559,45 @@ export default function DispatchPage() {
         throw new Error('Dropoff address is required');
       }
 
+      if (form.whenType === 'SCHEDULED' && !form.pickupAt) {
+        throw new Error('Scheduled bookings need a date and time');
+      }
+
+      const scheduledTime =
+        form.whenType === 'SCHEDULED'
+          ? new Date(form.pickupAt).toISOString()
+          : new Date().toISOString();
+
+      const quotedPriceNumber =
+        form.quotedPrice.trim() !== '' ? Number(form.quotedPrice) : null;
+
+      if (quotedPriceNumber != null && Number.isNaN(quotedPriceNumber)) {
+        throw new Error('Quoted price must be a valid number');
+      }
+
       const payload = {
         customerName: form.customerName.trim(),
         customerPhone: form.customerPhone.trim() || null,
+
+        pickup: form.pickupAddress.trim(),
+        dropoff: form.dropoffAddress.trim(),
+        pickupTime: scheduledTime,
+        pickupLat: form.pickupLatitude,
+        pickupLng: form.pickupLongitude,
+        dropoffLat: form.dropoffLatitude,
+        dropoffLng: form.dropoffLongitude,
+
         pickupAddress: form.pickupAddress.trim(),
         dropoffAddress: form.dropoffAddress.trim(),
-        pickupAt: form.pickupAt || null,
-        passengerCount: Number(form.passengerCount) || 1,
-        quotedPrice: form.quotedPrice ? Number(form.quotedPrice) : null,
-        notes: form.notes.trim() || null,
+        pickupAt: scheduledTime,
         pickupLatitude: form.pickupLatitude,
         pickupLongitude: form.pickupLongitude,
         dropoffLatitude: form.dropoffLatitude,
         dropoffLongitude: form.dropoffLongitude,
+
+        passengerCount: Number(form.passengerCount) || 1,
+        quotedPrice: quotedPriceNumber,
+        notes: form.notes.trim() || null,
       };
 
       const res = await fetch(`${API_URL}/bookings`, {
@@ -920,13 +958,37 @@ export default function DispatchPage() {
               />
             </div>
 
-            <DateTimeField
-              label="Pickup time"
-              value={form.pickupAt}
+            <SelectField
+              label="When"
+              value={form.whenType}
               onChange={(value) =>
-                setForm((prev) => ({ ...prev, pickupAt: value }))
+                setForm((prev) => ({
+                  ...prev,
+                  whenType: value as 'ASAP' | 'SCHEDULED',
+                  pickupAt:
+                    value === 'ASAP'
+                      ? ''
+                      : prev.pickupAt || toDateTimeLocalValue(),
+                }))
               }
+              options={[
+                { label: 'ASAP', value: 'ASAP' },
+                { label: 'Scheduled', value: 'SCHEDULED' },
+              ]}
             />
+
+            {form.whenType === 'SCHEDULED' ? (
+              <DateTimeField
+                label="Pickup date & time"
+                value={form.pickupAt}
+                min={toDateTimeLocalValue()}
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, pickupAt: value }))
+                }
+              />
+            ) : (
+              <InfoField label="Pickup date & time" value="ASAP" />
+            )}
 
             <NumberField
               label="Passenger count"
@@ -1227,14 +1289,45 @@ function NumberField({
   );
 }
 
-function DateTimeField({
+function SelectField({
   label,
   value,
   onChange,
+  options,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  options: Array<{ label: string; value: string }>;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="block text-sm text-gray-300">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white outline-none focus:border-cyan-500"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function DateTimeField({
+  label,
+  value,
+  onChange,
+  min,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  min?: string;
 }) {
   return (
     <label className="space-y-2">
@@ -1242,10 +1335,28 @@ function DateTimeField({
       <input
         type="datetime-local"
         value={value}
+        min={min}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white outline-none focus:border-cyan-500"
       />
     </label>
+  );
+}
+
+function InfoField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <span className="block text-sm text-gray-300">{label}</span>
+      <div className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white">
+        {value}
+      </div>
+    </div>
   );
 }
 
