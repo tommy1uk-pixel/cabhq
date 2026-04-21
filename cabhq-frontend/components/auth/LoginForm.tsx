@@ -39,7 +39,9 @@ export default function LoginForm() {
       });
 
       const text = await res.text();
-      const data = text ? (JSON.parse(text) as LoginResponse | { message?: string }) : null;
+      const data = text
+        ? (JSON.parse(text) as LoginResponse | { message?: string })
+        : null;
 
       if (!res.ok) {
         throw new Error((data as { message?: string })?.message || 'Login failed');
@@ -49,6 +51,7 @@ export default function LoginForm() {
 
       localStorage.setItem('cabhq_token', payload.token);
       localStorage.setItem('cabhq_user', JSON.stringify(payload.user));
+      localStorage.setItem('token', payload.token);
 
       if (payload.user.role === 'SUPER_ADMIN') {
         router.push('/super-admin');
@@ -69,43 +72,50 @@ export default function LoginForm() {
   return (
     <form
       onSubmit={onSubmit}
-      className="space-y-6 rounded-3xl border border-slate-800 bg-slate-950 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]"
+      className="space-y-6 rounded-3xl border border-white/10 bg-[#020b18] p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]"
     >
       <div>
-        <h2 className="text-3xl font-semibold tracking-tight text-white">
-          Login
+        <div className="inline-flex rounded-full border border-cyan-400/20 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">
+          Secure Login
+        </div>
+
+        <h2 className="mt-5 text-3xl font-black tracking-tight text-white">
+          Access your CABHQ account
         </h2>
-        <p className="mt-2 text-base text-slate-400">
-          Access your CabHQ account.
+
+        <p className="mt-2 text-base leading-7 text-slate-400">
+          Sign in to manage bookings, dispatch drivers and control daily operations.
         </p>
       </div>
 
       <div className="space-y-5">
         <label className="block space-y-2">
-          <span className="text-base text-slate-300">Email</span>
+          <span className="text-sm font-medium text-slate-300">Email</span>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
+            className="w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400/40"
             placeholder="you@company.com"
+            autoComplete="email"
           />
         </label>
 
         <label className="block space-y-2">
-          <span className="text-base text-slate-300">Password</span>
+          <span className="text-sm font-medium text-slate-300">Password</span>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
+            className="w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400/40"
             placeholder="••••••••"
+            autoComplete="current-password"
           />
         </label>
       </div>
 
       {error ? (
-        <div className="rounded-2xl border border-red-800 bg-red-950/30 px-5 py-4 text-base text-red-300">
+        <div className="rounded-2xl border border-red-800/60 bg-red-950/30 px-5 py-4 text-sm text-red-300">
           {error}
         </div>
       ) : null}
@@ -113,10 +123,14 @@ export default function LoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full rounded-2xl bg-white px-5 py-4 text-base font-semibold text-black disabled:opacity-50"
+        className="w-full rounded-2xl bg-cyan-500 px-5 py-4 text-base font-semibold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? 'Signing in...' : 'Sign in'}
       </button>
+
+      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-slate-400">
+        Use your operator, admin, driver or super admin credentials to continue.
+      </div>
     </form>
   );
 }
