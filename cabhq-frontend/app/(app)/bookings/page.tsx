@@ -55,6 +55,7 @@ function getPickupTimeLabel(booking: Booking) {
 
 function formatDateTime(value?: string | null) {
   if (!value) return '—';
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
 
@@ -231,15 +232,43 @@ export default function BookingsPage() {
   return (
     <AdminShell
       title="Bookings"
-      subtitle="Search, review and manage all bookings across dispatch"
+      subtitle="Search, review and manage all bookings across the business"
     >
       <div className="space-y-6">
+        <section className="overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(6,182,212,0.10),transparent_30%),linear-gradient(135deg,#081120_0%,#0c1527_55%,#07101c_100%)] p-6 md:p-8">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl">
+              <div className="inline-flex rounded-full border border-cyan-500/25 bg-cyan-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+                CabHQ Booking Control
+              </div>
+
+              <h1 className="mt-5 text-3xl font-black tracking-tight text-white md:text-5xl">
+                Booking management in one place
+              </h1>
+
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+                Search bookings, review statuses, track assignment state and
+                keep a clean overview of live, scheduled and completed work.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={() => void handleRefresh()}
+                className="rounded-2xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-black transition hover:bg-cyan-400"
+              >
+                {refreshing ? 'Refreshing...' : 'Refresh Bookings'}
+              </button>
+            </div>
+          </div>
+        </section>
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <StatCard label="All Bookings" value={counts.all} hint="Every booking record" />
-          <StatCard label="Live" value={counts.live} hint="Open and active jobs" />
-          <StatCard label="Scheduled" value={counts.scheduled} hint="Booked or offered" />
-          <StatCard label="Completed" value={counts.completed} hint="Finished jobs" />
-          <StatCard label="Cancelled" value={counts.cancelled} hint="Cancelled or no-show" />
+          <StatCard label="All Bookings" value={counts.all} hint="Every booking record" tone="slate" />
+          <StatCard label="Live" value={counts.live} hint="Open and active jobs" tone="cyan" />
+          <StatCard label="Scheduled" value={counts.scheduled} hint="Booked or offered" tone="amber" />
+          <StatCard label="Completed" value={counts.completed} hint="Finished jobs" tone="emerald" />
+          <StatCard label="Cancelled" value={counts.cancelled} hint="Cancelled or no-show" tone="red" />
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
@@ -277,19 +306,12 @@ export default function BookingsPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by ref, customer, phone, route, driver..."
-                className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50 sm:w-[340px]"
+                className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50 sm:w-[360px]"
               />
-
-              <button
-                onClick={() => void handleRefresh()}
-                className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
-              >
-                {refreshing ? 'Refreshing...' : 'Refresh'}
-              </button>
             </div>
           </div>
 
-          <div className="hidden grid-cols-[140px_190px_1.8fr_150px_170px_120px] gap-3 border-b border-white/10 px-3 pb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 xl:grid">
+          <div className="hidden grid-cols-[150px_190px_1.8fr_150px_170px_120px] gap-3 border-b border-white/10 px-3 pb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 xl:grid">
             <div>Reference</div>
             <div>Pickup Time</div>
             <div>Route</div>
@@ -311,9 +333,9 @@ export default function BookingsPage() {
               filteredBookings.map((booking) => (
                 <div
                   key={booking.id}
-                  className="rounded-2xl border border-white/10 bg-[#0b1728] p-4 transition hover:border-white/15"
+                  className="rounded-2xl border border-white/10 bg-[#0b1728] p-4 transition hover:border-white/15 hover:bg-[#0d1a2d]"
                 >
-                  <div className="grid gap-4 xl:grid-cols-[140px_190px_1.8fr_150px_170px_120px] xl:items-center">
+                  <div className="grid gap-4 xl:grid-cols-[150px_190px_1.8fr_150px_170px_120px] xl:items-center">
                     <div>
                       <div className="text-sm font-bold text-white">
                         {booking.reference}
@@ -375,15 +397,25 @@ function StatCard({
   label,
   value,
   hint,
+  tone,
 }: {
   label: string;
   value: number;
   hint: string;
+  tone: 'slate' | 'cyan' | 'amber' | 'emerald' | 'red';
 }) {
+  const toneMap = {
+    slate: 'from-slate-500/10 to-transparent border-white/10',
+    cyan: 'from-cyan-500/10 to-transparent border-cyan-500/20',
+    amber: 'from-amber-500/10 to-transparent border-amber-500/20',
+    emerald: 'from-emerald-500/10 to-transparent border-emerald-500/20',
+    red: 'from-red-500/10 to-transparent border-red-500/20',
+  };
+
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+    <div className={`rounded-3xl border bg-gradient-to-br ${toneMap[tone]} p-5`}>
       <p className="text-sm font-medium text-white/60">{label}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
+      <p className="mt-3 text-3xl font-black text-white">{value}</p>
       <p className="mt-2 text-xs text-white/45">{hint}</p>
     </div>
   );
@@ -403,7 +435,7 @@ function TabButton({
       onClick={onClick}
       className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
         active
-          ? 'bg-cyan-600 text-white'
+          ? 'bg-cyan-500 text-black'
           : 'bg-white/5 text-slate-300 hover:bg-white/10'
       }`}
     >
