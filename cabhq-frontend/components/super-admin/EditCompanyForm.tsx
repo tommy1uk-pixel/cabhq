@@ -6,6 +6,30 @@ import { Company } from '@/lib/super-admin/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
 
+type CompanyStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED';
+type BillingPlan = 'STARTER' | 'GROWTH' | 'PRO' | 'ENTERPRISE';
+type BillingStatus = 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'CANCELLED';
+
+type FormState = {
+  name: string;
+  code: string;
+  slug: string;
+  status: CompanyStatus;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
+  timezone: string;
+  currency: string;
+  driverLimit: number;
+  vehicleLimit: number;
+  dispatcherSeatLimit: number;
+  billingPlan: BillingPlan;
+  billingStatus: BillingStatus;
+  trialEndsAt: string;
+  subscriptionStartsAt: string;
+  subscriptionEndsAt: string;
+};
+
 export default function EditCompanyForm({
   company,
 }: {
@@ -15,11 +39,11 @@ export default function EditCompanyForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<FormState>({
     name: company.name || '',
     code: company.code || '',
     slug: company.slug || '',
-    status: company.status || 'ACTIVE',
+    status: ((company.status as CompanyStatus | undefined) || 'ACTIVE'),
     contactName: company.contactName || '',
     contactEmail: company.contactEmail || '',
     contactPhone: company.contactPhone || '',
@@ -28,8 +52,10 @@ export default function EditCompanyForm({
     driverLimit: company.driverLimit ?? 10,
     vehicleLimit: company.vehicleLimit ?? 10,
     dispatcherSeatLimit: company.dispatcherSeatLimit ?? 3,
-    billingPlan: company.billingPlan || 'STARTER',
-    billingStatus: company.billingStatus || 'TRIAL',
+    billingPlan:
+      ((company.billingPlan as BillingPlan | undefined) || 'STARTER'),
+    billingStatus:
+      ((company.billingStatus as BillingStatus | undefined) || 'TRIAL'),
     trialEndsAt: company.trialEndsAt ? company.trialEndsAt.slice(0, 10) : '',
     subscriptionStartsAt: company.subscriptionStartsAt
       ? company.subscriptionStartsAt.slice(0, 10)
@@ -81,43 +107,99 @@ export default function EditCompanyForm({
       className="space-y-8 rounded-3xl border border-slate-800 bg-slate-950 p-8"
     >
       <div className="grid gap-5 md:grid-cols-2">
-        <Field label="Company name" value={form.name} onChange={(v) => setForm((p) => ({ ...p, name: v }))} />
-        <Field label="Code" value={form.code} onChange={(v) => setForm((p) => ({ ...p, code: v }))} />
-        <Field label="Slug" value={form.slug} onChange={(v) => setForm((p) => ({ ...p, slug: v }))} />
-        <Field label="Contact name" value={form.contactName} onChange={(v) => setForm((p) => ({ ...p, contactName: v }))} />
-        <Field label="Contact email" value={form.contactEmail} onChange={(v) => setForm((p) => ({ ...p, contactEmail: v }))} />
-        <Field label="Contact phone" value={form.contactPhone} onChange={(v) => setForm((p) => ({ ...p, contactPhone: v }))} />
-        <Field label="Timezone" value={form.timezone} onChange={(v) => setForm((p) => ({ ...p, timezone: v }))} />
-        <Field label="Currency" value={form.currency} onChange={(v) => setForm((p) => ({ ...p, currency: v }))} />
+        <Field
+          label="Company name"
+          value={form.name}
+          onChange={(v) => setForm((p) => ({ ...p, name: v }))}
+        />
+        <Field
+          label="Code"
+          value={form.code}
+          onChange={(v) => setForm((p) => ({ ...p, code: v }))}
+        />
+        <Field
+          label="Slug"
+          value={form.slug}
+          onChange={(v) => setForm((p) => ({ ...p, slug: v }))}
+        />
+        <Field
+          label="Contact name"
+          value={form.contactName}
+          onChange={(v) => setForm((p) => ({ ...p, contactName: v }))}
+        />
+        <Field
+          label="Contact email"
+          value={form.contactEmail}
+          onChange={(v) => setForm((p) => ({ ...p, contactEmail: v }))}
+        />
+        <Field
+          label="Contact phone"
+          value={form.contactPhone}
+          onChange={(v) => setForm((p) => ({ ...p, contactPhone: v }))}
+        />
+        <Field
+          label="Timezone"
+          value={form.timezone}
+          onChange={(v) => setForm((p) => ({ ...p, timezone: v }))}
+        />
+        <Field
+          label="Currency"
+          value={form.currency}
+          onChange={(v) => setForm((p) => ({ ...p, currency: v }))}
+        />
 
         <SelectField
           label="Status"
           value={form.status}
-          onChange={(v) => setForm((p) => ({ ...p, status: v }))}
+          onChange={(v) => setForm((p) => ({ ...p, status: v as CompanyStatus }))}
           options={['PENDING', 'ACTIVE', 'SUSPENDED']}
         />
 
-        <NumberField label="Driver limit" value={form.driverLimit} onChange={(v) => setForm((p) => ({ ...p, driverLimit: v }))} />
-        <NumberField label="Vehicle limit" value={form.vehicleLimit} onChange={(v) => setForm((p) => ({ ...p, vehicleLimit: v }))} />
-        <NumberField label="Dispatcher seats" value={form.dispatcherSeatLimit} onChange={(v) => setForm((p) => ({ ...p, dispatcherSeatLimit: v }))} />
+        <NumberField
+          label="Driver limit"
+          value={form.driverLimit}
+          onChange={(v) => setForm((p) => ({ ...p, driverLimit: v }))}
+        />
+        <NumberField
+          label="Vehicle limit"
+          value={form.vehicleLimit}
+          onChange={(v) => setForm((p) => ({ ...p, vehicleLimit: v }))}
+        />
+        <NumberField
+          label="Dispatcher seats"
+          value={form.dispatcherSeatLimit}
+          onChange={(v) => setForm((p) => ({ ...p, dispatcherSeatLimit: v }))}
+        />
 
         <SelectField
           label="Billing plan"
           value={form.billingPlan}
-          onChange={(v) => setForm((p) => ({ ...p, billingPlan: v }))}
+          onChange={(v) => setForm((p) => ({ ...p, billingPlan: v as BillingPlan }))}
           options={['STARTER', 'GROWTH', 'PRO', 'ENTERPRISE']}
         />
 
         <SelectField
           label="Billing status"
           value={form.billingStatus}
-          onChange={(v) => setForm((p) => ({ ...p, billingStatus: v }))}
+          onChange={(v) => setForm((p) => ({ ...p, billingStatus: v as BillingStatus }))}
           options={['TRIAL', 'ACTIVE', 'PAST_DUE', 'CANCELLED']}
         />
 
-        <DateField label="Trial ends at" value={form.trialEndsAt} onChange={(v) => setForm((p) => ({ ...p, trialEndsAt: v }))} />
-        <DateField label="Subscription starts at" value={form.subscriptionStartsAt} onChange={(v) => setForm((p) => ({ ...p, subscriptionStartsAt: v }))} />
-        <DateField label="Subscription ends at" value={form.subscriptionEndsAt} onChange={(v) => setForm((p) => ({ ...p, subscriptionEndsAt: v }))} />
+        <DateField
+          label="Trial ends at"
+          value={form.trialEndsAt}
+          onChange={(v) => setForm((p) => ({ ...p, trialEndsAt: v }))}
+        />
+        <DateField
+          label="Subscription starts at"
+          value={form.subscriptionStartsAt}
+          onChange={(v) => setForm((p) => ({ ...p, subscriptionStartsAt: v }))}
+        />
+        <DateField
+          label="Subscription ends at"
+          value={form.subscriptionEndsAt}
+          onChange={(v) => setForm((p) => ({ ...p, subscriptionEndsAt: v }))}
+        />
       </div>
 
       {error ? (
