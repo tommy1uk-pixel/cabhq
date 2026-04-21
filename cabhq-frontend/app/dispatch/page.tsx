@@ -6,6 +6,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { DivIcon, LatLngTuple, Map as LeafletMap } from 'leaflet';
 import { closeSocket, getSocket } from '../../lib/socket';
+import AddressAutofillInput, {
+  type SelectedAddress,
+} from '@/components/AddressAutofillInput';
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') ||
@@ -63,6 +66,7 @@ type Booking = {
   id: string;
   reference: string;
   customerName?: string;
+  customerPhone?: string;
   pickupAddress?: string;
   dropoffAddress?: string;
   pickup?: string;
@@ -71,6 +75,8 @@ type Booking = {
   pickupTime?: string;
   status: string;
   quotedPrice?: number | null;
+  passengerCount?: number | null;
+  notes?: string | null;
   driverId?: string | null;
   driver?: Driver | null;
   pickupLatitude?: number | null;
@@ -85,6 +91,36 @@ type TimelineEvent = {
   type: string;
   note?: string | null;
   createdAt: string;
+};
+
+type BookingFormState = {
+  customerName: string;
+  customerPhone: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  pickupAt: string;
+  passengerCount: number;
+  quotedPrice: string;
+  notes: string;
+  pickupLatitude: number | null;
+  pickupLongitude: number | null;
+  dropoffLatitude: number | null;
+  dropoffLongitude: number | null;
+};
+
+const initialForm: BookingFormState = {
+  customerName: '',
+  customerPhone: '',
+  pickupAddress: '',
+  dropoffAddress: '',
+  pickupAt: '',
+  passengerCount: 1,
+  quotedPrice: '',
+  notes: '',
+  pickupLatitude: null,
+  pickupLongitude: null,
+  dropoffLatitude: null,
+  dropoffLongitude: null,
 };
 
 function getDriverName(driver: Driver) {
@@ -127,7 +163,6 @@ function formatDateTime(value?: string | null) {
     month: 'short',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit',
   });
 }
 
@@ -156,10 +191,13 @@ export default function DispatchPage() {
   const [connected, setConnected] = useState(false);
   const [assigningKey, setAssigningKey] = useState<string | null>(null);
   const [autoDispatchingId, setAutoDispatchingId] = useState<string | null>(null);
+  const [creatingBooking, setCreatingBooking] = useState(false);
+  const [bookingError, setBookingError] = useState('');
   const [driverIconFactory, setDriverIconFactory] =
     useState<((driver: Driver) => DivIcon) | null>(null);
   const [bookingIconFactory, setBookingIconFactory] =
     useState<((color: string, label: string) => DivIcon) | null>(null);
+  const [form, setForm] = useState<BookingFormState>(initialForm);
 
   const mapRef = useRef<LeafletMap | null>(null);
 
@@ -462,6 +500,71 @@ export default function DispatchPage() {
     }
   };
 
+  const createBooking = async (autoDispatchAfterCreate = false) => {
+    try {
+      setCreatingBooking(true);
+      setBookingError('');
+
+      if (!form.customerName.trim()) {
+        throw new Error('Customer name is required');
+      }
+
+      if (!form.pickupAddress.trim()) {
+        throw new Error('Pickup address is required');
+      }
+
+      if (!form.dropoffAddress.trim()) {
+        throw new Error('Dropoff address is required');
+      }
+
+      const payload = {
+        customerName: form.customerName.trim(),
+        customerPhone: form.customerPhone.trim() || null,
+        pickupAddress: form.pickupAddress.trim(),
+        dropoffAddress: form.dropoffAddress.trim(),
+        pickupAt: form.pickupAt || null,
+        passengerCount: Number(form.passengerCount) || 1,
+        quotedPrice: form.quotedPrice ? Number(form.quotedPrice) : null,
+        notes: form.notes.trim() || null,
+        pickupLatitude: form.pickupLatitude,
+        pickupLongitude: form.pickupLongitude,
+        dropoffLatitude: form.dropoffLatitude,
+        dropoffLongitude: form.dropoffLongitude,
+      };
+
+      const res = await fetch(`${API_URL}/bookings`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : null;
+
+      if (!res.ok) {
+        throw new Error(data?.message || 'Failed to create booking');
+      }
+
+      const createdBooking = data as Booking;
+
+      setForm(initialForm);
+      await loadBookings();
+
+      if (autoDispatchAfterCreate && createdBooking?.id) {
+        await autoDispatch(createdBooking.id);
+      }
+    } catch (err) {
+      setBookingError(
+        err instanceof Error ? err.message : 'Failed to create booking',
+      );
+    } finally {
+      setCreatingBooking(false);
+    }
+  };
+
   const loadTimeline = async (bookingId: string) => {
     const res = await fetch(`${API_URL}/bookings/${bookingId}/timeline`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -498,6 +601,143 @@ export default function DispatchPage() {
         <Card label="Available" value={stats.available} />
         <Card label="GPS Live" value={stats.liveGps} />
       </div>
+
+      <section className="mb-8 rounded-2xl border border-white/10 bg-gray-950 p-5">
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold">Add Job</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Create a booking directly from dispatch.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label="Customer name"
+            value={form.customerName}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, customerName: value }))
+            }
+            placeholder="John Smith"
+          />
+
+          <Field
+            label="Customer phone"
+            value={form.customerPhone}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, customerPhone: value }))
+            }
+            placeholder="07..."
+          />
+
+          <div className="md:col-span-2">
+            <AddressAutofillInput
+              label="Pickup address"
+              value={form.pickupAddress}
+              placeholder="Search pickup address"
+              autoComplete="off"
+              onChangeValue={(value) =>
+                setForm((prev) => ({
+                  ...prev,
+                  pickupAddress: value,
+                }))
+              }
+              onSelectAddress={(address: SelectedAddress) =>
+                setForm((prev) => ({
+                  ...prev,
+                  pickupAddress: address.label,
+                  pickupLatitude: address.lat,
+                  pickupLongitude: address.lng,
+                }))
+              }
+            />
+          </div>
+
+          <div className="md:col-span-2">
+            <AddressAutofillInput
+              label="Dropoff address"
+              value={form.dropoffAddress}
+              placeholder="Search dropoff address"
+              autoComplete="off"
+              onChangeValue={(value) =>
+                setForm((prev) => ({
+                  ...prev,
+                  dropoffAddress: value,
+                }))
+              }
+              onSelectAddress={(address: SelectedAddress) =>
+                setForm((prev) => ({
+                  ...prev,
+                  dropoffAddress: address.label,
+                  dropoffLatitude: address.lat,
+                  dropoffLongitude: address.lng,
+                }))
+              }
+            />
+          </div>
+
+          <DateTimeField
+            label="Pickup time"
+            value={form.pickupAt}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, pickupAt: value }))
+            }
+          />
+
+          <NumberField
+            label="Passenger count"
+            value={form.passengerCount}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, passengerCount: value }))
+            }
+          />
+
+          <Field
+            label="Quoted price"
+            value={form.quotedPrice}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, quotedPrice: value }))
+            }
+            placeholder="12.50"
+          />
+
+          <div className="md:col-span-2">
+            <TextAreaField
+              label="Notes"
+              value={form.notes}
+              onChange={(value) =>
+                setForm((prev) => ({ ...prev, notes: value }))
+              }
+              placeholder="Booking notes, gate code, wheelchair, etc."
+            />
+          </div>
+        </div>
+
+        {bookingError ? (
+          <div className="mt-4 rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {bookingError}
+          </div>
+        ) : null}
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            onClick={() => void createBooking(false)}
+            disabled={creatingBooking}
+            className="rounded bg-cyan-700 px-4 py-2 text-sm font-medium hover:bg-cyan-600 disabled:opacity-50"
+          >
+            {creatingBooking ? 'Creating...' : 'Create Job'}
+          </button>
+
+          <button
+            onClick={() => void createBooking(true)}
+            disabled={creatingBooking}
+            className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium hover:bg-emerald-600 disabled:opacity-50"
+          >
+            {creatingBooking ? 'Creating...' : 'Create & Auto Dispatch'}
+          </button>
+        </div>
+      </section>
 
       <section className="mb-8 rounded-2xl border border-white/10 bg-gray-950 p-5">
         <div className="mb-4 flex items-center justify-between gap-4">
@@ -846,5 +1086,99 @@ export default function DispatchPage() {
         </div>
       )}
     </main>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="block text-sm text-gray-300">{label}</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white outline-none focus:border-cyan-500"
+      />
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="block text-sm text-gray-300">{label}</span>
+      <input
+        type="number"
+        min={1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white outline-none focus:border-cyan-500"
+      />
+    </label>
+  );
+}
+
+function DateTimeField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="block text-sm text-gray-300">{label}</span>
+      <input
+        type="datetime-local"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white outline-none focus:border-cyan-500"
+      />
+    </label>
+  );
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="block text-sm text-gray-300">{label}</span>
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={4}
+        className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white outline-none focus:border-cyan-500"
+      />
+    </label>
   );
 }
