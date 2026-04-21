@@ -2,13 +2,18 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  decodeJwtPayload,
-  getDefaultRouteForRole,
-  setAuthCookie,
-} from '@/lib/auth';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+
+type LoginResponse = {
+  token: string;
+  user: {
+    id: string;
+    email: string;
+    role: 'SUPER_ADMIN' | 'ADMIN' | 'OPERATOR' | 'DRIVER';
+    companyId: string;
+  };
+};
 
 export default function LoginForm() {
   const router = useRouter();
@@ -34,23 +39,25 @@ export default function LoginForm() {
       });
 
       const text = await res.text();
-      const data = text ? JSON.parse(text) : null;
+      const data = text ? (JSON.parse(text) as LoginResponse | { message?: string }) : null;
 
       if (!res.ok) {
-        throw new Error(data?.message || 'Login failed');
+        throw new Error((data as { message?: string })?.message || 'Login failed');
       }
 
-      const token = data?.token as string | undefined;
-      if (!token) {
-        throw new Error('No token returned from login');
+      const payload = data as LoginResponse;
+
+      localStorage.setItem('cabhq_token', payload.token);
+      localStorage.setItem('cabhq_user', JSON.stringify(payload.user));
+
+      if (payload.user.role === 'SUPER_ADMIN') {
+        router.push('/super-admin');
+      } else if (payload.user.role === 'DRIVER') {
+        router.push('/driver');
+      } else {
+        router.push('/dashboard');
       }
 
-      setAuthCookie(token);
-
-      const payload = decodeJwtPayload(token);
-      const nextPath = getDefaultRouteForRole(payload?.role);
-
-      router.push(nextPath);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
@@ -62,38 +69,40 @@ export default function LoginForm() {
   return (
     <form
       onSubmit={onSubmit}
-      className="space-y-6 rounded-3xl border border-slate-800 bg-slate-950 p-8"
+      className="space-y-6 rounded-3xl border border-slate-800 bg-slate-950 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]"
     >
       <div>
-        <h1 className="text-4xl font-semibold tracking-tight text-white">
+        <h2 className="text-3xl font-semibold tracking-tight text-white">
           Login
-        </h1>
+        </h2>
         <p className="mt-2 text-base text-slate-400">
-          Sign in to CabHQ.
+          Access your CabHQ account.
         </p>
       </div>
 
-      <label className="block space-y-2">
-        <span className="text-base text-slate-300">Email</span>
-        <input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          type="email"
-          autoComplete="email"
-          className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
-        />
-      </label>
+      <div className="space-y-5">
+        <label className="block space-y-2">
+          <span className="text-base text-slate-300">Email</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
+            placeholder="you@company.com"
+          />
+        </label>
 
-      <label className="block space-y-2">
-        <span className="text-base text-slate-300">Password</span>
-        <input
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          type="password"
-          autoComplete="current-password"
-          className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
-        />
-      </label>
+        <label className="block space-y-2">
+          <span className="text-base text-slate-300">Password</span>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-base text-white"
+            placeholder="••••••••"
+          />
+        </label>
+      </div>
 
       {error ? (
         <div className="rounded-2xl border border-red-800 bg-red-950/30 px-5 py-4 text-base text-red-300">
@@ -104,7 +113,7 @@ export default function LoginForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full rounded-2xl bg-white px-5 py-3 text-base font-semibold text-black disabled:opacity-50"
+        className="w-full rounded-2xl bg-white px-5 py-4 text-base font-semibold text-black disabled:opacity-50"
       >
         {loading ? 'Signing in...' : 'Sign in'}
       </button>

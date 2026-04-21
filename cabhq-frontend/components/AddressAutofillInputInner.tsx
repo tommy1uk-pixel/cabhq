@@ -13,8 +13,6 @@ export type SelectedAddress = {
 type Suggestion = {
   id: string;
   label: string;
-  lat: number | null;
-  lng: number | null;
   postcode?: string | null;
   placeName?: string | null;
 };
@@ -28,27 +26,33 @@ type AddressAutofillInputInnerProps = {
   onSelectAddress: (address: SelectedAddress) => void;
 };
 
-type MapboxContextItem = {
-  id?: string;
-  text?: string;
+type IdealSuggestion = {
+  id: string;
+  suggestion: string;
 };
 
-type MapboxFeature = {
-  id?: string;
-  place_name?: string;
-  text?: string;
-  center?: [number, number] | number[] | null;
-  context?: MapboxContextItem[] | null;
-  properties?: {
-    full_address?: string;
-  } | null;
+type IdealAutocompleteResponse = {
+  result?: {
+    hits?: IdealSuggestion[];
+  };
 };
 
-type MapboxResponse = {
-  features?: MapboxFeature[];
+type IdealResolvedAddress = {
+  line_1?: string;
+  line_2?: string;
+  line_3?: string;
+  post_town?: string;
+  county?: string;
+  postcode?: string;
+  organisation_name?: string;
+  udprn?: string;
 };
 
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ?? '';
+type IdealResolveResponse = {
+  result?: IdealResolvedAddress;
+};
+
+const IDEAL_API_KEY = process.env.NEXT_PUBLIC_IDEAL_POSTCODES_API_KEY ?? '';
 
 export default function AddressAutofillInputInner({
   label,
@@ -64,6 +68,7 @@ export default function AddressAutofillInputInner({
   const [items, setItems] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [selecting, setSelecting] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [error, setError] = useState('');
 
@@ -84,18 +89,20 @@ export default function AddressAutofillInputInner({
   useEffect(() => {
     const query = value.trim();
 
-    if (!MAPBOX_TOKEN) {
+    if (!IDEAL_API_KEY) {
       setItems([]);
       setOpen(false);
       setLoading(false);
-      setError('Missing NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN');
+      setError('Missing NEXT_PUBLIC_IDEAL_POSTCODES_API_KEY');
       return;
     }
 
     if (query.length < 3) {
+      abortRef.current?.abort();
       setItems([]);
       setOpen(false);
       setLoading(false);
+      setHighlightedIndex(-1);
       setError('');
       return;
     }
@@ -110,20 +117,11 @@ export default function AddressAutofillInputInner({
         abortRef.current = controller;
 
         const url = new URL(
-          'https://api.mapbox.com/geocoding/v5/mapbox.places/' +
-            encodeURIComponent(query) +
-            '.json',
+          'https://api.ideal-postcodes.co.uk/v1/autocomplete/addresses',
         );
 
-        url.searchParams.set('access_token', MAPBOX_TOKEN);
-        url.searchParams.set('autocomplete', 'true');
-        url.searchParams.set('country', 'gb');
-        url.searchParams.set('language', 'en');
-        url.searchParams.set('limit', '8');
-        url.searchParams.set(
-          'types',
-          'address,postcode,place,locality,neighborhood',
-        );
+        url.searchParams.set('api_key', IDEAL_API_KEY);
+        url.searchParams.set('query', query);
 
         const response = await fetch(url.toString(), {
           method: 'GET',
@@ -132,38 +130,20 @@ export default function AddressAutofillInputInner({
 
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(`Mapbox ${response.status}: ${text || 'request failed'}`);
+          throw new Error(
+            `Ideal Postcodes ${response.status}: ${text || 'request failed'}`,
+          );
         }
 
-        const data: MapboxResponse = await response.json();
-        const features = Array.isArray(data.features) ? data.features : [];
+        const data: IdealAutocompleteResponse = await response.json();
+        const hits = Array.isArray(data.result?.hits) ? data.result!.hits! : [];
 
-        const nextItems: Suggestion[] = features.map((feature, index) => {
-          const placeName =
-            feature.place_name ||
-            feature.text ||
-            feature.properties?.full_address ||
-            query;
-
-          const center = Array.isArray(feature.center) ? feature.center : [null, null];
-          const lng = typeof center[0] === 'number' ? center[0] : null;
-          const lat = typeof center[1] === 'number' ? center[1] : null;
-
-          const postcodeContext = Array.isArray(feature.context)
-            ? feature.context.find((ctx) =>
-                String(ctx?.id || '').startsWith('postcode'),
-              )
-            : null;
-
-          return {
-            id: feature.id || `${placeName}-${index}`,
-            label: placeName,
-            lat,
-            lng,
-            postcode: postcodeContext?.text ?? null,
-            placeName,
-          };
-        });
+        const nextItems: Suggestion[] = hits.map((hit) => ({
+          id: hit.id,
+          label: hit.suggestion,
+          postcode: extractPostcode(hit.suggestion),
+          placeName: hit.suggestion,
+        }));
 
         setItems(nextItems);
         setOpen(nextItems.length > 0);
@@ -185,26 +165,62 @@ export default function AddressAutofillInputInner({
       } finally {
         setLoading(false);
       }
-    }, 300);
+    }, 250);
 
     return () => {
       window.clearTimeout(timer);
     };
   }, [value]);
 
-  function selectItem(item: Suggestion) {
-    onChangeValue(item.label);
-    onSelectAddress({
-      label: item.label,
-      lat: item.lat,
-      lng: item.lng,
-      postcode: item.postcode ?? null,
-      placeName: item.placeName ?? null,
-    });
-    setItems([]);
-    setOpen(false);
-    setHighlightedIndex(-1);
-    setError('');
+  async function selectItem(item: Suggestion) {
+    try {
+      setSelecting(true);
+      setError('');
+
+      const url = new URL(
+        `https://api.ideal-postcodes.co.uk/v1/autocomplete/addresses/${encodeURIComponent(
+          item.id,
+        )}/gbr`,
+      );
+
+      url.searchParams.set('api_key', IDEAL_API_KEY);
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(
+          `Ideal Postcodes ${response.status}: ${text || 'resolve failed'}`,
+        );
+      }
+
+      const data: IdealResolveResponse = await response.json();
+      const result = data.result;
+
+      const fullAddress = formatResolvedAddress(result) || item.label;
+      const postcode = result?.postcode?.trim() || item.postcode || null;
+
+      onChangeValue(fullAddress);
+      onSelectAddress({
+        label: fullAddress,
+        lat: null,
+        lng: null,
+        postcode,
+        placeName: result?.organisation_name?.trim() || item.placeName || null,
+      });
+
+      setItems([]);
+      setOpen(false);
+      setHighlightedIndex(-1);
+      setError('');
+    } catch (err: unknown) {
+      console.error('Address resolve failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to select address');
+    } finally {
+      setSelecting(false);
+    }
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -229,7 +245,7 @@ export default function AddressAutofillInputInner({
     if (event.key === 'Enter') {
       event.preventDefault();
       if (highlightedIndex >= 0 && highlightedIndex < items.length) {
-        selectItem(items[highlightedIndex]);
+        void selectItem(items[highlightedIndex]);
       }
     }
 
@@ -266,12 +282,16 @@ export default function AddressAutofillInputInner({
         <div className="mt-2 text-xs text-white/50">Searching addresses...</div>
       ) : null}
 
-      {!loading && error ? (
+      {selecting ? (
+        <div className="mt-2 text-xs text-white/50">Loading selected address...</div>
+      ) : null}
+
+      {!loading && !selecting && error ? (
         <div className="mt-2 text-xs text-amber-300">{error}</div>
       ) : null}
 
       {open && items.length > 0 ? (
-        <div className="absolute z-50 mt-2 max-h-72 w-full overflow-y-auto rounded-2xl border border-white/10 bg-[#07111f] shadow-2xl">
+        <div className="absolute z-50 mt-2 max-h-80 w-full overflow-y-auto rounded-2xl border border-white/10 bg-[#07111f] shadow-2xl">
           {items.map((item, index) => {
             const active = index === highlightedIndex;
 
@@ -281,7 +301,7 @@ export default function AddressAutofillInputInner({
                 type="button"
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  selectItem(item);
+                  void selectItem(item);
                 }}
                 onMouseEnter={() => setHighlightedIndex(index)}
                 className={`block w-full border-b border-white/5 px-4 py-3 text-left last:border-b-0 ${
@@ -289,7 +309,7 @@ export default function AddressAutofillInputInner({
                 }`}
               >
                 <div className="text-sm font-medium text-white">{item.label}</div>
-                <div className="mt-1 text-xs text-white/45">
+                <div className="mt-1 text-xs text-cyan-300/80">
                   {item.postcode || 'Select address'}
                 </div>
               </button>
@@ -299,4 +319,29 @@ export default function AddressAutofillInputInner({
       ) : null}
     </div>
   );
+}
+
+function formatResolvedAddress(address?: IdealResolvedAddress) {
+  if (!address) return '';
+
+  const parts = [
+    address.line_1,
+    address.line_2,
+    address.line_3,
+    address.post_town,
+    address.county,
+    address.postcode,
+  ]
+    .map((part) => part?.trim())
+    .filter(Boolean);
+
+  return parts.join(', ');
+}
+
+function extractPostcode(text: string) {
+  const match = text.match(
+    /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i,
+  );
+
+  return match ? match[0].toUpperCase() : null;
 }
