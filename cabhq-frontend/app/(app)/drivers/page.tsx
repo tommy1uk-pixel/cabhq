@@ -641,15 +641,34 @@ function DriversPageContent() {
   return (
     <AdminShell
       title="Drivers"
-      subtitle="Driver records, compliance tracking, shift visibility and document control"
+      subtitle="Driver records, compliance tracking, shifts and document control"
     >
       <div className="space-y-6">
+        <section className="overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(6,182,212,0.10),transparent_30%),linear-gradient(135deg,#081120_0%,#0c1527_55%,#07101c_100%)] p-6 md:p-8">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl">
+              <div className="inline-flex rounded-full border border-cyan-500/25 bg-cyan-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+                CabHQ Driver Management
+              </div>
+
+              <h1 className="mt-5 text-3xl font-black tracking-tight text-white md:text-5xl">
+                Manage drivers, shifts and compliance
+              </h1>
+
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+                Create driver records, track readiness for dispatch, manage live
+                shift state and keep compliance documents under control.
+              </p>
+            </div>
+          </div>
+        </section>
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <StatCard label="Total Drivers" value={drivers.length} hint="Driver records" />
-          <StatCard label="On Shift" value={onShiftDrivers.length} hint="Currently working" />
-          <StatCard label="Clear" value={clearDrivers.length} hint="Dispatch ready" />
-          <StatCard label="Expiring" value={expiringDrivers.length} hint="Attention soon" />
-          <StatCard label="Blocked" value={blockedDrivers.length} hint="Cannot be dispatched" />
+          <StatCard label="Total Drivers" value={drivers.length} hint="Driver records" tone="slate" />
+          <StatCard label="On Shift" value={onShiftDrivers.length} hint="Currently working" tone="cyan" />
+          <StatCard label="Clear" value={clearDrivers.length} hint="Dispatch ready" tone="emerald" />
+          <StatCard label="Expiring" value={expiringDrivers.length} hint="Attention soon" tone="amber" />
+          <StatCard label="Blocked" value={blockedDrivers.length} hint="Cannot be dispatched" tone="red" />
           <StatCard
             label="Documents"
             value={drivers.reduce(
@@ -657,6 +676,7 @@ function DriversPageContent() {
               0,
             )}
             hint="Uploaded compliance files"
+            tone="violet"
           />
         </section>
 
@@ -813,7 +833,7 @@ function DriversPageContent() {
               <button
                 type="submit"
                 disabled={saving}
-                className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-semibold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {saving
                   ? editingDriverId
@@ -831,7 +851,7 @@ function DriversPageContent() {
               <div>
                 <h2 className="text-2xl font-bold">Drivers</h2>
                 <p className="mt-1 text-sm text-white/60">
-                  Driver records, shift controls, dispatch controls and compliance visibility.
+                  Driver records, shift controls and compliance visibility.
                 </p>
               </div>
 
@@ -1423,7 +1443,7 @@ function DriversPageContent() {
                                   type="button"
                                   onClick={() => uploadDriverDocument(driver.id)}
                                   disabled={uploadingDriverId === driver.id}
-                                  className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                  className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-semibold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                   {uploadingDriverId === driver.id
                                     ? 'Uploading...'
@@ -1629,15 +1649,26 @@ function StatCard({
   label,
   value,
   hint,
+  tone,
 }: {
   label: string;
   value: number;
   hint: string;
+  tone: 'slate' | 'cyan' | 'emerald' | 'amber' | 'red' | 'violet';
 }) {
+  const toneMap = {
+    slate: 'from-slate-500/10 to-transparent border-white/10',
+    cyan: 'from-cyan-500/10 to-transparent border-cyan-500/20',
+    emerald: 'from-emerald-500/10 to-transparent border-emerald-500/20',
+    amber: 'from-amber-500/10 to-transparent border-amber-500/20',
+    red: 'from-red-500/10 to-transparent border-red-500/20',
+    violet: 'from-violet-500/10 to-transparent border-violet-500/20',
+  };
+
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+    <div className={`rounded-3xl border bg-gradient-to-br ${toneMap[tone]} p-5`}>
       <p className="text-sm font-medium text-white/60">{label}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
+      <p className="mt-3 text-3xl font-black text-white">{value}</p>
       <p className="mt-2 text-xs text-white/45">{hint}</p>
     </div>
   );
