@@ -215,7 +215,9 @@ export default function DispatchPage() {
   const liveDrivers = useMemo(
     () =>
       drivers.filter(
-        (driver) => driver.latitude != null && driver.longitude != null,
+        (driver) =>
+          typeof driver.latitude === 'number' &&
+          typeof driver.longitude === 'number',
       ),
     [drivers],
   );
@@ -227,7 +229,10 @@ export default function DispatchPage() {
     ) {
       return null;
     }
-    return [selectedBooking.pickupLatitude, selectedBooking.pickupLongitude];
+    return [
+      selectedBooking.pickupLatitude,
+      selectedBooking.pickupLongitude,
+    ] as LatLngTuple;
   }, [selectedBooking]);
 
   const selectedDropoffPosition = useMemo<LatLngTuple | null>(() => {
@@ -237,7 +242,10 @@ export default function DispatchPage() {
     ) {
       return null;
     }
-    return [selectedBooking.dropoffLatitude, selectedBooking.dropoffLongitude];
+    return [
+      selectedBooking.dropoffLatitude,
+      selectedBooking.dropoffLongitude,
+    ] as LatLngTuple;
   }, [selectedBooking]);
 
   const mapCenter = useMemo<LatLngTuple>(() => {
@@ -246,23 +254,30 @@ export default function DispatchPage() {
       return [
         liveDrivers[0].latitude as number,
         liveDrivers[0].longitude as number,
-      ];
+      ] as LatLngTuple;
     }
-    return [51.5074, -0.1278];
+    return [51.5074, -0.1278] as LatLngTuple;
   }, [liveDrivers, selectedPickupPosition]);
 
   useEffect(() => {
     if (!mapRef.current) return;
 
     const points: LatLngTuple[] = [
-      ...liveDrivers.map((driver) => [
-        driver.latitude as number,
-        driver.longitude as number,
-      ]),
+      ...liveDrivers.map(
+        (driver): LatLngTuple => [
+          driver.latitude as number,
+          driver.longitude as number,
+        ],
+      ),
     ];
 
-    if (selectedPickupPosition) points.push(selectedPickupPosition);
-    if (selectedDropoffPosition) points.push(selectedDropoffPosition);
+    if (selectedPickupPosition) {
+      points.push(selectedPickupPosition);
+    }
+
+    if (selectedDropoffPosition) {
+      points.push(selectedDropoffPosition);
+    }
 
     if (points.length === 0) return;
 
@@ -506,7 +521,10 @@ export default function DispatchPage() {
               {liveDrivers.map((driver) => (
                 <Marker
                   key={driver.id}
-                  position={[driver.latitude as number, driver.longitude as number]}
+                  position={[
+                    driver.latitude as number,
+                    driver.longitude as number,
+                  ] as LatLngTuple}
                   icon={makeDriverIcon(driver)}
                 >
                   <Popup>
