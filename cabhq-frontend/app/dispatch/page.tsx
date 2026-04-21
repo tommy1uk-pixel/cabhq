@@ -194,7 +194,9 @@ export default function DispatchPage() {
   const [driversError, setDriversError] = useState('');
   const [connected, setConnected] = useState(false);
   const [assigningKey, setAssigningKey] = useState<string | null>(null);
-  const [autoDispatchingId, setAutoDispatchingId] = useState<string | null>(null);
+  const [autoDispatchingId, setAutoDispatchingId] = useState<string | null>(
+    null,
+  );
   const [creatingBooking, setCreatingBooking] = useState(false);
   const [bookingError, setBookingError] = useState('');
   const [driverIconFactory, setDriverIconFactory] =
@@ -289,6 +291,23 @@ export default function DispatchPage() {
     [drivers],
   );
 
+  const selectedDriver = useMemo<Driver | null>(() => {
+    if (!selectedBooking?.driverId) return null;
+    return drivers.find((d) => d.id === selectedBooking.driverId) ?? null;
+  }, [selectedBooking, drivers]);
+
+  const selectedDriverPosition = useMemo<LatLngTuple | null>(() => {
+    if (
+      !selectedDriver ||
+      selectedDriver.latitude == null ||
+      selectedDriver.longitude == null
+    ) {
+      return null;
+    }
+
+    return [selectedDriver.latitude, selectedDriver.longitude] as LatLngTuple;
+  }, [selectedDriver]);
+
   const selectedPickupPosition = useMemo<LatLngTuple | null>(() => {
     if (
       selectedBooking?.pickupLatitude == null ||
@@ -314,22 +333,6 @@ export default function DispatchPage() {
       selectedBooking.dropoffLongitude,
     ] as LatLngTuple;
   }, [selectedBooking]);
-
-  const selectedDriver = useMemo<Driver | null>(() => {
-    if (!selectedBooking?.driverId) return null;
-    return drivers.find((d) => d.id === selectedBooking.driverId) ?? null;
-  }, [selectedBooking, drivers]);
-
-  const selectedDriverPosition = useMemo<LatLngTuple | null>(() => {
-    if (
-      !selectedDriver ||
-      selectedDriver.latitude == null ||
-      selectedDriver.longitude == null
-    ) {
-      return null;
-    }
-    return [selectedDriver.latitude, selectedDriver.longitude] as LatLngTuple;
-  }, [selectedDriver]);
 
   const mapCenter = useMemo<LatLngTuple>(() => {
     if (selectedPickupPosition) return selectedPickupPosition;
@@ -629,340 +632,356 @@ export default function DispatchPage() {
         <Card label="GPS Live" value={stats.liveGps} />
       </div>
 
-      <section className="mb-8 rounded-2xl border border-white/10 bg-gray-950 p-5">
-        <div className="mb-6 flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold">Add Job</h2>
-            <p className="mt-1 text-sm text-gray-400">
-              Create a booking directly from dispatch.
-            </p>
-          </div>
-        </div>
+      <div className="mb-8 grid gap-6 xl:grid-cols-2">
+        <section className="rounded-2xl border border-white/10 bg-gray-950 p-5 h-fit xl:h-[620px]">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-semibold">Live Driver Map</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                Real-time vehicle positions with booking markers and route lines
+              </p>
+            </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field
-            label="Customer name"
-            value={form.customerName}
-            onChange={(value) =>
-              setForm((prev) => ({ ...prev, customerName: value }))
-            }
-            placeholder="John Smith"
-          />
-
-          <Field
-            label="Customer phone"
-            value={form.customerPhone}
-            onChange={(value) =>
-              setForm((prev) => ({ ...prev, customerPhone: value }))
-            }
-            placeholder="07..."
-          />
-
-          <div className="md:col-span-2">
-            <AddressAutofillInput
-              label="Pickup address"
-              value={form.pickupAddress}
-              placeholder="Search pickup address"
-              autoComplete="off"
-              onChangeValue={(value) =>
-                setForm((prev) => ({
-                  ...prev,
-                  pickupAddress: value,
-                }))
-              }
-              onSelectAddress={(address: SelectedAddress) =>
-                setForm((prev) => ({
-                  ...prev,
-                  pickupAddress: address.label,
-                  pickupLatitude: address.lat,
-                  pickupLongitude: address.lng,
-                }))
-              }
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <AddressAutofillInput
-              label="Dropoff address"
-              value={form.dropoffAddress}
-              placeholder="Search dropoff address"
-              autoComplete="off"
-              onChangeValue={(value) =>
-                setForm((prev) => ({
-                  ...prev,
-                  dropoffAddress: value,
-                }))
-              }
-              onSelectAddress={(address: SelectedAddress) =>
-                setForm((prev) => ({
-                  ...prev,
-                  dropoffAddress: address.label,
-                  dropoffLatitude: address.lat,
-                  dropoffLongitude: address.lng,
-                }))
-              }
-            />
-          </div>
-
-          <DateTimeField
-            label="Pickup time"
-            value={form.pickupAt}
-            onChange={(value) =>
-              setForm((prev) => ({ ...prev, pickupAt: value }))
-            }
-          />
-
-          <NumberField
-            label="Passenger count"
-            value={form.passengerCount}
-            onChange={(value) =>
-              setForm((prev) => ({ ...prev, passengerCount: value }))
-            }
-          />
-
-          <Field
-            label="Quoted price"
-            value={form.quotedPrice}
-            onChange={(value) =>
-              setForm((prev) => ({ ...prev, quotedPrice: value }))
-            }
-            placeholder="12.50"
-          />
-
-          <div className="md:col-span-2">
-            <TextAreaField
-              label="Notes"
-              value={form.notes}
-              onChange={(value) =>
-                setForm((prev) => ({ ...prev, notes: value }))
-              }
-              placeholder="Booking notes, gate code, wheelchair, etc."
-            />
-          </div>
-        </div>
-
-        {bookingError ? (
-          <div className="mt-4 rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {bookingError}
-          </div>
-        ) : null}
-
-        <div className="mt-6 flex flex-wrap gap-3">
-          <button
-            onClick={() => void createBooking(false)}
-            disabled={creatingBooking}
-            className="rounded bg-cyan-700 px-4 py-2 text-sm font-medium hover:bg-cyan-600 disabled:opacity-50"
-          >
-            {creatingBooking ? 'Creating...' : 'Create Job'}
-          </button>
-
-          <button
-            onClick={() => void createBooking(true)}
-            disabled={creatingBooking}
-            className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium hover:bg-emerald-600 disabled:opacity-50"
-          >
-            {creatingBooking ? 'Creating...' : 'Create & Auto Dispatch'}
-          </button>
-        </div>
-      </section>
-
-      <section className="mb-8 rounded-2xl border border-white/10 bg-gray-950 p-5">
-        <div className="mb-4 flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold">Live Driver Map</h2>
-            <p className="mt-1 text-sm text-gray-400">
-              Real-time vehicle positions with booking markers and route lines
-            </p>
-          </div>
-
-          <button
-            onClick={() => void loadDrivers(true)}
-            className="rounded bg-cyan-700 px-4 py-2 text-sm font-medium hover:bg-cyan-600"
-          >
-            Refresh Drivers
-          </button>
-        </div>
-
-        {driversError ? (
-          <div className="mb-4 rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {driversError}
-          </div>
-        ) : null}
-
-        <div className="overflow-hidden rounded-2xl border border-white/10">
-          <div className="h-[420px] w-full bg-gray-900">
-            <MapContainer
-              center={mapCenter}
-              zoom={12}
-              scrollWheelZoom
-              className="h-full w-full"
-              ref={(map) => {
-                if (map) mapRef.current = map;
-              }}
+            <button
+              onClick={() => void loadDrivers(true)}
+              className="rounded bg-cyan-700 px-4 py-2 text-sm font-medium hover:bg-cyan-600"
             >
-              <TileLayer
-                attribution="&copy; OpenStreetMap contributors"
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
+              Refresh Drivers
+            </button>
+          </div>
 
-              {driverIconFactory &&
-                liveDrivers.map((driver) => (
+          {driversError ? (
+            <div className="mb-4 rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              {driversError}
+            </div>
+          ) : null}
+
+          <div className="overflow-hidden rounded-2xl border border-white/10">
+            <div className="h-[620px] w-full bg-gray-900 xl:h-[520px]">
+              <MapContainer
+                center={mapCenter}
+                zoom={12}
+                scrollWheelZoom
+                className="h-full w-full"
+                ref={(map) => {
+                  if (map) mapRef.current = map;
+                }}
+              >
+                <TileLayer
+                  attribution="&copy; OpenStreetMap contributors"
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+
+                {driverIconFactory &&
+                  liveDrivers.map((driver) => (
+                    <Marker
+                      key={driver.id}
+                      position={[
+                        driver.latitude as number,
+                        driver.longitude as number,
+                      ] as LatLngTuple}
+                      icon={driverIconFactory(driver)}
+                    >
+                      <Popup>
+                        <div className="min-w-[180px] text-black">
+                          <div className="font-bold">{getDriverName(driver)}</div>
+                          <div className="mt-1 text-sm">
+                            {(driver.status || 'UNKNOWN').replace(/_/g, ' ')}
+                          </div>
+                          <div className="mt-1 text-sm">
+                            {getVehicleLabel(driver.vehicle ?? null)}
+                          </div>
+                          <div className="mt-2 text-xs text-gray-600">
+                            GPS: {formatDateTime(driver.lastLocationAt)}
+                          </div>
+                          <div className="mt-1 text-xs text-gray-600">
+                            {driver.latitude}, {driver.longitude}
+                          </div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ))}
+
+                {driverIconFactory && selectedDriver && selectedDriverPosition ? (
                   <Marker
-                    key={driver.id}
-                    position={[
-                      driver.latitude as number,
-                      driver.longitude as number,
-                    ] as LatLngTuple}
-                    icon={driverIconFactory(driver)}
+                    position={selectedDriverPosition}
+                    icon={driverIconFactory(selectedDriver)}
                   >
                     <Popup>
                       <div className="min-w-[180px] text-black">
-                        <div className="font-bold">{getDriverName(driver)}</div>
-                        <div className="mt-1 text-sm">
-                          {(driver.status || 'UNKNOWN').replace(/_/g, ' ')}
+                        <div className="font-bold">
+                          Assigned Driver: {getDriverName(selectedDriver)}
                         </div>
                         <div className="mt-1 text-sm">
-                          {getVehicleLabel(driver.vehicle ?? null)}
+                          {(selectedDriver.status || 'UNKNOWN').replace(
+                            /_/g,
+                            ' ',
+                          )}
                         </div>
-                        <div className="mt-2 text-xs text-gray-600">
-                          GPS: {formatDateTime(driver.lastLocationAt)}
-                        </div>
-                        <div className="mt-1 text-xs text-gray-600">
-                          {driver.latitude}, {driver.longitude}
+                        <div className="mt-1 text-sm">
+                          {getVehicleLabel(selectedDriver.vehicle ?? null)}
                         </div>
                       </div>
                     </Popup>
                   </Marker>
-                ))}
+                ) : null}
 
-              {driverIconFactory && selectedDriver && selectedDriverPosition ? (
-                <Marker
-                  position={selectedDriverPosition}
-                  icon={driverIconFactory(selectedDriver)}
-                >
-                  <Popup>
-                    <div className="min-w-[180px] text-black">
-                      <div className="font-bold">
-                        Assigned Driver: {getDriverName(selectedDriver)}
+                {bookingIconFactory && selectedPickupPosition ? (
+                  <Marker
+                    position={selectedPickupPosition}
+                    icon={bookingIconFactory('#2563eb', 'P')}
+                  >
+                    <Popup>
+                      <div className="text-black">
+                        <div className="font-bold">Pickup</div>
+                        <div className="mt-1 text-sm">
+                          {selectedBooking
+                            ? getPickupLabel(selectedBooking)
+                            : '—'}
+                        </div>
                       </div>
-                      <div className="mt-1 text-sm">
-                        {(selectedDriver.status || 'UNKNOWN').replace(/_/g, ' ')}
-                      </div>
-                      <div className="mt-1 text-sm">
-                        {getVehicleLabel(selectedDriver.vehicle ?? null)}
-                      </div>
-                    </div>
-                  </Popup>
-                </Marker>
-              ) : null}
+                    </Popup>
+                  </Marker>
+                ) : null}
 
-              {bookingIconFactory && selectedPickupPosition ? (
-                <Marker
-                  position={selectedPickupPosition}
-                  icon={bookingIconFactory('#2563eb', 'P')}
-                >
-                  <Popup>
-                    <div className="text-black">
-                      <div className="font-bold">Pickup</div>
-                      <div className="mt-1 text-sm">
-                        {selectedBooking ? getPickupLabel(selectedBooking) : '—'}
+                {bookingIconFactory && selectedDropoffPosition ? (
+                  <Marker
+                    position={selectedDropoffPosition}
+                    icon={bookingIconFactory('#7c3aed', 'D')}
+                  >
+                    <Popup>
+                      <div className="text-black">
+                        <div className="font-bold">Dropoff</div>
+                        <div className="mt-1 text-sm">
+                          {selectedBooking
+                            ? getDropoffLabel(selectedBooking)
+                            : '—'}
+                        </div>
                       </div>
-                    </div>
-                  </Popup>
-                </Marker>
-              ) : null}
+                    </Popup>
+                  </Marker>
+                ) : null}
 
-              {bookingIconFactory && selectedDropoffPosition ? (
-                <Marker
-                  position={selectedDropoffPosition}
-                  icon={bookingIconFactory('#7c3aed', 'D')}
-                >
-                  <Popup>
-                    <div className="text-black">
-                      <div className="font-bold">Dropoff</div>
-                      <div className="mt-1 text-sm">
-                        {selectedBooking ? getDropoffLabel(selectedBooking) : '—'}
-                      </div>
-                    </div>
-                  </Popup>
-                </Marker>
-              ) : null}
+                {selectedDriverPosition && selectedPickupPosition ? (
+                  <Polyline
+                    positions={[selectedDriverPosition, selectedPickupPosition]}
+                    pathOptions={{
+                      color: '#22c55e',
+                      weight: 4,
+                      opacity: 0.85,
+                    }}
+                  />
+                ) : null}
 
-              {selectedDriverPosition && selectedPickupPosition ? (
-                <Polyline
-                  positions={[selectedDriverPosition, selectedPickupPosition]}
-                  pathOptions={{ color: '#22c55e', weight: 4, opacity: 0.85 }}
-                />
-              ) : null}
-
-              {selectedPickupPosition && selectedDropoffPosition ? (
-                <Polyline
-                  positions={[selectedPickupPosition, selectedDropoffPosition]}
-                  pathOptions={{ color: '#8b5cf6', weight: 4, opacity: 0.85 }}
-                />
-              ) : null}
-            </MapContainer>
+                {selectedPickupPosition && selectedDropoffPosition ? (
+                  <Polyline
+                    positions={[selectedPickupPosition, selectedDropoffPosition]}
+                    pathOptions={{
+                      color: '#8b5cf6',
+                      weight: 4,
+                      opacity: 0.85,
+                    }}
+                  />
+                ) : null}
+              </MapContainer>
+            </div>
           </div>
-        </div>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {driversLoading && drivers.length === 0 ? (
-            <div className="rounded border border-white/10 bg-black/30 p-4 text-sm text-gray-400">
-              Loading drivers...
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {driversLoading && drivers.length === 0 ? (
+              <div className="rounded border border-white/10 bg-black/30 p-4 text-sm text-gray-400">
+                Loading drivers...
+              </div>
+            ) : null}
+
+            {!driversLoading && drivers.length === 0 ? (
+              <div className="rounded border border-white/10 bg-black/30 p-4 text-sm text-gray-400">
+                No drivers found.
+              </div>
+            ) : null}
+
+            {drivers.slice(0, 4).map((driver) => (
+              <div
+                key={driver.id}
+                className="rounded-xl border border-white/10 bg-black/30 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-lg font-semibold">
+                      {getDriverName(driver)}
+                    </div>
+                    <div className="mt-1 text-sm text-gray-400">
+                      {getVehicleLabel(driver.vehicle ?? null)}
+                    </div>
+                  </div>
+
+                  <div className="rounded-full bg-cyan-900/50 px-3 py-1 text-xs font-semibold text-cyan-200">
+                    {(driver.status ||
+                      (driver.isAvailable ? 'AVAILABLE' : 'UNKNOWN')
+                    ).replace(/_/g, ' ')}
+                  </div>
+                </div>
+
+                <div className="mt-4 space-y-2 text-sm text-gray-200">
+                  <div>
+                    <span className="text-gray-500">Latitude:</span>{' '}
+                    {driver.latitude ?? '—'}
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Longitude:</span>{' '}
+                    {driver.longitude ?? '—'}
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Last GPS update:</span>{' '}
+                    {formatDateTime(driver.lastLocationAt)}
+                  </div>
+                  <div>
+                    <span className="text-gray-500">Duty:</span>{' '}
+                    {driver.isOnDuty ? 'On duty' : 'Off duty'}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-white/10 bg-gray-950 p-5 h-fit xl:h-[620px] overflow-y-auto">
+          <div className="mb-6 flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-semibold">Add Job</h2>
+              <p className="mt-1 text-sm text-gray-400">
+                Create a booking directly from dispatch.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field
+              label="Customer name"
+              value={form.customerName}
+              onChange={(value) =>
+                setForm((prev) => ({ ...prev, customerName: value }))
+              }
+              placeholder="John Smith"
+            />
+
+            <Field
+              label="Customer phone"
+              value={form.customerPhone}
+              onChange={(value) =>
+                setForm((prev) => ({ ...prev, customerPhone: value }))
+              }
+              placeholder="07..."
+            />
+
+            <div className="md:col-span-2">
+              <AddressAutofillInput
+                label="Pickup address"
+                value={form.pickupAddress}
+                placeholder="Search pickup address"
+                autoComplete="off"
+                onChangeValue={(value) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    pickupAddress: value,
+                  }))
+                }
+                onSelectAddress={(address: SelectedAddress) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    pickupAddress: address.label,
+                    pickupLatitude: address.lat,
+                    pickupLongitude: address.lng,
+                  }))
+                }
+              />
+            </div>
+
+            <div className="md:col-span-2">
+              <AddressAutofillInput
+                label="Dropoff address"
+                value={form.dropoffAddress}
+                placeholder="Search dropoff address"
+                autoComplete="off"
+                onChangeValue={(value) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    dropoffAddress: value,
+                  }))
+                }
+                onSelectAddress={(address: SelectedAddress) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    dropoffAddress: address.label,
+                    dropoffLatitude: address.lat,
+                    dropoffLongitude: address.lng,
+                  }))
+                }
+              />
+            </div>
+
+            <DateTimeField
+              label="Pickup time"
+              value={form.pickupAt}
+              onChange={(value) =>
+                setForm((prev) => ({ ...prev, pickupAt: value }))
+              }
+            />
+
+            <NumberField
+              label="Passenger count"
+              value={form.passengerCount}
+              onChange={(value) =>
+                setForm((prev) => ({ ...prev, passengerCount: value }))
+              }
+            />
+
+            <Field
+              label="Quoted price"
+              value={form.quotedPrice}
+              onChange={(value) =>
+                setForm((prev) => ({ ...prev, quotedPrice: value }))
+              }
+              placeholder="12.50"
+            />
+
+            <div className="md:col-span-2">
+              <TextAreaField
+                label="Notes"
+                value={form.notes}
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, notes: value }))
+                }
+                placeholder="Booking notes, gate code, wheelchair, etc."
+              />
+            </div>
+          </div>
+
+          {bookingError ? (
+            <div className="mt-4 rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+              {bookingError}
             </div>
           ) : null}
 
-          {!driversLoading && drivers.length === 0 ? (
-            <div className="rounded border border-white/10 bg-black/30 p-4 text-sm text-gray-400">
-              No drivers found.
-            </div>
-          ) : null}
-
-          {drivers.map((driver) => (
-            <div
-              key={driver.id}
-              className="rounded-xl border border-white/10 bg-black/30 p-4"
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button
+              onClick={() => void createBooking(false)}
+              disabled={creatingBooking}
+              className="rounded bg-cyan-700 px-4 py-2 text-sm font-medium hover:bg-cyan-600 disabled:opacity-50"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">
-                    {getDriverName(driver)}
-                  </div>
-                  <div className="mt-1 text-sm text-gray-400">
-                    {getVehicleLabel(driver.vehicle ?? null)}
-                  </div>
-                </div>
+              {creatingBooking ? 'Creating...' : 'Create Job'}
+            </button>
 
-                <div className="rounded-full bg-cyan-900/50 px-3 py-1 text-xs font-semibold text-cyan-200">
-                  {(driver.status || (driver.isAvailable ? 'AVAILABLE' : 'UNKNOWN')).replace(
-                    /_/g,
-                    ' ',
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-2 text-sm text-gray-200">
-                <div>
-                  <span className="text-gray-500">Latitude:</span>{' '}
-                  {driver.latitude ?? '—'}
-                </div>
-                <div>
-                  <span className="text-gray-500">Longitude:</span>{' '}
-                  {driver.longitude ?? '—'}
-                </div>
-                <div>
-                  <span className="text-gray-500">Last GPS update:</span>{' '}
-                  {formatDateTime(driver.lastLocationAt)}
-                </div>
-                <div>
-                  <span className="text-gray-500">Duty:</span>{' '}
-                  {driver.isOnDuty ? 'On duty' : 'Off duty'}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+            <button
+              onClick={() => void createBooking(true)}
+              disabled={creatingBooking}
+              className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium hover:bg-emerald-600 disabled:opacity-50"
+            >
+              {creatingBooking ? 'Creating...' : 'Create & Auto Dispatch'}
+            </button>
+          </div>
+        </section>
+      </div>
 
       <div className="mb-8">
         <h2 className="mb-2 text-xl">Bookings</h2>
@@ -990,7 +1009,8 @@ export default function DispatchPage() {
               ) : null}
 
               <div className="mt-2 text-sm">
-                Status: {b.status} | Driver: {b.driver ? getDriverName(b.driver) : 'None'}
+                Status: {b.status} | Driver:{' '}
+                {b.driver ? getDriverName(b.driver) : 'None'}
               </div>
 
               {b.suggestedDrivers?.length ? (
@@ -1012,8 +1032,11 @@ export default function DispatchPage() {
                               #{index + 1} {suggested.name}
                             </div>
                             <div className="mt-1 text-xs text-gray-400">
-                              {(suggested.status || 'UNKNOWN').replace(/_/g, ' ')} •{' '}
-                              {getVehicleLabel(suggested.vehicle ?? null)}
+                              {(suggested.status || 'UNKNOWN').replace(
+                                /_/g,
+                                ' ',
+                              )}{' '}
+                              • {getVehicleLabel(suggested.vehicle ?? null)}
                             </div>
                             <div className="mt-1 text-xs text-gray-400">
                               Score: {suggested.score ?? '—'} • Distance:{' '}
