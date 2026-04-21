@@ -185,7 +185,7 @@ function Card({ label, value }: { label: string; value: number }) {
 export default function DispatchPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
-  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
   const [timelineBooking, setTimelineBooking] = useState<Booking | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -289,6 +289,11 @@ export default function DispatchPage() {
     [drivers],
   );
 
+  const selectedBooking = useMemo(
+    () => bookings.find((b) => b.id === selectedBookingId) ?? null,
+    [bookings, selectedBookingId],
+  );
+
   const selectedPickupPosition = useMemo<LatLngTuple | null>(() => {
     if (
       selectedBooking?.pickupLatitude == null ||
@@ -371,9 +376,10 @@ export default function DispatchPage() {
 
     setBookings(nextBookings);
 
-    setSelectedBooking((prev) => {
-      if (!prev) return prev;
-      return nextBookings.find((b) => b.id === prev.id) ?? prev;
+    setSelectedBookingId((prev) => {
+      if (!prev && nextBookings.length > 0) return nextBookings[0].id;
+      if (prev && nextBookings.some((b) => b.id === prev)) return prev;
+      return nextBookings.length > 0 ? nextBookings[0].id : null;
     });
 
     setTimelineBooking((prev) => {
@@ -420,12 +426,8 @@ export default function DispatchPage() {
     const load = async () => {
       try {
         setLoading(true);
-        const loadedBookings = await loadBookings();
+        await loadBookings();
         await loadDrivers(true);
-
-        if (!selectedBooking && loadedBookings.length > 0) {
-          setSelectedBooking(loadedBookings[0]);
-        }
       } catch (error) {
         console.error(error);
       } finally {
@@ -434,7 +436,7 @@ export default function DispatchPage() {
     };
 
     void load();
-  }, [token, loadBookings, loadDrivers, selectedBooking]);
+  }, [token, loadBookings, loadDrivers]);
 
   useEffect(() => {
     if (!token) return;
@@ -455,44 +457,20 @@ export default function DispatchPage() {
     socket.on('connect', () => setConnected(true));
     socket.on('disconnect', () => setConnected(false));
 
-    socket.on('booking:created', (p) => {
-      setBookings((prev) => [p.booking, ...prev]);
+    socket.on('booking:created', () => {
+      void loadBookings();
     });
 
-    socket.on('booking:updated', (p) => {
-      setBookings((prev) =>
-        prev.map((b) => (b.id === p.booking.id ? p.booking : b)),
-      );
-      setSelectedBooking((prev) =>
-        prev?.id === p.booking.id ? p.booking : prev,
-      );
-      setTimelineBooking((prev) =>
-        prev?.id === p.booking.id ? p.booking : prev,
-      );
+    socket.on('booking:updated', () => {
+      void loadBookings();
     });
 
-    socket.on('booking:assigned', (p) => {
-      setBookings((prev) =>
-        prev.map((b) => (b.id === p.booking.id ? p.booking : b)),
-      );
-      setSelectedBooking((prev) =>
-        prev?.id === p.booking.id ? p.booking : prev,
-      );
-      setTimelineBooking((prev) =>
-        prev?.id === p.booking.id ? p.booking : prev,
-      );
+    socket.on('booking:assigned', () => {
+      void loadBookings();
     });
 
-    socket.on('booking:status_changed', (p) => {
-      setBookings((prev) =>
-        prev.map((b) => (b.id === p.booking.id ? p.booking : b)),
-      );
-      setSelectedBooking((prev) =>
-        prev?.id === p.booking.id ? p.booking : prev,
-      );
-      setTimelineBooking((prev) =>
-        prev?.id === p.booking.id ? p.booking : prev,
-      );
+    socket.on('booking:status_changed', () => {
+      void loadBookings();
     });
 
     socket.on('driver:updated', (p) => {
@@ -504,7 +482,7 @@ export default function DispatchPage() {
     });
 
     return () => closeSocket();
-  }, [token]);
+  }, [token, loadBookings]);
 
   const autoDispatch = async (id: string) => {
     try {
@@ -595,11 +573,8 @@ export default function DispatchPage() {
       }
 
       const createdBooking = data as Booking;
-      const loadedBookings = await loadBookings();
-      const freshBooking =
-        loadedBookings.find((b) => b.id === createdBooking.id) || createdBooking;
-
-      setSelectedBooking(freshBooking);
+      await loadBookings();
+      setSelectedBookingId(createdBooking.id);
       setForm(initialForm);
     } catch (err) {
       setBookingError(
@@ -640,14 +615,11 @@ export default function DispatchPage() {
       </div>
 
       <section className="mb-8 rounded-2xl border border-white/10 bg-gray-950 p-5">
-        <div className="mb-6 flex items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl font-semibold">Add Job</h2>
-            <p className="mt-1 text-sm text-gray-400">
-              Create a booking directly from dispatch. New jobs auto-focus on the
-              map.
-            </p>
-          </div>
+        <div className="mb-6">
+          <h2 className="text-xl font-semibold">Add Job</h2>
+          <p className="mt-1 text-sm text-gray-400">
+            Create a booking directly from dispatch. New jobs auto-focus on the map.
+          </p>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -877,67 +849,9 @@ export default function DispatchPage() {
             </MapContainer>
           </div>
         </div>
-
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {driversLoading && drivers.length === 0 ? (
-            <div className="rounded border border-white/10 bg-black/30 p-4 text-sm text-gray-400">
-              Loading drivers...
-            </div>
-          ) : null}
-
-          {!driversLoading && drivers.length === 0 ? (
-            <div className="rounded border border-white/10 bg-black/30 p-4 text-sm text-gray-400">
-              No drivers found.
-            </div>
-          ) : null}
-
-          {drivers.map((driver) => (
-            <div
-              key={driver.id}
-              className="rounded-xl border border-white/10 bg-black/30 p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-lg font-semibold">
-                    {getDriverName(driver)}
-                  </div>
-                  <div className="mt-1 text-sm text-gray-400">
-                    {getVehicleLabel(driver.vehicle ?? null)}
-                  </div>
-                </div>
-
-                <div className="rounded-full bg-cyan-900/50 px-3 py-1 text-xs font-semibold text-cyan-200">
-                  {(driver.status || (driver.isAvailable ? 'AVAILABLE' : 'UNKNOWN')).replace(
-                    /_/g,
-                    ' ',
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-2 text-sm text-gray-200">
-                <div>
-                  <span className="text-gray-500">Latitude:</span>{' '}
-                  {driver.latitude ?? '—'}
-                </div>
-                <div>
-                  <span className="text-gray-500">Longitude:</span>{' '}
-                  {driver.longitude ?? '—'}
-                </div>
-                <div>
-                  <span className="text-gray-500">Last GPS update:</span>{' '}
-                  {formatDateTime(driver.lastLocationAt)}
-                </div>
-                <div>
-                  <span className="text-gray-500">Duty:</span>{' '}
-                  {driver.isOnDuty ? 'On duty' : 'Off duty'}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
       </section>
 
-      <div className="mb-8">
+      <section className="mb-8">
         <h2 className="mb-2 text-xl">Bookings</h2>
 
         {loading ? (
@@ -946,9 +860,9 @@ export default function DispatchPage() {
           bookings.map((b) => (
             <div
               key={b.id}
-              onClick={() => setSelectedBooking(b)}
+              onClick={() => setSelectedBookingId(b.id)}
               className={`mb-3 cursor-pointer rounded border p-4 transition ${
-                selectedBooking?.id === b.id
+                selectedBookingId === b.id
                   ? 'border-cyan-500 bg-cyan-500/5'
                   : 'border-white/10 hover:border-cyan-700/50'
               }`}
@@ -1040,7 +954,6 @@ export default function DispatchPage() {
 
                 <button
                   onClick={async () => {
-                    setSelectedBooking(b);
                     setTimelineBooking(b);
                     await loadTimeline(b.id);
                   }}
@@ -1052,10 +965,10 @@ export default function DispatchPage() {
             </div>
           ))
         )}
-      </div>
+      </section>
 
       {selectedBooking ? (
-        <div className="mb-8 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 p-4">
+        <section className="mb-8 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 p-4">
           <div className="text-lg font-semibold text-cyan-200">
             Selected Booking: {selectedBooking.reference}
           </div>
@@ -1079,10 +992,10 @@ export default function DispatchPage() {
               ? `${selectedBooking.dropoffLatitude}, ${selectedBooking.dropoffLongitude}`
               : 'Not available'}
           </div>
-        </div>
+        </section>
       ) : null}
 
-      <div>
+      <section>
         <h2 className="mb-2 text-xl">Drivers</h2>
 
         {drivers.map((d) => (
@@ -1096,7 +1009,7 @@ export default function DispatchPage() {
             ) : null}
           </div>
         ))}
-      </div>
+      </section>
 
       {timelineBooking ? (
         <div className="fixed inset-0 z-50 bg-black/80 p-10">
