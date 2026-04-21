@@ -1,0 +1,688 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import AdminShell from '@/components/AdminShell';
+
+type InvoiceStatus =
+  | 'DRAFT'
+  | 'SENT'
+  | 'PART_PAID'
+  | 'PAID'
+  | 'OVERDUE'
+  | 'VOID';
+
+type Invoice = {
+  id: string;
+  invoiceNumber: string;
+  accountName: string;
+  status: InvoiceStatus;
+  issueDate: string;
+  dueDate: string;
+  tripCount: number;
+  subtotal: number;
+  vat: number;
+  total: number;
+  paidAmount: number;
+  balanceDue: number;
+  notes?: string;
+};
+
+type InvoiceFormState = {
+  accountName: string;
+  issueDate: string;
+  dueDate: string;
+  tripCount: string;
+  subtotal: string;
+  vat: string;
+  notes: string;
+};
+
+const today = new Date().toISOString().slice(0, 10);
+
+const initialInvoices: Invoice[] = [
+  {
+    id: '1',
+    invoiceNumber: 'INV-2025-001',
+    accountName: 'Northside Medical Centre',
+    status: 'SENT',
+    issueDate: '2025-04-01',
+    dueDate: '2025-04-30',
+    tripCount: 44,
+    subtotal: 1800,
+    vat: 360,
+    total: 2160,
+    paidAmount: 0,
+    balanceDue: 2160,
+    notes: 'Monthly medical transport invoice',
+  },
+  {
+    id: '2',
+    invoiceNumber: 'INV-2025-002',
+    accountName: 'Greenfield School Transport',
+    status: 'PART_PAID',
+    issueDate: '2025-04-01',
+    dueDate: '2025-04-30',
+    tripCount: 102,
+    subtotal: 4075,
+    vat: 815,
+    total: 4890,
+    paidAmount: 2000,
+    balanceDue: 2890,
+    notes: 'School run contract billing',
+  },
+  {
+    id: '3',
+    invoiceNumber: 'INV-2025-003',
+    accountName: 'City Stay Hotel',
+    status: 'OVERDUE',
+    issueDate: '2025-03-01',
+    dueDate: '2025-03-31',
+    tripCount: 21,
+    subtotal: 995.83,
+    vat: 199.17,
+    total: 1195,
+    paidAmount: 0,
+    balanceDue: 1195,
+    notes: 'Guest transport account',
+  },
+];
+
+const initialForm: InvoiceFormState = {
+  accountName: '',
+  issueDate: today,
+  dueDate: today,
+  tripCount: '1',
+  subtotal: '0',
+  vat: '0',
+  notes: '',
+};
+
+function formatCurrency(value: number) {
+  return `£${value.toFixed(2)}`;
+}
+
+function statusClasses(status: InvoiceStatus) {
+  if (status === 'PAID') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  }
+  if (status === 'PART_PAID') {
+    return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
+  }
+  if (status === 'SENT') {
+    return 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300';
+  }
+  if (status === 'OVERDUE') {
+    return 'border-red-500/30 bg-red-500/10 text-red-300';
+  }
+  if (status === 'VOID') {
+    return 'border-slate-500/30 bg-slate-500/10 text-slate-300';
+  }
+
+  return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+}
+
+export default function InvoicesPage() {
+  const [invoices, setInvoices] = useState<Invoice[]>(initialInvoices);
+  const [search, setSearch] = useState('');
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(
+    initialInvoices[0]?.id ?? null,
+  );
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
+  const [form, setForm] = useState<InvoiceFormState>(initialForm);
+
+  const filteredInvoices = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return invoices;
+
+    return invoices.filter((invoice) =>
+      [
+        invoice.invoiceNumber,
+        invoice.accountName,
+        invoice.status,
+        invoice.issueDate,
+        invoice.dueDate,
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [invoices, search]);
+
+  const selectedInvoice = useMemo(
+    () => invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? null,
+    [invoices, selectedInvoiceId],
+  );
+
+  const stats = useMemo(() => {
+    const total = invoices.reduce((sum, invoice) => sum + invoice.total, 0);
+    const paid = invoices.reduce((sum, invoice) => sum + invoice.paidAmount, 0);
+    const outstanding = invoices.reduce(
+      (sum, invoice) => sum + invoice.balanceDue,
+      0,
+    );
+    const overdue = invoices
+      .filter((invoice) => invoice.status === 'OVERDUE')
+      .reduce((sum, invoice) => sum + invoice.balanceDue, 0);
+
+    return {
+      totalInvoices: invoices.length,
+      total,
+      paid,
+      outstanding,
+      overdue,
+    };
+  }, [invoices]);
+
+  function setField<K extends keyof InvoiceFormState>(
+    key: K,
+    value: InvoiceFormState[K],
+  ) {
+    setForm((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  }
+
+  function resetForm() {
+    setForm(initialForm);
+    setEditingInvoiceId(null);
+  }
+
+  function generateInvoiceNumber() {
+    const next = invoices.length + 1;
+    return `INV-2025-${String(next).padStart(3, '0')}`;
+  }
+
+  function submitInvoice(e: React.FormEvent) {
+    e.preventDefault();
+
+    const subtotal = Number(form.subtotal || 0);
+    const vat = Number(form.vat || 0);
+    const total = subtotal + vat;
+
+    const payload: Invoice = {
+      id: editingInvoiceId ?? crypto.randomUUID(),
+      invoiceNumber:
+        editingInvoiceId != null
+          ? invoices.find((i) => i.id === editingInvoiceId)?.invoiceNumber ??
+            generateInvoiceNumber()
+          : generateInvoiceNumber(),
+      accountName: form.accountName.trim(),
+      status:
+        editingInvoiceId != null
+          ? invoices.find((i) => i.id === editingInvoiceId)?.status ?? 'DRAFT'
+          : 'DRAFT',
+      issueDate: form.issueDate,
+      dueDate: form.dueDate,
+      tripCount: Number(form.tripCount || 0),
+      subtotal,
+      vat,
+      total,
+      paidAmount:
+        editingInvoiceId != null
+          ? invoices.find((i) => i.id === editingInvoiceId)?.paidAmount ?? 0
+          : 0,
+      balanceDue:
+        editingInvoiceId != null
+          ? Math.max(
+              total -
+                (invoices.find((i) => i.id === editingInvoiceId)?.paidAmount ?? 0),
+              0,
+            )
+          : total,
+      notes: form.notes.trim(),
+    };
+
+    if (!payload.accountName) return;
+
+    setInvoices((prev) => {
+      const exists = prev.some((i) => i.id === payload.id);
+      if (exists) {
+        return prev.map((i) => (i.id === payload.id ? payload : i));
+      }
+      return [payload, ...prev];
+    });
+
+    setSelectedInvoiceId(payload.id);
+    resetForm();
+  }
+
+  function startEdit(invoice: Invoice) {
+    setEditingInvoiceId(invoice.id);
+    setSelectedInvoiceId(invoice.id);
+    setForm({
+      accountName: invoice.accountName,
+      issueDate: invoice.issueDate,
+      dueDate: invoice.dueDate,
+      tripCount: String(invoice.tripCount),
+      subtotal: String(invoice.subtotal),
+      vat: String(invoice.vat),
+      notes: invoice.notes ?? '',
+    });
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function deleteInvoice(invoiceId: string) {
+    const confirmed = window.confirm('Delete this invoice?');
+    if (!confirmed) return;
+
+    setInvoices((prev) => prev.filter((i) => i.id !== invoiceId));
+
+    if (selectedInvoiceId === invoiceId) {
+      const remaining = invoices.filter((i) => i.id !== invoiceId);
+      setSelectedInvoiceId(remaining[0]?.id ?? null);
+    }
+
+    if (editingInvoiceId === invoiceId) {
+      resetForm();
+    }
+  }
+
+  function updateInvoiceStatus(invoiceId: string, status: InvoiceStatus) {
+    setInvoices((prev) =>
+      prev.map((invoice) => {
+        if (invoice.id !== invoiceId) return invoice;
+
+        return {
+          ...invoice,
+          status,
+          balanceDue:
+            status === 'PAID' ? 0 : invoice.total - invoice.paidAmount,
+          paidAmount:
+            status === 'PAID' ? invoice.total : invoice.paidAmount,
+        };
+      }),
+    );
+  }
+
+  return (
+    <AdminShell
+      title="Invoices"
+      subtitle="Create, send and track account invoices, balances and payment status."
+    >
+      <div className="space-y-6">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <StatCard label="Invoices" value={stats.totalInvoices} hint="All records" />
+          <StatCard label="Billed" value={formatCurrency(stats.total)} hint="Invoice value" />
+          <StatCard label="Paid" value={formatCurrency(stats.paid)} hint="Collected so far" />
+          <StatCard
+            label="Outstanding"
+            value={formatCurrency(stats.outstanding)}
+            hint="Still due"
+          />
+          <StatCard label="Overdue" value={formatCurrency(stats.overdue)} hint="Past due date" />
+        </section>
+
+        <div className="grid gap-6 xl:grid-cols-[430px_1fr]">
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold">
+                  {editingInvoiceId ? 'Edit Invoice' : 'Create Invoice'}
+                </h2>
+                <p className="mt-1 text-sm text-white/60">
+                  Build monthly account invoices and billing runs.
+                </p>
+              </div>
+
+              {editingInvoiceId ? (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white/80 transition hover:bg-white/10"
+                >
+                  Cancel edit
+                </button>
+              ) : null}
+            </div>
+
+            <form onSubmit={submitInvoice} className="space-y-5">
+              <Field
+                label="Account Name *"
+                input={
+                  <input
+                    value={form.accountName}
+                    onChange={(e) => setField('accountName', e.target.value)}
+                    placeholder="Northside Medical Centre"
+                    required
+                    className={inputClassName}
+                  />
+                }
+              />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field
+                  label="Issue Date"
+                  input={
+                    <input
+                      type="date"
+                      value={form.issueDate}
+                      onChange={(e) => setField('issueDate', e.target.value)}
+                      className={inputClassName}
+                    />
+                  }
+                />
+
+                <Field
+                  label="Due Date"
+                  input={
+                    <input
+                      type="date"
+                      value={form.dueDate}
+                      onChange={(e) => setField('dueDate', e.target.value)}
+                      className={inputClassName}
+                    />
+                  }
+                />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <Field
+                  label="Trip Count"
+                  input={
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.tripCount}
+                      onChange={(e) => setField('tripCount', e.target.value)}
+                      className={inputClassName}
+                    />
+                  }
+                />
+
+                <Field
+                  label="Subtotal"
+                  input={
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.subtotal}
+                      onChange={(e) => setField('subtotal', e.target.value)}
+                      className={inputClassName}
+                    />
+                  }
+                />
+
+                <Field
+                  label="VAT"
+                  input={
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.vat}
+                      onChange={(e) => setField('vat', e.target.value)}
+                      className={inputClassName}
+                    />
+                  }
+                />
+              </div>
+
+              <Field
+                label="Notes"
+                input={
+                  <textarea
+                    rows={4}
+                    value={form.notes}
+                    onChange={(e) => setField('notes', e.target.value)}
+                    placeholder="Invoice notes, trip period, PO number..."
+                    className={`${inputClassName} resize-none`}
+                  />
+                }
+              />
+
+              <button
+                type="submit"
+                className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500"
+              >
+                {editingInvoiceId ? 'Save Invoice Changes' : 'Create Invoice'}
+              </button>
+            </form>
+          </section>
+
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+            <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-2xl font-bold">Invoices</h2>
+                <p className="mt-1 text-sm text-white/60">
+                  Review invoice status, balances, payment state and account totals.
+                </p>
+              </div>
+
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search invoices..."
+                className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50 lg:w-[300px]"
+              />
+            </div>
+
+            {filteredInvoices.length === 0 ? (
+              <div className="rounded-2xl bg-[#0b1728] p-6 text-white/60">
+                No invoices found.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {filteredInvoices.map((invoice) => {
+                  const isSelected = selectedInvoiceId === invoice.id;
+
+                  return (
+                    <div
+                      key={invoice.id}
+                      className={`rounded-2xl border p-5 transition ${
+                        isSelected
+                          ? 'border-cyan-500/50 bg-[#0c1b2c]'
+                          : 'border-white/10 bg-[#0b1728]'
+                      }`}
+                    >
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div
+                          className="min-w-0 cursor-pointer"
+                          onClick={() =>
+                            setSelectedInvoiceId((current) =>
+                              current === invoice.id ? null : invoice.id,
+                            )
+                          }
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-xl font-bold">
+                              {invoice.invoiceNumber}
+                            </h3>
+
+                            <span
+                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClasses(
+                                invoice.status,
+                              )}`}
+                            >
+                              {invoice.status.replace('_', ' ')}
+                            </span>
+                          </div>
+
+                          <p className="mt-2 text-sm text-white/70">
+                            {invoice.accountName}
+                          </p>
+
+                          <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/50">
+                            <span>Issued: {invoice.issueDate}</span>
+                            <span>Due: {invoice.dueDate}</span>
+                            <span>Trips: {invoice.tripCount}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startEdit(invoice)}
+                            className="rounded-xl bg-cyan-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => deleteInvoice(invoice.id)}
+                            className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+
+                      {isSelected ? (
+                        <div className="mt-5 grid gap-4 border-t border-white/10 pt-5 xl:grid-cols-3">
+                          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                            <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                              Totals
+                            </h4>
+
+                            <DetailRow
+                              label="Subtotal"
+                              value={formatCurrency(invoice.subtotal)}
+                            />
+                            <DetailRow label="VAT" value={formatCurrency(invoice.vat)} />
+                            <DetailRow label="Total" value={formatCurrency(invoice.total)} />
+                            <DetailRow
+                              label="Paid"
+                              value={formatCurrency(invoice.paidAmount)}
+                            />
+                            <DetailRow
+                              label="Balance Due"
+                              value={formatCurrency(invoice.balanceDue)}
+                            />
+                          </div>
+
+                          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                            <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                              Details
+                            </h4>
+
+                            <DetailRow label="Account" value={invoice.accountName} />
+                            <DetailRow label="Issue Date" value={invoice.issueDate} />
+                            <DetailRow label="Due Date" value={invoice.dueDate} />
+                            <DetailRow
+                              label="Trip Count"
+                              value={String(invoice.tripCount)}
+                            />
+                            <DetailRow label="Status" value={invoice.status} />
+                          </div>
+
+                          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                            <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                              Actions
+                            </h4>
+
+                            <div className="space-y-2">
+                              <button
+                                type="button"
+                                onClick={() => updateInvoiceStatus(invoice.id, 'SENT')}
+                                className="w-full rounded-xl border border-white/10 px-4 py-2 text-sm text-white transition hover:bg-white/10"
+                              >
+                                Mark Sent
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateInvoiceStatus(invoice.id, 'PART_PAID')
+                                }
+                                className="w-full rounded-xl border border-white/10 px-4 py-2 text-sm text-white transition hover:bg-white/10"
+                              >
+                                Mark Part Paid
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => updateInvoiceStatus(invoice.id, 'PAID')}
+                                className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500"
+                              >
+                                Mark Paid
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  updateInvoiceStatus(invoice.id, 'OVERDUE')
+                                }
+                                className="w-full rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-500"
+                              >
+                                Mark Overdue
+                              </button>
+                            </div>
+                          </div>
+
+                          {invoice.notes ? (
+                            <div className="xl:col-span-3 rounded-2xl border border-white/10 bg-black/20 p-4">
+                              <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-white/70">
+                                Notes
+                              </h4>
+                              <p className="text-sm text-white/70">{invoice.notes}</p>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
+      </div>
+    </AdminShell>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string | number;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+      <p className="text-sm font-medium text-white/60">{label}</p>
+      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
+      <p className="mt-2 text-xs text-white/45">{hint}</p>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  input,
+}: {
+  label: string;
+  input: React.ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-sm font-medium text-white/75">{label}</span>
+      {input}
+    </label>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-white/5 py-2 last:border-b-0">
+      <span className="text-sm text-white/50">{label}</span>
+      <span className="max-w-[60%] text-right text-sm text-white/85">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+const inputClassName =
+  'w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50';
