@@ -185,6 +185,7 @@ function VehiclesPageContent() {
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
 
   const [form, setForm] = useState<VehicleFormState>(initialVehicleForm);
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
@@ -214,6 +215,26 @@ function VehiclesPageContent() {
     () => vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? null,
     [vehicles, selectedVehicleId],
   );
+
+  const filteredVehicles = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return vehicles;
+
+    return vehicles.filter((vehicle) =>
+      [
+        vehicle.reg,
+        vehicle.make,
+        vehicle.model,
+        vehicle.colour,
+        vehicle.status,
+        vehicle.plateNumber,
+        vehicle.vin,
+        vehicle.driver?.name,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q)),
+    );
+  }, [vehicles, search]);
 
   const clearVehicles = useMemo(
     () => vehicles.filter((vehicle) => vehicle.dispatch?.assignable !== false),
@@ -666,15 +687,59 @@ function VehiclesPageContent() {
       subtitle="Fleet management, compliance tracking and document control"
     >
       <div className="space-y-6">
+        <section className="overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(6,182,212,0.10),transparent_30%),linear-gradient(135deg,#081120_0%,#0c1527_55%,#07101c_100%)] p-6 md:p-8">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl">
+              <div className="inline-flex rounded-full border border-cyan-500/25 bg-cyan-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+                CabHQ Fleet Management
+              </div>
+
+              <h1 className="mt-5 text-3xl font-black tracking-tight text-white md:text-5xl">
+                Manage fleet records and compliance
+              </h1>
+
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+                Control vehicle status, assignments, compliance dates and
+                supporting documents from one clean fleet workspace.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white/70">
+                Alerts:{' '}
+                <span className="font-semibold text-white">
+                  {dashboard?.alerts.total ?? 0}
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <StatCard
             label="Total Vehicles"
             value={dashboard?.totalVehicles ?? 0}
             hint="Fleet records"
+            tone="slate"
           />
-          <StatCard label="Clear" value={clearVehicles.length} hint="Dispatch ready" />
-          <StatCard label="Expiring" value={expiringVehicles.length} hint="Attention soon" />
-          <StatCard label="Blocked" value={blockedVehicles.length} hint="Cannot be dispatched" />
+          <StatCard
+            label="Clear"
+            value={clearVehicles.length}
+            hint="Dispatch ready"
+            tone="emerald"
+          />
+          <StatCard
+            label="Expiring"
+            value={expiringVehicles.length}
+            hint="Attention soon"
+            tone="amber"
+          />
+          <StatCard
+            label="Blocked"
+            value={blockedVehicles.length}
+            hint="Cannot be dispatched"
+            tone="red"
+          />
           <StatCard
             label="Documents"
             value={vehicles.reduce(
@@ -682,11 +747,12 @@ function VehiclesPageContent() {
               0,
             )}
             hint="Uploaded compliance files"
+            tone="violet"
           />
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[430px_1fr]">
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-2xl font-bold">
@@ -928,7 +994,7 @@ function VehiclesPageContent() {
               <button
                 type="submit"
                 disabled={saving}
-                className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-semibold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {saving
                   ? editingVehicleId
@@ -941,33 +1007,34 @@ function VehiclesPageContent() {
             </form>
           </section>
 
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-            <div className="mb-5 flex items-center justify-between gap-3">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
+            <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-2xl font-bold">Fleet</h2>
                 <p className="mt-1 text-sm text-white/60">
                   Vehicle records, status controls, driver assignments and compliance.
                 </p>
               </div>
-              <div className="rounded-xl border border-white/10 bg-[#0b1728] px-3 py-2 text-sm text-white/70">
-                Alerts:{' '}
-                <span className="font-semibold text-white">
-                  {dashboard?.alerts.total ?? 0}
-                </span>
-              </div>
+
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search reg, make, model, driver..."
+                className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50 sm:w-[280px]"
+              />
             </div>
 
             {loading ? (
               <div className="rounded-2xl bg-[#0b1728] p-6 text-white/70">
                 Loading fleet...
               </div>
-            ) : vehicles.length === 0 ? (
+            ) : filteredVehicles.length === 0 ? (
               <div className="rounded-2xl bg-[#0b1728] p-6 text-white/70">
-                No vehicles added yet.
+                No vehicles found.
               </div>
             ) : (
               <div className="space-y-4">
-                {vehicles.map((vehicle) => {
+                {filteredVehicles.map((vehicle) => {
                   const documentForm = getDocumentForm(vehicle.id);
                   const isSelected = selectedVehicleId === vehicle.id;
                   const blocked = vehicle.dispatch?.assignable === false;
@@ -1285,7 +1352,7 @@ function VehiclesPageContent() {
                                   type="button"
                                   onClick={() => uploadVehicleDocument(vehicle.id)}
                                   disabled={uploadingVehicleId === vehicle.id}
-                                  className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                  className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-semibold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                   {uploadingVehicleId === vehicle.id
                                     ? 'Uploading...'
@@ -1395,7 +1462,7 @@ function VehiclesPageContent() {
         </div>
 
         {selectedVehicle ? (
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-2xl font-bold">
@@ -1441,15 +1508,25 @@ function StatCard({
   label,
   value,
   hint,
+  tone,
 }: {
   label: string;
   value: number;
   hint: string;
+  tone: 'slate' | 'emerald' | 'amber' | 'red' | 'violet';
 }) {
+  const toneMap = {
+    slate: 'from-slate-500/10 to-transparent border-white/10',
+    emerald: 'from-emerald-500/10 to-transparent border-emerald-500/20',
+    amber: 'from-amber-500/10 to-transparent border-amber-500/20',
+    red: 'from-red-500/10 to-transparent border-red-500/20',
+    violet: 'from-violet-500/10 to-transparent border-violet-500/20',
+  };
+
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+    <div className={`rounded-3xl border bg-gradient-to-br ${toneMap[tone]} p-5`}>
       <p className="text-sm font-medium text-white/60">{label}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
+      <p className="mt-3 text-3xl font-black text-white">{value}</p>
       <p className="mt-2 text-xs text-white/45">{hint}</p>
     </div>
   );
