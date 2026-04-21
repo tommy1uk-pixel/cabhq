@@ -101,19 +101,27 @@ function formatCurrency(value: number) {
   return `£${value.toFixed(2)}`;
 }
 
+function prettifyEnum(value: string) {
+  return value.replace(/_/g, ' ');
+}
+
 function statusClasses(status: InvoiceStatus) {
   if (status === 'PAID') {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   }
+
   if (status === 'PART_PAID') {
     return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
   }
+
   if (status === 'SENT') {
     return 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300';
   }
+
   if (status === 'OVERDUE') {
     return 'border-red-500/30 bg-red-500/10 text-red-300';
   }
+
   if (status === 'VOID') {
     return 'border-slate-500/30 bg-slate-500/10 text-slate-300';
   }
@@ -200,45 +208,37 @@ export default function InvoicesPage() {
     const vat = Number(form.vat || 0);
     const total = subtotal + vat;
 
+    const existing = editingInvoiceId
+      ? invoices.find((invoice) => invoice.id === editingInvoiceId)
+      : null;
+
+    const paidAmount = existing?.paidAmount ?? 0;
+    const balanceDue = Math.max(total - paidAmount, 0);
+
     const payload: Invoice = {
       id: editingInvoiceId ?? crypto.randomUUID(),
-      invoiceNumber:
-        editingInvoiceId != null
-          ? invoices.find((i) => i.id === editingInvoiceId)?.invoiceNumber ??
-            generateInvoiceNumber()
-          : generateInvoiceNumber(),
+      invoiceNumber: existing?.invoiceNumber ?? generateInvoiceNumber(),
       accountName: form.accountName.trim(),
-      status:
-        editingInvoiceId != null
-          ? invoices.find((i) => i.id === editingInvoiceId)?.status ?? 'DRAFT'
-          : 'DRAFT',
+      status: existing?.status ?? 'DRAFT',
       issueDate: form.issueDate,
       dueDate: form.dueDate,
       tripCount: Number(form.tripCount || 0),
       subtotal,
       vat,
       total,
-      paidAmount:
-        editingInvoiceId != null
-          ? invoices.find((i) => i.id === editingInvoiceId)?.paidAmount ?? 0
-          : 0,
-      balanceDue:
-        editingInvoiceId != null
-          ? Math.max(
-              total -
-                (invoices.find((i) => i.id === editingInvoiceId)?.paidAmount ?? 0),
-              0,
-            )
-          : total,
+      paidAmount,
+      balanceDue,
       notes: form.notes.trim(),
     };
 
     if (!payload.accountName) return;
 
     setInvoices((prev) => {
-      const exists = prev.some((i) => i.id === payload.id);
+      const exists = prev.some((invoice) => invoice.id === payload.id);
       if (exists) {
-        return prev.map((i) => (i.id === payload.id ? payload : i));
+        return prev.map((invoice) =>
+          invoice.id === payload.id ? payload : invoice,
+        );
       }
       return [payload, ...prev];
     });
@@ -267,10 +267,10 @@ export default function InvoicesPage() {
     const confirmed = window.confirm('Delete this invoice?');
     if (!confirmed) return;
 
-    setInvoices((prev) => prev.filter((i) => i.id !== invoiceId));
+    const remaining = invoices.filter((invoice) => invoice.id !== invoiceId);
+    setInvoices(remaining);
 
     if (selectedInvoiceId === invoiceId) {
-      const remaining = invoices.filter((i) => i.id !== invoiceId);
       setSelectedInvoiceId(remaining[0]?.id ?? null);
     }
 
@@ -284,17 +284,27 @@ export default function InvoicesPage() {
       prev.map((invoice) => {
         if (invoice.id !== invoiceId) return invoice;
 
+        if (status === 'PAID') {
+          return {
+            ...invoice,
+            status,
+            paidAmount: invoice.total,
+            balanceDue: 0,
+          };
+        }
+
         return {
           ...invoice,
           status,
-          balanceDue:
-            status === 'PAID' ? 0 : invoice.total - invoice.paidAmount,
-          paidAmount:
-            status === 'PAID' ? invoice.total : invoice.paidAmount,
+          balanceDue: Math.max(invoice.total - invoice.paidAmount, 0),
         };
       }),
     );
   }
+
+  const liveSubtotal = Number(form.subtotal || 0);
+  const liveVat = Number(form.vat || 0);
+  const liveTotal = liveSubtotal + liveVat;
 
   return (
     <AdminShell
@@ -420,6 +430,14 @@ export default function InvoicesPage() {
                 />
               </div>
 
+              <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                <div className="grid gap-3 md:grid-cols-3">
+                  <QuickValue label="Subtotal" value={formatCurrency(liveSubtotal)} />
+                  <QuickValue label="VAT" value={formatCurrency(liveVat)} />
+                  <QuickValue label="Total" value={formatCurrency(liveTotal)} />
+                </div>
+              </div>
+
               <Field
                 label="Notes"
                 input={
@@ -478,8 +496,9 @@ export default function InvoicesPage() {
                       }`}
                     >
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div
-                          className="min-w-0 cursor-pointer"
+                        <button
+                          type="button"
+                          className="min-w-0 text-left"
                           onClick={() =>
                             setSelectedInvoiceId((current) =>
                               current === invoice.id ? null : invoice.id,
@@ -496,7 +515,7 @@ export default function InvoicesPage() {
                                 invoice.status,
                               )}`}
                             >
-                              {invoice.status.replace('_', ' ')}
+                              {prettifyEnum(invoice.status)}
                             </span>
                           </div>
 
@@ -509,7 +528,7 @@ export default function InvoicesPage() {
                             <span>Due: {invoice.dueDate}</span>
                             <span>Trips: {invoice.tripCount}</span>
                           </div>
-                        </div>
+                        </button>
 
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -565,7 +584,7 @@ export default function InvoicesPage() {
                               label="Trip Count"
                               value={String(invoice.tripCount)}
                             />
-                            <DetailRow label="Status" value={invoice.status} />
+                            <DetailRow label="Status" value={prettifyEnum(invoice.status)} />
                           </div>
 
                           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -648,6 +667,21 @@ function StatCard({
       <p className="text-sm font-medium text-white/60">{label}</p>
       <p className="mt-3 text-3xl font-bold text-white">{value}</p>
       <p className="mt-2 text-xs text-white/45">{hint}</p>
+    </div>
+  );
+}
+
+function QuickValue({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+      <p className="text-xs uppercase tracking-wide text-white/45">{label}</p>
+      <p className="mt-2 text-sm font-semibold text-white">{value}</p>
     </div>
   );
 }

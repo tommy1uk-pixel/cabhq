@@ -103,32 +103,9 @@ function formatDateTime(value?: string | null) {
   });
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-
-  return date.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
 function formatCurrency(value?: number | null) {
   if (value == null || Number.isNaN(value)) return '£0.00';
   return `£${value.toFixed(2)}`;
-}
-
-function formatMinutes(value?: number | null) {
-  if (value == null || !Number.isFinite(value)) return '—';
-
-  const hours = Math.floor(value / 60);
-  const minutes = value % 60;
-
-  if (hours <= 0) return `${minutes}m`;
-  if (minutes <= 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
 }
 
 function isCompleted(status?: string) {
@@ -235,12 +212,9 @@ export default function ReportsPage() {
   }
 
   const filteredBookings = useMemo(() => {
-    return bookings.filter((booking) => {
-      return inRange(
-        getPickupTimeLabel(booking) || booking.createdAt,
-        range,
-      );
-    });
+    return bookings.filter((booking) =>
+      inRange(getPickupTimeLabel(booking) || booking.createdAt, range),
+    );
   }, [bookings, range]);
 
   const totals = useMemo(() => {
@@ -260,8 +234,7 @@ export default function ReportsPage() {
       0,
     );
 
-    const avgFare =
-      completed.length > 0 ? revenue / completed.length : 0;
+    const avgFare = completed.length > 0 ? revenue / completed.length : 0;
 
     return {
       total: filteredBookings.length,
@@ -356,8 +329,8 @@ export default function ReportsPage() {
         (driver.status || '').toUpperCase(),
       ),
     ).length;
-    const busy = drivers.filter((driver) =>
-      ['BUSY'].includes((driver.status || '').toUpperCase()),
+    const busy = drivers.filter(
+      (driver) => (driver.status || '').toUpperCase() === 'BUSY',
     ).length;
 
     return {
@@ -393,66 +366,86 @@ export default function ReportsPage() {
       subtitle="Operational reporting, booking performance, driver output and fleet snapshot"
     >
       <div className="space-y-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex flex-wrap gap-2">
-            <RangeButton
-              active={range === 'TODAY'}
-              label="Today"
-              onClick={() => setRange('TODAY')}
-            />
-            <RangeButton
-              active={range === '7D'}
-              label="Last 7 Days"
-              onClick={() => setRange('7D')}
-            />
-            <RangeButton
-              active={range === '30D'}
-              label="Last 30 Days"
-              onClick={() => setRange('30D')}
-            />
-            <RangeButton
-              active={range === 'ALL'}
-              label="All Time"
-              onClick={() => setRange('ALL')}
-            />
-          </div>
+        <section className="overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(6,182,212,0.10),transparent_30%),linear-gradient(135deg,#081120_0%,#0c1527_55%,#07101c_100%)] p-6 md:p-8">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl">
+              <div className="inline-flex rounded-full border border-cyan-500/25 bg-cyan-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+                CabHQ Reporting
+              </div>
 
-          <button
-            onClick={() => void handleRefresh()}
-            className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
-          >
-            {refreshing ? 'Refreshing...' : 'Refresh Reports'}
-          </button>
-        </div>
+              <h1 className="mt-5 text-3xl font-black tracking-tight text-white md:text-5xl">
+                Measure performance across the operation
+              </h1>
+
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+                Track bookings, revenue, completion, driver activity and fleet
+                position with a cleaner reporting view across the business.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-4 lg:items-end">
+              <div className="flex flex-wrap gap-2">
+                <RangeButton
+                  active={range === 'TODAY'}
+                  label="Today"
+                  onClick={() => setRange('TODAY')}
+                />
+                <RangeButton
+                  active={range === '7D'}
+                  label="Last 7 Days"
+                  onClick={() => setRange('7D')}
+                />
+                <RangeButton
+                  active={range === '30D'}
+                  label="Last 30 Days"
+                  onClick={() => setRange('30D')}
+                />
+                <RangeButton
+                  active={range === 'ALL'}
+                  label="All Time"
+                  onClick={() => setRange('ALL')}
+                />
+              </div>
+
+              <button
+                onClick={() => void handleRefresh()}
+                className="rounded-2xl bg-cyan-500 px-4 py-3 text-sm font-semibold text-black transition hover:bg-cyan-400"
+              >
+                {refreshing ? 'Refreshing...' : 'Refresh Reports'}
+              </button>
+            </div>
+          </div>
+        </section>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Total Bookings"
             value={loading ? '—' : String(totals.total)}
             hint="Within selected range"
+            tone="slate"
           />
           <StatCard
             label="Completed Revenue"
             value={loading ? '—' : formatCurrency(totals.revenue)}
             hint="Completed jobs only"
+            tone="emerald"
           />
           <StatCard
             label="Average Fare"
             value={loading ? '—' : formatCurrency(totals.avgFare)}
             hint="Completed bookings"
+            tone="cyan"
           />
           <StatCard
             label="Completion Rate"
             value={loading ? '—' : `${totals.completionRate}%`}
             hint="Completed vs all bookings"
+            tone="violet"
           />
         </section>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MiniStatCard
-            label="Live Jobs"
-            value={loading ? '—' : String(totals.live)}
-          />
+          <MiniStatCard label="Live Jobs" value={loading ? '—' : String(totals.live)} />
           <MiniStatCard
             label="Scheduled"
             value={loading ? '—' : String(totals.scheduled)}
@@ -468,7 +461,7 @@ export default function ReportsPage() {
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <div className="mb-5">
               <h2 className="text-2xl font-bold">Booking Status Breakdown</h2>
               <p className="mt-1 text-sm text-white/60">
@@ -513,7 +506,7 @@ export default function ReportsPage() {
             )}
           </section>
 
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <div className="mb-5">
               <h2 className="text-2xl font-bold">Operations Snapshot</h2>
               <p className="mt-1 text-sm text-white/60">
@@ -546,7 +539,7 @@ export default function ReportsPage() {
         </div>
 
         <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <div className="mb-5">
               <h2 className="text-2xl font-bold">Top Drivers</h2>
               <p className="mt-1 text-sm text-white/60">
@@ -585,7 +578,7 @@ export default function ReportsPage() {
             )}
           </section>
 
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <div className="mb-5">
               <h2 className="text-2xl font-bold">Latest Bookings</h2>
               <p className="mt-1 text-sm text-white/60">
@@ -640,7 +633,7 @@ export default function ReportsPage() {
           </section>
         </div>
 
-        <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
           <div className="mb-5">
             <h2 className="text-2xl font-bold">Business Summary</h2>
             <p className="mt-1 text-sm text-white/60">
@@ -680,15 +673,24 @@ function StatCard({
   label,
   value,
   hint,
+  tone,
 }: {
   label: string;
   value: string;
   hint: string;
+  tone: 'slate' | 'emerald' | 'cyan' | 'violet';
 }) {
+  const toneMap = {
+    slate: 'from-slate-500/10 to-transparent border-white/10',
+    emerald: 'from-emerald-500/10 to-transparent border-emerald-500/20',
+    cyan: 'from-cyan-500/10 to-transparent border-cyan-500/20',
+    violet: 'from-violet-500/10 to-transparent border-violet-500/20',
+  };
+
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+    <div className={`rounded-3xl border bg-gradient-to-br ${toneMap[tone]} p-5`}>
       <p className="text-sm font-medium text-white/60">{label}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
+      <p className="mt-3 text-3xl font-black text-white">{value}</p>
       <p className="mt-2 text-xs text-white/45">{hint}</p>
     </div>
   );
@@ -777,7 +779,7 @@ function RangeButton({
       onClick={onClick}
       className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
         active
-          ? 'bg-cyan-600 text-white'
+          ? 'bg-cyan-500 text-black'
           : 'bg-white/5 text-slate-300 hover:bg-white/10'
       }`}
     >

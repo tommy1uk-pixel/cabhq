@@ -87,7 +87,7 @@ const initialForm: PaymentFormState = {
   invoiceNumber: '',
   method: 'BANK_TRANSFER',
   status: 'PENDING',
-  amount: '0',
+  amount: '',
   paymentDate: today,
   allocatedAmount: '0',
   notes: '',
@@ -97,13 +97,19 @@ function formatCurrency(value: number) {
   return `£${value.toFixed(2)}`;
 }
 
+function prettifyEnum(value: string) {
+  return value.replace(/_/g, ' ');
+}
+
 function statusClasses(status: PaymentStatus) {
   if (status === 'CLEARED') {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   }
+
   if (status === 'PENDING') {
     return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   }
+
   if (status === 'FAILED') {
     return 'border-red-500/30 bg-red-500/10 text-red-300';
   }
@@ -144,6 +150,7 @@ export default function PaymentsPage() {
         payment.invoiceNumber,
         payment.method,
         payment.status,
+        payment.paymentDate,
       ]
         .filter(Boolean)
         .join(' ')
@@ -204,22 +211,23 @@ export default function PaymentsPage() {
 
     const amount = Number(form.amount || 0);
     const allocatedAmount = Number(form.allocatedAmount || 0);
-    const unallocatedAmount = Math.max(amount - allocatedAmount, 0);
+    const safeAllocated = Math.min(Math.max(allocatedAmount, 0), amount);
+    const unallocatedAmount = Math.max(amount - safeAllocated, 0);
+
+    const existing = editingPaymentId
+      ? payments.find((payment) => payment.id === editingPaymentId)
+      : null;
 
     const payload: Payment = {
       id: editingPaymentId ?? crypto.randomUUID(),
-      reference:
-        editingPaymentId != null
-          ? payments.find((payment) => payment.id === editingPaymentId)
-              ?.reference ?? generatePaymentReference()
-          : generatePaymentReference(),
+      reference: existing?.reference ?? generatePaymentReference(),
       accountName: form.accountName.trim(),
       invoiceNumber: form.invoiceNumber.trim() || null,
       method: form.method,
       status: form.status,
       amount,
       paymentDate: form.paymentDate,
-      allocatedAmount,
+      allocatedAmount: safeAllocated,
       unallocatedAmount,
       notes: form.notes.trim(),
     };
@@ -228,11 +236,13 @@ export default function PaymentsPage() {
 
     setPayments((prev) => {
       const exists = prev.some((payment) => payment.id === payload.id);
+
       if (exists) {
         return prev.map((payment) =>
           payment.id === payload.id ? payload : payment,
         );
       }
+
       return [payload, ...prev];
     });
 
@@ -261,10 +271,10 @@ export default function PaymentsPage() {
     const confirmed = window.confirm('Delete this payment?');
     if (!confirmed) return;
 
-    setPayments((prev) => prev.filter((payment) => payment.id !== paymentId));
+    const remaining = payments.filter((payment) => payment.id !== paymentId);
+    setPayments(remaining);
 
     if (selectedPaymentId === paymentId) {
-      const remaining = payments.filter((payment) => payment.id !== paymentId);
       setSelectedPaymentId(remaining[0]?.id ?? null);
     }
 
@@ -289,9 +299,21 @@ export default function PaymentsPage() {
       <div className="space-y-6">
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <StatCard label="Payments" value={stats.totalCount} hint="All records" />
-          <StatCard label="Received" value={formatCurrency(stats.total)} hint="Gross payment value" />
-          <StatCard label="Cleared" value={formatCurrency(stats.cleared)} hint="Settled funds" />
-          <StatCard label="Pending" value={formatCurrency(stats.pending)} hint="Awaiting clearance" />
+          <StatCard
+            label="Received"
+            value={formatCurrency(stats.total)}
+            hint="Gross payment value"
+          />
+          <StatCard
+            label="Cleared"
+            value={formatCurrency(stats.cleared)}
+            hint="Settled funds"
+          />
+          <StatCard
+            label="Pending"
+            value={formatCurrency(stats.pending)}
+            hint="Awaiting clearance"
+          />
           <StatCard
             label="Unallocated"
             value={formatCurrency(stats.unallocated)}
@@ -359,10 +381,10 @@ export default function PaymentsPage() {
                       }
                       className={inputClassName}
                     >
-                      <option value="BANK_TRANSFER">BANK_TRANSFER</option>
+                      <option value="BANK_TRANSFER">BANK TRANSFER</option>
                       <option value="CARD">CARD</option>
                       <option value="CASH">CASH</option>
-                      <option value="DIRECT_DEBIT">DIRECT_DEBIT</option>
+                      <option value="DIRECT_DEBIT">DIRECT DEBIT</option>
                       <option value="CHEQUE">CHEQUE</option>
                       <option value="STRIPE">STRIPE</option>
                     </select>
@@ -433,6 +455,39 @@ export default function PaymentsPage() {
                 />
               </div>
 
+              {Number(form.amount || 0) > 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <QuickValue
+                      label="Total"
+                      value={formatCurrency(Number(form.amount || 0))}
+                    />
+                    <QuickValue
+                      label="Allocated"
+                      value={formatCurrency(
+                        Math.min(
+                          Math.max(Number(form.allocatedAmount || 0), 0),
+                          Number(form.amount || 0),
+                        ),
+                      )}
+                    />
+                    <QuickValue
+                      label="Unallocated"
+                      value={formatCurrency(
+                        Math.max(
+                          Number(form.amount || 0) -
+                            Math.min(
+                              Math.max(Number(form.allocatedAmount || 0), 0),
+                              Number(form.amount || 0),
+                            ),
+                          0,
+                        ),
+                      )}
+                    />
+                  </div>
+                </div>
+              ) : null}
+
               <Field
                 label="Notes"
                 input={
@@ -491,8 +546,9 @@ export default function PaymentsPage() {
                       }`}
                     >
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div
-                          className="min-w-0 cursor-pointer"
+                        <button
+                          type="button"
+                          className="min-w-0 text-left"
                           onClick={() =>
                             setSelectedPaymentId((current) =>
                               current === payment.id ? null : payment.id,
@@ -509,7 +565,7 @@ export default function PaymentsPage() {
                                 payment.status,
                               )}`}
                             >
-                              {payment.status.replace('_', ' ')}
+                              {prettifyEnum(payment.status)}
                             </span>
 
                             <span
@@ -517,7 +573,7 @@ export default function PaymentsPage() {
                                 payment.method,
                               )}`}
                             >
-                              {payment.method.replace('_', ' ')}
+                              {prettifyEnum(payment.method)}
                             </span>
                           </div>
 
@@ -530,7 +586,7 @@ export default function PaymentsPage() {
                             <span>Date: {payment.paymentDate}</span>
                             <span>Amount: {formatCurrency(payment.amount)}</span>
                           </div>
-                        </div>
+                        </button>
 
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -567,7 +623,7 @@ export default function PaymentsPage() {
                               label="Unallocated"
                               value={formatCurrency(payment.unallocatedAmount)}
                             />
-                            <DetailRow label="Status" value={payment.status} />
+                            <DetailRow label="Status" value={prettifyEnum(payment.status)} />
                           </div>
 
                           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -579,7 +635,7 @@ export default function PaymentsPage() {
                             <DetailRow label="Invoice" value={payment.invoiceNumber || '—'} />
                             <DetailRow
                               label="Method"
-                              value={payment.method.replace(/_/g, ' ')}
+                              value={prettifyEnum(payment.method)}
                             />
                             <DetailRow label="Payment Date" value={payment.paymentDate} />
                           </div>
@@ -660,6 +716,21 @@ function StatCard({
       <p className="text-sm font-medium text-white/60">{label}</p>
       <p className="mt-3 text-3xl font-bold text-white">{value}</p>
       <p className="mt-2 text-xs text-white/45">{hint}</p>
+    </div>
+  );
+}
+
+function QuickValue({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+      <p className="text-xs uppercase tracking-wide text-white/45">{label}</p>
+      <p className="mt-2 text-sm font-semibold text-white">{value}</p>
     </div>
   );
 }
