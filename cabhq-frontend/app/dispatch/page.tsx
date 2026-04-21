@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import L, { LatLngTuple, Map as LeafletMap } from 'leaflet';
+import type { DivIcon, LatLngTuple, Map as LeafletMap } from 'leaflet';
 import { closeSocket, getSocket } from '../../lib/socket';
 
 const API_URL =
@@ -136,56 +136,6 @@ function formatDistance(value?: number | null) {
   return `${value.toFixed(2)} mi`;
 }
 
-function makeDriverIcon(driver: Driver) {
-  const status = (driver.status || '').toUpperCase();
-  const available = driver.isAvailable || status === 'AVAILABLE';
-  const busy = status === 'BUSY' || status === 'ON_JOB' || status === 'EN_ROUTE';
-  const blocked = status === 'OFF_DUTY';
-
-  const color = blocked ? '#ef4444' : busy ? '#f59e0b' : available ? '#10b981' : '#06b6d4';
-
-  return L.divIcon({
-    className: '',
-    html: `
-      <div style="
-        width: 18px;
-        height: 18px;
-        border-radius: 9999px;
-        background: ${color};
-        border: 3px solid white;
-        box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
-      "></div>
-    `,
-    iconSize: [18, 18],
-    iconAnchor: [9, 9],
-  });
-}
-
-function makeBookingIcon(color: string, label: string) {
-  return L.divIcon({
-    className: '',
-    html: `
-      <div style="
-        min-width: 26px;
-        height: 26px;
-        border-radius: 9999px;
-        background: ${color};
-        color: white;
-        border: 2px solid white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 11px;
-        font-weight: 700;
-        box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
-        padding: 0 6px;
-      ">${label}</div>
-    `,
-    iconSize: [26, 26],
-    iconAnchor: [13, 13],
-  });
-}
-
 function Card({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded bg-gray-900 p-4">
@@ -206,11 +156,86 @@ export default function DispatchPage() {
   const [connected, setConnected] = useState(false);
   const [assigningKey, setAssigningKey] = useState<string | null>(null);
   const [autoDispatchingId, setAutoDispatchingId] = useState<string | null>(null);
+  const [driverIconFactory, setDriverIconFactory] =
+    useState<((driver: Driver) => DivIcon) | null>(null);
+  const [bookingIconFactory, setBookingIconFactory] =
+    useState<((color: string, label: string) => DivIcon) | null>(null);
 
   const mapRef = useRef<LeafletMap | null>(null);
 
   const token =
     typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadLeaflet() {
+      const L = await import('leaflet');
+      if (!mounted) return;
+
+      setDriverIconFactory(() => (driver: Driver) => {
+        const status = (driver.status || '').toUpperCase();
+        const available = driver.isAvailable || status === 'AVAILABLE';
+        const busy =
+          status === 'BUSY' || status === 'ON_JOB' || status === 'EN_ROUTE';
+        const blocked = status === 'OFF_DUTY';
+
+        const color = blocked
+          ? '#ef4444'
+          : busy
+          ? '#f59e0b'
+          : available
+          ? '#10b981'
+          : '#06b6d4';
+
+        return L.divIcon({
+          className: '',
+          html: `
+            <div style="
+              width: 18px;
+              height: 18px;
+              border-radius: 9999px;
+              background: ${color};
+              border: 3px solid white;
+              box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
+            "></div>
+          `,
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
+        });
+      });
+
+      setBookingIconFactory(() => (color: string, label: string) =>
+        L.divIcon({
+          className: '',
+          html: `
+            <div style="
+              min-width: 26px;
+              height: 26px;
+              border-radius: 9999px;
+              background: ${color};
+              color: white;
+              border: 2px solid white;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 11px;
+              font-weight: 700;
+              box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
+              padding: 0 6px;
+            ">${label}</div>
+          `,
+          iconSize: [26, 26],
+          iconAnchor: [13, 13],
+        }),
+      );
+    }
+
+    void loadLeaflet();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const liveDrivers = useMemo(
     () =>
@@ -271,13 +296,8 @@ export default function DispatchPage() {
       ),
     ];
 
-    if (selectedPickupPosition) {
-      points.push(selectedPickupPosition);
-    }
-
-    if (selectedDropoffPosition) {
-      points.push(selectedDropoffPosition);
-    }
+    if (selectedPickupPosition) points.push(selectedPickupPosition);
+    if (selectedDropoffPosition) points.push(selectedDropoffPosition);
 
     if (points.length === 0) return;
 
@@ -518,39 +538,40 @@ export default function DispatchPage() {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
 
-              {liveDrivers.map((driver) => (
-                <Marker
-                  key={driver.id}
-                  position={[
-                    driver.latitude as number,
-                    driver.longitude as number,
-                  ] as LatLngTuple}
-                  icon={makeDriverIcon(driver)}
-                >
-                  <Popup>
-                    <div className="min-w-[180px] text-black">
-                      <div className="font-bold">{getDriverName(driver)}</div>
-                      <div className="mt-1 text-sm">
-                        {(driver.status || 'UNKNOWN').replace(/_/g, ' ')}
+              {driverIconFactory &&
+                liveDrivers.map((driver) => (
+                  <Marker
+                    key={driver.id}
+                    position={[
+                      driver.latitude as number,
+                      driver.longitude as number,
+                    ] as LatLngTuple}
+                    icon={driverIconFactory(driver)}
+                  >
+                    <Popup>
+                      <div className="min-w-[180px] text-black">
+                        <div className="font-bold">{getDriverName(driver)}</div>
+                        <div className="mt-1 text-sm">
+                          {(driver.status || 'UNKNOWN').replace(/_/g, ' ')}
+                        </div>
+                        <div className="mt-1 text-sm">
+                          {getVehicleLabel(driver.vehicle ?? null)}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-600">
+                          GPS: {formatDateTime(driver.lastLocationAt)}
+                        </div>
+                        <div className="mt-1 text-xs text-gray-600">
+                          {driver.latitude}, {driver.longitude}
+                        </div>
                       </div>
-                      <div className="mt-1 text-sm">
-                        {getVehicleLabel(driver.vehicle ?? null)}
-                      </div>
-                      <div className="mt-2 text-xs text-gray-600">
-                        GPS: {formatDateTime(driver.lastLocationAt)}
-                      </div>
-                      <div className="mt-1 text-xs text-gray-600">
-                        {driver.latitude}, {driver.longitude}
-                      </div>
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
+                    </Popup>
+                  </Marker>
+                ))}
 
-              {selectedPickupPosition ? (
+              {bookingIconFactory && selectedPickupPosition ? (
                 <Marker
                   position={selectedPickupPosition}
-                  icon={makeBookingIcon('#2563eb', 'P')}
+                  icon={bookingIconFactory('#2563eb', 'P')}
                 >
                   <Popup>
                     <div className="text-black">
@@ -563,10 +584,10 @@ export default function DispatchPage() {
                 </Marker>
               ) : null}
 
-              {selectedDropoffPosition ? (
+              {bookingIconFactory && selectedDropoffPosition ? (
                 <Marker
                   position={selectedDropoffPosition}
-                  icon={makeBookingIcon('#7c3aed', 'D')}
+                  icon={bookingIconFactory('#7c3aed', 'D')}
                 >
                   <Popup>
                     <div className="text-black">
