@@ -289,34 +289,70 @@ export default function AccountsPage() {
   return (
     <AdminShell
       title="Accounts"
-      subtitle="Account customers, billing terms, balances, contract work and monthly invoice clients."
+      subtitle="Account customers, billing terms, balances, contract work and invoice clients"
     >
       <div className="space-y-6">
+        <section className="overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(6,182,212,0.10),transparent_30%),linear-gradient(135deg,#081120_0%,#0c1527_55%,#07101c_100%)] p-6 md:p-8">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+            <div className="max-w-3xl">
+              <div className="inline-flex rounded-full border border-cyan-500/25 bg-cyan-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300">
+                CabHQ Account Customers
+              </div>
+
+              <h1 className="mt-5 text-3xl font-black tracking-tight text-white md:text-5xl">
+                Manage account work and billing relationships
+              </h1>
+
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
+                Keep track of contract customers, invoice terms, outstanding
+                balances, monthly usage and account-level trading status.
+              </p>
+            </div>
+          </div>
+        </section>
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <StatCard label="Total Accounts" value={stats.total} hint="All account customers" />
-          <StatCard label="Active" value={stats.active} hint="Currently trading" />
-          <StatCard label="On Hold" value={stats.onHold} hint="Payment or ops hold" />
+          <StatCard
+            label="Total Accounts"
+            value={stats.total}
+            hint="All account customers"
+            tone="slate"
+          />
+          <StatCard
+            label="Active"
+            value={stats.active}
+            hint="Currently trading"
+            tone="emerald"
+          />
+          <StatCard
+            label="On Hold"
+            value={stats.onHold}
+            hint="Payment or ops hold"
+            tone="amber"
+          />
           <StatCard
             label="Monthly Revenue"
             value={formatCurrency(stats.revenue)}
             hint="Current account revenue"
+            tone="cyan"
           />
           <StatCard
             label="Outstanding"
             value={formatCurrency(stats.outstanding)}
             hint="Open balance"
+            tone="violet"
           />
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[430px_1fr]">
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-2xl font-bold">
                   {editingAccountId ? 'Edit Account' : 'Create Account'}
                 </h2>
                 <p className="mt-1 text-sm text-white/60">
-                  Add account customers for invoicing, contracts and priority jobs.
+                  Add account customers for invoicing, contracts and priority work.
                 </p>
               </div>
 
@@ -484,14 +520,14 @@ export default function AccountsPage() {
 
               <button
                 type="submit"
-                className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500"
+                className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-semibold text-black transition hover:bg-cyan-400"
               >
                 {editingAccountId ? 'Save Account Changes' : 'Create Account'}
               </button>
             </form>
           </section>
 
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+          <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-2xl font-bold">Accounts</h2>
@@ -668,15 +704,25 @@ function StatCard({
   label,
   value,
   hint,
+  tone,
 }: {
   label: string;
   value: string | number;
   hint: string;
+  tone: 'slate' | 'emerald' | 'amber' | 'cyan' | 'violet';
 }) {
+  const toneMap = {
+    slate: 'from-slate-500/10 to-transparent border-white/10',
+    emerald: 'from-emerald-500/10 to-transparent border-emerald-500/20',
+    amber: 'from-amber-500/10 to-transparent border-amber-500/20',
+    cyan: 'from-cyan-500/10 to-transparent border-cyan-500/20',
+    violet: 'from-violet-500/10 to-transparent border-violet-500/20',
+  };
+
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+    <div className={`rounded-3xl border bg-gradient-to-br ${toneMap[tone]} p-5`}>
       <p className="text-sm font-medium text-white/60">{label}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
+      <p className="mt-3 text-3xl font-black text-white">{value}</p>
       <p className="mt-2 text-xs text-white/45">{hint}</p>
     </div>
   );
