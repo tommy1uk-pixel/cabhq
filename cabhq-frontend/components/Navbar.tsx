@@ -5,7 +5,8 @@ import { useState } from 'react';
 
 const links = [
   { label: 'Features', href: '#features' },
-  { label: 'Pricing', href: '/pricing' },
+  { label: 'Pricing', href: '#pricing' },
+  { label: 'Demo', href: '#demo' },
   { label: 'FAQ', href: '#faq' },
 ];
 
@@ -13,16 +14,17 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-[#05070c]/90 backdrop-blur-xl">
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-[#020617]/85 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
         <Link href="/" className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-500/15 text-sm font-bold text-cyan-300 ring-1 ring-cyan-500/20">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-500/15 text-sm font-bold text-cyan-300 ring-1 ring-cyan-500/20">
             C
           </div>
+
           <div className="leading-tight">
-            <div className="text-lg font-semibold text-white">CabHQ</div>
-            <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-              Dispatch Platform
+            <div className="text-lg font-bold text-white">CabHQ</div>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
+              Taxi Dispatch Software
             </div>
           </div>
         </Link>
@@ -48,10 +50,10 @@ export default function Navbar() {
           </Link>
 
           <Link
-            href="/pricing"
-            className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500"
+            href="#pricing"
+            className="rounded-xl bg-cyan-500 px-5 py-2 text-sm font-semibold text-black transition hover:bg-cyan-400"
           >
-            View Pricing
+            Start Free Trial
           </Link>
         </div>
 
@@ -65,7 +67,7 @@ export default function Navbar() {
       </div>
 
       {open ? (
-        <div className="border-t border-white/10 bg-[#05070c] md:hidden">
+        <div className="border-t border-white/10 bg-[#020617] md:hidden">
           <div className="mx-auto flex max-w-7xl flex-col gap-2 px-6 py-4">
             {links.map((link) => (
               <Link
@@ -88,11 +90,11 @@ export default function Navbar() {
               </Link>
 
               <Link
-                href="/pricing"
+                href="#pricing"
                 onClick={() => setOpen(false)}
-                className="rounded-xl bg-cyan-600 px-4 py-3 text-center text-sm font-semibold text-white"
+                className="rounded-xl bg-cyan-500 px-4 py-3 text-center text-sm font-semibold text-black"
               >
-                View Pricing
+                Start Free Trial
               </Link>
             </div>
           </div>

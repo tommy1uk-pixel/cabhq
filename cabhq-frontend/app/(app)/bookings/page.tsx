@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import AdminShell from '@/components/AdminShell';
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') ||
@@ -75,15 +76,15 @@ function statusTone(status?: string) {
   const normalized = (status || '').toUpperCase();
 
   if (normalized === 'COMPLETED') {
-    return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25';
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   }
 
   if (normalized === 'CANCELLED' || normalized === 'NO_SHOW') {
-    return 'bg-rose-500/15 text-rose-300 border-rose-500/25';
+    return 'border-red-500/30 bg-red-500/10 text-red-300';
   }
 
   if (normalized === 'BOOKED' || normalized === 'OFFERED') {
-    return 'bg-amber-500/15 text-amber-300 border-amber-500/25';
+    return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   }
 
   if (
@@ -91,10 +92,10 @@ function statusTone(status?: string) {
       normalized,
     )
   ) {
-    return 'bg-cyan-500/15 text-cyan-300 border-cyan-500/25';
+    return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
   }
 
-  return 'bg-slate-500/15 text-slate-300 border-slate-500/25';
+  return 'border-slate-500/30 bg-slate-500/10 text-slate-300';
 }
 
 function isCompleted(status?: string) {
@@ -228,31 +229,21 @@ export default function BookingsPage() {
   }
 
   return (
-    <main className="min-h-screen text-white">
-      <div className="mx-auto max-w-[1800px]">
-        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
-              CabHQ
-            </div>
-            <h1 className="mt-1 text-2xl font-bold">Bookings</h1>
-            <p className="mt-1 text-sm text-slate-400">
-              Search, review and manage all bookings across dispatch.
-            </p>
-          </div>
+    <AdminShell
+      title="Bookings"
+      subtitle="Search, review and manage all bookings across dispatch"
+    >
+      <div className="space-y-6">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <StatCard label="All Bookings" value={counts.all} hint="Every booking record" />
+          <StatCard label="Live" value={counts.live} hint="Open and active jobs" />
+          <StatCard label="Scheduled" value={counts.scheduled} hint="Booked or offered" />
+          <StatCard label="Completed" value={counts.completed} hint="Finished jobs" />
+          <StatCard label="Cancelled" value={counts.cancelled} hint="Cancelled or no-show" />
+        </section>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => void handleRefresh()}
-              className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200"
-            >
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </button>
-          </div>
-        </div>
-
-        <section className="rounded-2xl border border-white/10 bg-[#0d1120] p-4">
-          <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
+          <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap gap-2">
               <TabButton
                 active={activeTab === 'ALL'}
@@ -281,17 +272,24 @@ export default function BookingsPage() {
               />
             </div>
 
-            <div className="w-full xl:w-[360px]">
+            <div className="flex w-full flex-col gap-3 sm:flex-row xl:w-auto">
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search by ref, customer, phone, route, driver..."
-                className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-cyan-500"
+                className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50 sm:w-[340px]"
               />
+
+              <button
+                onClick={() => void handleRefresh()}
+                className="rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
+              >
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
             </div>
           </div>
 
-          <div className="hidden grid-cols-[130px_180px_1.8fr_140px_150px_110px] gap-3 border-b border-white/10 px-3 pb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 xl:grid">
+          <div className="hidden grid-cols-[140px_190px_1.8fr_150px_170px_120px] gap-3 border-b border-white/10 px-3 pb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 xl:grid">
             <div>Reference</div>
             <div>Pickup Time</div>
             <div>Route</div>
@@ -300,32 +298,32 @@ export default function BookingsPage() {
             <div>Fare</div>
           </div>
 
-          <div className="mt-3 space-y-2">
+          <div className="mt-4 space-y-3">
             {loading ? (
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-slate-400">
+              <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-6 text-sm text-white/60">
                 Loading bookings...
               </div>
             ) : filteredBookings.length === 0 ? (
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-slate-400">
+              <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-6 text-sm text-white/60">
                 No bookings found.
               </div>
             ) : (
               filteredBookings.map((booking) => (
                 <div
                   key={booking.id}
-                  className="rounded-xl border border-white/10 bg-black/20 px-3 py-3"
+                  className="rounded-2xl border border-white/10 bg-[#0b1728] p-4 transition hover:border-white/15"
                 >
-                  <div className="grid gap-3 xl:grid-cols-[130px_180px_1.8fr_140px_150px_110px] xl:items-center">
+                  <div className="grid gap-4 xl:grid-cols-[140px_190px_1.8fr_150px_170px_120px] xl:items-center">
                     <div>
                       <div className="text-sm font-bold text-white">
                         {booking.reference}
                       </div>
-                      <div className="text-xs text-slate-500">
+                      <div className="mt-1 text-xs text-white/50">
                         {booking.customerName || 'No customer name'}
                       </div>
                     </div>
 
-                    <div className="text-sm text-slate-300">
+                    <div className="text-sm text-white/80">
                       {formatDateTime(getPickupTimeLabel(booking))}
                     </div>
 
@@ -333,7 +331,7 @@ export default function BookingsPage() {
                       <div className="truncate text-sm text-white">
                         {getPickupLabel(booking)}
                       </div>
-                      <div className="truncate text-sm text-slate-400">
+                      <div className="truncate text-sm text-white/50">
                         → {getDropoffLabel(booking)}
                       </div>
                     </div>
@@ -348,7 +346,7 @@ export default function BookingsPage() {
                       </span>
                     </div>
 
-                    <div className="text-sm text-slate-300">
+                    <div className="text-sm text-white/80">
                       {getDriverName(booking.driver)}
                     </div>
 
@@ -357,7 +355,7 @@ export default function BookingsPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-400">
+                  <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 border-t border-white/5 pt-4 text-xs text-white/50">
                     <span>Phone: {booking.customerPhone || '—'}</span>
                     <span>Passengers: {booking.passengerCount ?? '—'}</span>
                     <span>Created: {formatDateTime(booking.createdAt)}</span>
@@ -369,7 +367,25 @@ export default function BookingsPage() {
           </div>
         </section>
       </div>
-    </main>
+    </AdminShell>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: number;
+  hint: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+      <p className="text-sm font-medium text-white/60">{label}</p>
+      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
+      <p className="mt-2 text-xs text-white/45">{hint}</p>
+    </div>
   );
 }
 
@@ -385,7 +401,7 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`rounded-full px-4 py-2 text-sm font-semibold ${
+      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
         active
           ? 'bg-cyan-600 text-white'
           : 'bg-white/5 text-slate-300 hover:bg-white/10'
