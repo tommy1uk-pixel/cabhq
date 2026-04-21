@@ -30,6 +30,10 @@ const Popup = dynamic(
   () => import('react-leaflet').then((mod) => mod.Popup),
   { ssr: false },
 );
+const Polyline = dynamic(
+  () => import('react-leaflet').then((mod) => mod.Polyline),
+  { ssr: false },
+);
 
 type Vehicle = {
   id: string;
@@ -221,10 +225,10 @@ export default function DispatchPage() {
         const color = blocked
           ? '#ef4444'
           : busy
-          ? '#f59e0b'
-          : available
-          ? '#10b981'
-          : '#06b6d4';
+            ? '#f59e0b'
+            : available
+              ? '#10b981'
+              : '#06b6d4';
 
         return L.divIcon({
           className: '',
@@ -311,8 +315,25 @@ export default function DispatchPage() {
     ] as LatLngTuple;
   }, [selectedBooking]);
 
+  const selectedDriver = useMemo<Driver | null>(() => {
+    if (!selectedBooking?.driverId) return null;
+    return drivers.find((d) => d.id === selectedBooking.driverId) ?? null;
+  }, [selectedBooking, drivers]);
+
+  const selectedDriverPosition = useMemo<LatLngTuple | null>(() => {
+    if (
+      !selectedDriver ||
+      selectedDriver.latitude == null ||
+      selectedDriver.longitude == null
+    ) {
+      return null;
+    }
+    return [selectedDriver.latitude, selectedDriver.longitude] as LatLngTuple;
+  }, [selectedDriver]);
+
   const mapCenter = useMemo<LatLngTuple>(() => {
     if (selectedPickupPosition) return selectedPickupPosition;
+    if (selectedDriverPosition) return selectedDriverPosition;
     if (liveDrivers.length > 0) {
       return [
         liveDrivers[0].latitude as number,
@@ -320,7 +341,7 @@ export default function DispatchPage() {
       ] as LatLngTuple;
     }
     return [51.5074, -0.1278] as LatLngTuple;
-  }, [liveDrivers, selectedPickupPosition]);
+  }, [liveDrivers, selectedPickupPosition, selectedDriverPosition]);
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -334,6 +355,7 @@ export default function DispatchPage() {
       ),
     ];
 
+    if (selectedDriverPosition) points.push(selectedDriverPosition);
     if (selectedPickupPosition) points.push(selectedPickupPosition);
     if (selectedDropoffPosition) points.push(selectedDropoffPosition);
 
@@ -345,7 +367,12 @@ export default function DispatchPage() {
     }
 
     mapRef.current.fitBounds(points, { padding: [40, 40] });
-  }, [liveDrivers, selectedPickupPosition, selectedDropoffPosition]);
+  }, [
+    liveDrivers,
+    selectedDriverPosition,
+    selectedPickupPosition,
+    selectedDropoffPosition,
+  ]);
 
   const loadBookings = useCallback(async () => {
     if (!token) return;
@@ -744,7 +771,7 @@ export default function DispatchPage() {
           <div>
             <h2 className="text-xl font-semibold">Live Driver Map</h2>
             <p className="mt-1 text-sm text-gray-400">
-              Real-time vehicle positions with booking markers
+              Real-time vehicle positions with booking markers and route lines
             </p>
           </div>
 
@@ -808,6 +835,27 @@ export default function DispatchPage() {
                   </Marker>
                 ))}
 
+              {driverIconFactory && selectedDriver && selectedDriverPosition ? (
+                <Marker
+                  position={selectedDriverPosition}
+                  icon={driverIconFactory(selectedDriver)}
+                >
+                  <Popup>
+                    <div className="min-w-[180px] text-black">
+                      <div className="font-bold">
+                        Assigned Driver: {getDriverName(selectedDriver)}
+                      </div>
+                      <div className="mt-1 text-sm">
+                        {(selectedDriver.status || 'UNKNOWN').replace(/_/g, ' ')}
+                      </div>
+                      <div className="mt-1 text-sm">
+                        {getVehicleLabel(selectedDriver.vehicle ?? null)}
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              ) : null}
+
               {bookingIconFactory && selectedPickupPosition ? (
                 <Marker
                   position={selectedPickupPosition}
@@ -838,6 +886,20 @@ export default function DispatchPage() {
                     </div>
                   </Popup>
                 </Marker>
+              ) : null}
+
+              {selectedDriverPosition && selectedPickupPosition ? (
+                <Polyline
+                  positions={[selectedDriverPosition, selectedPickupPosition]}
+                  pathOptions={{ color: '#22c55e', weight: 4, opacity: 0.85 }}
+                />
+              ) : null}
+
+              {selectedPickupPosition && selectedDropoffPosition ? (
+                <Polyline
+                  positions={[selectedPickupPosition, selectedDropoffPosition]}
+                  pathOptions={{ color: '#8b5cf6', weight: 4, opacity: 0.85 }}
+                />
               ) : null}
             </MapContainer>
           </div>
@@ -1041,6 +1103,12 @@ export default function DispatchPage() {
             {selectedBooking.dropoffLatitude != null &&
             selectedBooking.dropoffLongitude != null
               ? `${selectedBooking.dropoffLatitude}, ${selectedBooking.dropoffLongitude}`
+              : 'Not available'}
+          </div>
+          <div className="mt-1 text-sm text-white/80">
+            Assigned driver coords:{' '}
+            {selectedDriverPosition
+              ? `${selectedDriverPosition[0]}, ${selectedDriverPosition[1]}`
               : 'Not available'}
           </div>
         </div>
