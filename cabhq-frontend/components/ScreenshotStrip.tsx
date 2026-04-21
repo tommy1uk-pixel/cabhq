@@ -2,47 +2,47 @@ import Reveal from "./Reveal";
 
 const panels = [
   {
-    title: "Dispatch",
-    subtitle: "Live job board",
-    content: ["CBH-2101", "CBH-2102", "CBH-2103"],
+    title: "Dispatch Board",
+    subtitle: "Live office control",
     accent: "text-blue-300",
+    rows: ["CBH-2101 • Heathrow", "CBH-2102 • Gatwick", "CBH-2103 • Local Job"],
   },
   {
     title: "Driver App",
     subtitle: "Mobile workflow",
-    content: ["Offer received", "Accepted", "En route"],
     accent: "text-cyan-300",
+    rows: ["New Offer", "Accepted", "En Route"],
   },
   {
-    title: "Passenger",
-    subtitle: "Booking updates",
-    content: ["Confirmed", "Driver assigned", "ETA 12 mins"],
+    title: "Passenger App",
+    subtitle: "Customer updates",
     accent: "text-emerald-300",
+    rows: ["Booked", "Driver Assigned", "ETA 12 mins"],
   },
   {
-    title: "Reporting",
-    subtitle: "Operational metrics",
-    content: ["42 jobs today", "78% auto-dispatch", "12 on duty"],
+    title: "Reports",
+    subtitle: "Business visibility",
     accent: "text-amber-300",
+    rows: ["42 Jobs Today", "£6,480 Revenue", "78% Auto Dispatch"],
   },
 ];
 
 export default function ScreenshotStrip() {
   return (
     <Reveal>
-      <section className="mx-auto max-w-7xl px-6 py-12 md:py-16">
-        <div className="mb-8 max-w-3xl">
-          <div className="mb-4 inline-flex items-center rounded-full border border-blue-400/20 bg-white/5 px-4 py-2 text-sm text-blue-200 shadow-lg shadow-blue-500/10">
-            Product Proof
+      <section className="mx-auto max-w-7xl px-6 py-14 md:py-20">
+        <div className="mb-10 max-w-3xl">
+          <div className="mb-4 inline-flex rounded-full border border-cyan-400/20 bg-white/5 px-4 py-2 text-sm text-cyan-200">
+            Inside CabHQ
           </div>
 
-          <h2 className="mb-3 text-4xl font-bold leading-tight md:text-5xl">
-            A clearer picture of the CabHQ product
+          <h2 className="mb-4 text-4xl font-bold md:text-5xl">
+            Every part of the operation in one platform
           </h2>
 
           <p className="text-lg text-white/70">
-            Quick visual panels that make the platform feel more real and easier
-            to understand at a glance.
+            Operators, drivers, passengers and management all work from the same
+            live system.
           </p>
         </div>
 
@@ -50,29 +50,31 @@ export default function ScreenshotStrip() {
           {panels.map((panel) => (
             <div
               key={panel.title}
-              className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-xl shadow-black/10 transition duration-300 hover:-translate-y-1 hover:border-blue-400/30 hover:bg-white/[0.07]"
+              className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-xl shadow-black/10 transition hover:-translate-y-1 hover:border-cyan-400/30"
             >
               <div className="mb-4">
                 <p className={`text-sm font-semibold ${panel.accent}`}>
                   {panel.title}
                 </p>
-                <p className="mt-1 text-sm text-white/50">{panel.subtitle}</p>
+                <p className="mt-1 text-sm text-white/50">
+                  {panel.subtitle}
+                </p>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
                 <div className="mb-4 flex gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-white/20"></span>
-                  <span className="h-2.5 w-2.5 rounded-full bg-white/20"></span>
-                  <span className="h-2.5 w-2.5 rounded-full bg-white/20"></span>
+                  <span className="h-2.5 w-2.5 rounded-full bg-red-400/60"></span>
+                  <span className="h-2.5 w-2.5 rounded-full bg-amber-400/60"></span>
+                  <span className="h-2.5 w-2.5 rounded-full bg-green-400/60"></span>
                 </div>
 
                 <div className="space-y-3">
-                  {panel.content.map((item) => (
+                  {panel.rows.map((row) => (
                     <div
-                      key={item}
-                      className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/75"
+                      key={row}
+                      className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-white/80"
                     >
-                      {item}
+                      {row}
                     </div>
                   ))}
                 </div>
