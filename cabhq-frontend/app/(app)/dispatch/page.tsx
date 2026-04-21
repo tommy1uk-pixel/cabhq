@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { DivIcon, LatLngTuple, Map as LeafletMap } from 'leaflet';
-import { closeSocket, getSocket } from '../../../lib/socket';
+import { closeSocket, getSocket } from '../../lib/socket';
 import AddressAutofillInput, {
   type SelectedAddress,
 } from '@/components/AddressAutofillInput';
@@ -28,10 +28,6 @@ const Marker = dynamic(
 );
 const Popup = dynamic(
   () => import('react-leaflet').then((mod) => mod.Popup),
-  { ssr: false },
-);
-const Polyline = dynamic(
-  () => import('react-leaflet').then((mod) => mod.Polyline),
   { ssr: false },
 );
 
@@ -62,6 +58,7 @@ type DriverSuggestion = {
   status: string;
   distanceMiles?: number | null;
   score?: number | null;
+  scoreBreakdown?: string[];
   lastLocationAt?: string | null;
   vehicle?: Vehicle;
 };
@@ -69,8 +66,8 @@ type DriverSuggestion = {
 type Booking = {
   id: string;
   reference: string;
-  customerName?: string;
-  customerPhone?: string;
+  customerName?: string | null;
+  customerPhone?: string | null;
   pickupAddress?: string;
   dropoffAddress?: string;
   pickup?: string;
@@ -92,7 +89,8 @@ type Booking = {
 
 type TimelineEvent = {
   id: string;
-  type: string;
+  type?: string;
+  message?: string;
   note?: string | null;
   createdAt: string;
 };
@@ -102,7 +100,6 @@ type BookingFormState = {
   customerPhone: string;
   pickupAddress: string;
   dropoffAddress: string;
-  whenType: 'ASAP' | 'SCHEDULED';
   pickupAt: string;
   passengerCount: number;
   quotedPrice: string;
@@ -113,14 +110,11 @@ type BookingFormState = {
   dropoffLongitude: number | null;
 };
 
-type BookingTab = 'LIVE' | 'COMPLETED';
-
 const initialForm: BookingFormState = {
   customerName: '',
   customerPhone: '',
   pickupAddress: '',
   dropoffAddress: '',
-  whenType: 'ASAP',
   pickupAt: '',
   passengerCount: 1,
   quotedPrice: '',
@@ -174,89 +168,16 @@ function formatDateTime(value?: string | null) {
   });
 }
 
-function formatTimeOnly(value?: string | null) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-
-  return date.toLocaleTimeString('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 function formatDistance(value?: number | null) {
   if (value == null) return '—';
   return `${value.toFixed(2)} mi`;
 }
 
-function formatPrice(value?: number | null) {
-  if (value == null) return '—';
-  return `£${value.toFixed(2)}`;
-}
-
-function toDateTimeLocalValue(date = new Date()) {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const yyyy = date.getFullYear();
-  const mm = pad(date.getMonth() + 1);
-  const dd = pad(date.getDate());
-  const hh = pad(date.getHours());
-  const min = pad(date.getMinutes());
-  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
-}
-
-function isCompletedStatus(status?: string) {
-  return ['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(
-    (status || '').toUpperCase(),
-  );
-}
-
-function isLiveStatus(status?: string) {
-  return !isCompletedStatus(status);
-}
-
-function statusTone(status?: string) {
-  const normalized = (status || '').toUpperCase();
-
-  if (normalized === 'COMPLETED') {
-    return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/25';
-  }
-
-  if (normalized === 'CANCELLED' || normalized === 'NO_SHOW') {
-    return 'bg-rose-500/15 text-rose-300 border-rose-500/25';
-  }
-
-  if (normalized === 'OFFERED' || normalized === 'BOOKED') {
-    return 'bg-amber-500/15 text-amber-300 border-amber-500/25';
-  }
-
-  if (
-    ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB', 'ALLOCATED'].includes(
-      normalized,
-    )
-  ) {
-    return 'bg-cyan-500/15 text-cyan-300 border-cyan-500/25';
-  }
-
-  return 'bg-slate-500/15 text-slate-300 border-slate-500/25';
-}
-
-function Card({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: number | string;
-  hint?: string;
-}) {
+function Card({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-black/30 p-4">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
-        {label}
-      </div>
-      <div className="mt-2 text-2xl font-bold text-white">{value}</div>
-      {hint ? <div className="mt-1 text-xs text-slate-400">{hint}</div> : null}
+    <div className="rounded bg-gray-900 p-4">
+      <div className="text-sm text-gray-400">{label}</div>
+      <div className="text-2xl font-bold">{value}</div>
     </div>
   );
 }
@@ -265,15 +186,14 @@ export default function DispatchPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [timelineBooking, setTimelineBooking] = useState<Booking | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [driversLoading, setDriversLoading] = useState(false);
   const [driversError, setDriversError] = useState('');
   const [connected, setConnected] = useState(false);
   const [assigningKey, setAssigningKey] = useState<string | null>(null);
-  const [autoDispatchingId, setAutoDispatchingId] = useState<string | null>(
-    null,
-  );
+  const [autoDispatchingId, setAutoDispatchingId] = useState<string | null>(null);
   const [creatingBooking, setCreatingBooking] = useState(false);
   const [bookingError, setBookingError] = useState('');
   const [driverIconFactory, setDriverIconFactory] =
@@ -281,7 +201,6 @@ export default function DispatchPage() {
   const [bookingIconFactory, setBookingIconFactory] =
     useState<((color: string, label: string) => DivIcon) | null>(null);
   const [form, setForm] = useState<BookingFormState>(initialForm);
-  const [activeTab, setActiveTab] = useState<BookingTab>('LIVE');
 
   const mapRef = useRef<LeafletMap | null>(null);
 
@@ -305,10 +224,10 @@ export default function DispatchPage() {
         const color = blocked
           ? '#ef4444'
           : busy
-            ? '#f59e0b'
-            : available
-              ? '#22c55e'
-              : '#06b6d4';
+          ? '#f59e0b'
+          : available
+          ? '#10b981'
+          : '#06b6d4';
 
         return L.divIcon({
           className: '',
@@ -369,23 +288,6 @@ export default function DispatchPage() {
     [drivers],
   );
 
-  const selectedDriver = useMemo<Driver | null>(() => {
-    if (!selectedBooking?.driverId) return null;
-    return drivers.find((d) => d.id === selectedBooking.driverId) ?? null;
-  }, [selectedBooking, drivers]);
-
-  const selectedDriverPosition = useMemo<LatLngTuple | null>(() => {
-    if (
-      !selectedDriver ||
-      selectedDriver.latitude == null ||
-      selectedDriver.longitude == null
-    ) {
-      return null;
-    }
-
-    return [selectedDriver.latitude, selectedDriver.longitude] as LatLngTuple;
-  }, [selectedDriver]);
-
   const selectedPickupPosition = useMemo<LatLngTuple | null>(() => {
     if (
       selectedBooking?.pickupLatitude == null ||
@@ -414,7 +316,6 @@ export default function DispatchPage() {
 
   const mapCenter = useMemo<LatLngTuple>(() => {
     if (selectedPickupPosition) return selectedPickupPosition;
-    if (selectedDriverPosition) return selectedDriverPosition;
     if (liveDrivers.length > 0) {
       return [
         liveDrivers[0].latitude as number,
@@ -422,57 +323,38 @@ export default function DispatchPage() {
       ] as LatLngTuple;
     }
     return [51.5074, -0.1278] as LatLngTuple;
-  }, [liveDrivers, selectedPickupPosition, selectedDriverPosition]);
+  }, [liveDrivers, selectedPickupPosition]);
 
-  const stats = useMemo(() => {
-    const liveBookings = bookings.filter((booking) => isLiveStatus(booking.status));
-    const completedBookings = bookings.filter(
-      (booking) => (booking.status || '').toUpperCase() === 'COMPLETED',
-    );
-    const availableDrivers = drivers.filter(
-      (d) => d.isAvailable || d.status === 'AVAILABLE',
-    );
-    const busyDrivers = drivers.filter(
-      (d) =>
-        ['BUSY', 'ON_JOB', 'EN_ROUTE', 'ARRIVED', 'ACCEPTED'].includes(
-          (d.status || '').toUpperCase(),
-        ),
-    );
+  useEffect(() => {
+    if (!mapRef.current) return;
 
-    return {
-      bookings: bookings.length,
-      liveBookings: liveBookings.length,
-      completed: completedBookings.length,
-      drivers: drivers.length,
-      available: availableDrivers.length,
-      busy: busyDrivers.length,
-      liveGps: liveDrivers.length,
-    };
-  }, [bookings, drivers, liveDrivers.length]);
+    const points: LatLngTuple[] = [
+      ...liveDrivers.map(
+        (driver): LatLngTuple => [
+          driver.latitude as number,
+          driver.longitude as number,
+        ],
+      ),
+    ];
 
-  const liveBookingRows = useMemo(
-    () => bookings.filter((booking) => isLiveStatus(booking.status)),
-    [bookings],
-  );
+    if (selectedPickupPosition) points.push(selectedPickupPosition);
+    if (selectedDropoffPosition) points.push(selectedDropoffPosition);
 
-  const completedBookingRows = useMemo(
-    () => bookings.filter((booking) => isCompletedStatus(booking.status)),
-    [bookings],
-  );
+    if (points.length === 0) return;
 
-  const displayedBookings = activeTab === 'LIVE' ? liveBookingRows : completedBookingRows;
+    if (points.length === 1) {
+      mapRef.current.setView(points[0], 13);
+      return;
+    }
 
-  const nearestDrivers = useMemo(() => {
-    if (!selectedBooking?.suggestedDrivers?.length) return [];
-    return selectedBooking.suggestedDrivers.slice(0, 5);
-  }, [selectedBooking]);
+    mapRef.current.fitBounds(points, { padding: [40, 40] });
+  }, [liveDrivers, selectedPickupPosition, selectedDropoffPosition]);
 
   const loadBookings = useCallback(async () => {
-    if (!token) return;
+    if (!token) return [];
 
     const response = await fetch(`${API_URL}/bookings/dispatch-board`, {
       headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
     });
 
     if (!response.ok) {
@@ -480,7 +362,20 @@ export default function DispatchPage() {
     }
 
     const data = (await response.json()) as Booking[];
-    setBookings(Array.isArray(data) ? data : []);
+    const nextBookings = Array.isArray(data) ? data : [];
+    setBookings(nextBookings);
+
+    setSelectedBooking((prev) => {
+      if (!prev) return prev;
+      return nextBookings.find((b) => b.id === prev.id) ?? prev;
+    });
+
+    setTimelineBooking((prev) => {
+      if (!prev) return prev;
+      return nextBookings.find((b) => b.id === prev.id) ?? prev;
+    });
+
+    return nextBookings;
   }, [token]);
 
   const loadDrivers = useCallback(
@@ -493,7 +388,6 @@ export default function DispatchPage() {
 
         const response = await fetch(`${API_URL}/drivers`, {
           headers: { Authorization: `Bearer ${token}` },
-          cache: 'no-store',
         });
 
         if (!response.ok) {
@@ -514,17 +408,18 @@ export default function DispatchPage() {
     [token],
   );
 
-  const hardRefresh = useCallback(async () => {
-    await Promise.all([loadBookings(), loadDrivers(false)]);
-  }, [loadBookings, loadDrivers]);
-
   useEffect(() => {
     if (!token) return;
 
     const load = async () => {
       try {
         setLoading(true);
-        await Promise.all([loadBookings(), loadDrivers(true)]);
+        const loadedBookings = await loadBookings();
+        await loadDrivers(true);
+
+        if (!selectedBooking && loadedBookings.length > 0) {
+          setSelectedBooking(loadedBookings[0]);
+        }
       } catch (error) {
         console.error(error);
       } finally {
@@ -539,20 +434,12 @@ export default function DispatchPage() {
     if (!token) return;
 
     const interval = setInterval(() => {
-      void hardRefresh();
-    }, 5000);
+      void loadDrivers(false);
+      void loadBookings();
+    }, 10000);
 
     return () => clearInterval(interval);
-  }, [token, hardRefresh]);
-
-  useEffect(() => {
-    const onFocus = () => {
-      void hardRefresh();
-    };
-
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [hardRefresh]);
+  }, [token, loadDrivers, loadBookings]);
 
   useEffect(() => {
     if (!token) return;
@@ -570,21 +457,36 @@ export default function DispatchPage() {
       setBookings((prev) =>
         prev.map((b) => (b.id === p.booking.id ? p.booking : b)),
       );
-      setSelectedBooking((prev) => (prev?.id === p.booking.id ? p.booking : prev));
+      setSelectedBooking((prev) =>
+        prev?.id === p.booking.id ? p.booking : prev,
+      );
+      setTimelineBooking((prev) =>
+        prev?.id === p.booking.id ? p.booking : prev,
+      );
     });
 
     socket.on('booking:assigned', (p) => {
       setBookings((prev) =>
         prev.map((b) => (b.id === p.booking.id ? p.booking : b)),
       );
-      setSelectedBooking((prev) => (prev?.id === p.booking.id ? p.booking : prev));
+      setSelectedBooking((prev) =>
+        prev?.id === p.booking.id ? p.booking : prev,
+      );
+      setTimelineBooking((prev) =>
+        prev?.id === p.booking.id ? p.booking : prev,
+      );
     });
 
     socket.on('booking:status_changed', (p) => {
       setBookings((prev) =>
         prev.map((b) => (b.id === p.booking.id ? p.booking : b)),
       );
-      setSelectedBooking((prev) => (prev?.id === p.booking.id ? p.booking : prev));
+      setSelectedBooking((prev) =>
+        prev?.id === p.booking.id ? p.booking : prev,
+      );
+      setTimelineBooking((prev) =>
+        prev?.id === p.booking.id ? p.booking : prev,
+      );
     });
 
     socket.on('driver:updated', (p) => {
@@ -598,37 +500,6 @@ export default function DispatchPage() {
     return () => closeSocket();
   }, [token]);
 
-  useEffect(() => {
-    if (!mapRef.current) return;
-
-    const points: LatLngTuple[] = [
-      ...liveDrivers.map(
-        (driver): LatLngTuple => [
-          driver.latitude as number,
-          driver.longitude as number,
-        ],
-      ),
-    ];
-
-    if (selectedDriverPosition) points.push(selectedDriverPosition);
-    if (selectedPickupPosition) points.push(selectedPickupPosition);
-    if (selectedDropoffPosition) points.push(selectedDropoffPosition);
-
-    if (points.length === 0) return;
-
-    if (points.length === 1) {
-      mapRef.current.setView(points[0], 13);
-      return;
-    }
-
-    mapRef.current.fitBounds(points, { padding: [24, 24] });
-  }, [
-    liveDrivers,
-    selectedDriverPosition,
-    selectedPickupPosition,
-    selectedDropoffPosition,
-  ]);
-
   const autoDispatch = async (id: string) => {
     try {
       setAutoDispatchingId(id);
@@ -636,7 +507,7 @@ export default function DispatchPage() {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
-      await hardRefresh();
+      await loadBookings();
     } finally {
       setAutoDispatchingId(null);
     }
@@ -653,10 +524,19 @@ export default function DispatchPage() {
         },
         body: JSON.stringify({ driverId }),
       });
-      await hardRefresh();
+      await loadBookings();
     } finally {
       setAssigningKey(null);
     }
+  };
+
+  const loadTimeline = async (bookingId: string) => {
+    const res = await fetch(`${API_URL}/bookings/${bookingId}/timeline`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const data = (await res.json()) as TimelineEvent[];
+    setTimeline(Array.isArray(data) ? data : []);
   };
 
   const createBooking = async (autoDispatchAfterCreate = false) => {
@@ -676,42 +556,20 @@ export default function DispatchPage() {
         throw new Error('Dropoff address is required');
       }
 
-      if (form.whenType === 'SCHEDULED' && !form.pickupAt) {
-        throw new Error('Scheduled bookings need a date and time');
-      }
-
-      const scheduledTime =
-        form.whenType === 'SCHEDULED'
-          ? new Date(form.pickupAt).toISOString()
-          : new Date().toISOString();
-
-      const quotedPriceNumber =
-        form.quotedPrice.trim() !== '' ? Number(form.quotedPrice) : null;
-
-      if (quotedPriceNumber != null && Number.isNaN(quotedPriceNumber)) {
-        throw new Error('Quoted price must be a valid number');
-      }
-
       const payload = {
         customerName: form.customerName.trim(),
         customerPhone: form.customerPhone.trim() || null,
-        pickup: form.pickupAddress.trim(),
-        dropoff: form.dropoffAddress.trim(),
-        pickupTime: scheduledTime,
-        pickupLat: form.pickupLatitude,
-        pickupLng: form.pickupLongitude,
-        dropoffLat: form.dropoffLatitude,
-        dropoffLng: form.dropoffLongitude,
         pickupAddress: form.pickupAddress.trim(),
         dropoffAddress: form.dropoffAddress.trim(),
-        pickupAt: scheduledTime,
+        pickupAt: form.pickupAt || null,
+        passengerCount: Number(form.passengerCount) || 1,
+        quotedPrice: form.quotedPrice ? Number(form.quotedPrice) : null,
+        notes: form.notes.trim() || null,
         pickupLatitude: form.pickupLatitude,
         pickupLongitude: form.pickupLongitude,
         dropoffLatitude: form.dropoffLatitude,
         dropoffLongitude: form.dropoffLongitude,
-        passengerCount: Number(form.passengerCount) || 1,
-        quotedPrice: quotedPriceNumber,
-        notes: form.notes.trim() || null,
+        autoDispatch: autoDispatchAfterCreate,
       };
 
       const res = await fetch(`${API_URL}/bookings`, {
@@ -731,13 +589,12 @@ export default function DispatchPage() {
       }
 
       const createdBooking = data as Booking;
+      const loadedBookings = await loadBookings();
+      const freshBooking =
+        loadedBookings.find((b) => b.id === createdBooking.id) || createdBooking;
 
+      setSelectedBooking(freshBooking);
       setForm(initialForm);
-      await hardRefresh();
-
-      if (autoDispatchAfterCreate && createdBooking?.id) {
-        await autoDispatch(createdBooking.id);
-      }
     } catch (err) {
       setBookingError(
         err instanceof Error ? err.message : 'Failed to create booking',
@@ -747,749 +604,523 @@ export default function DispatchPage() {
     }
   };
 
-  const loadTimeline = async (bookingId: string) => {
-    const res = await fetch(`${API_URL}/bookings/${bookingId}/timeline`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    setTimeline(await res.json());
-  };
+  const stats = useMemo(() => {
+    return {
+      bookings: bookings.length,
+      drivers: drivers.length,
+      available: drivers.filter(
+        (d) => d.isAvailable || d.status === 'AVAILABLE',
+      ).length,
+      liveGps: liveDrivers.length,
+    };
+  }, [bookings, drivers, liveDrivers.length]);
 
   return (
-    <main className="min-h-screen bg-[#05070c] p-4 text-white md:p-6">
-      <div className="mx-auto max-w-[1800px]">
-        <div className="mb-4 flex flex-col gap-3 rounded-2xl border border-white/10 bg-[#101427] px-5 py-4 md:flex-row md:items-center md:justify-between">
+    <main className="min-h-screen bg-black p-6 text-white">
+      <h1 className="mb-4 text-3xl font-bold">Dispatch</h1>
+
+      <div className="mb-4">
+        Status:{' '}
+        <span className={connected ? 'text-green-400' : 'text-red-400'}>
+          {connected ? 'LIVE' : 'OFFLINE'}
+        </span>
+      </div>
+
+      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Card label="Bookings" value={stats.bookings} />
+        <Card label="Drivers" value={stats.drivers} />
+        <Card label="Available" value={stats.available} />
+        <Card label="GPS Live" value={stats.liveGps} />
+      </div>
+
+      <section className="mb-8 rounded-2xl border border-white/10 bg-gray-950 p-5">
+        <div className="mb-6 flex items-center justify-between gap-4">
           <div>
-            <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-300/70">
-              CabHQ Operator
-            </div>
-            <h1 className="mt-1 text-2xl font-bold">Dispatch Dashboard</h1>
+            <h2 className="text-xl font-semibold">Add Job</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Create a booking directly from dispatch. New jobs will auto-focus on the map.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field
+            label="Customer name"
+            value={form.customerName}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, customerName: value }))
+            }
+            placeholder="John Smith"
+          />
+
+          <Field
+            label="Customer phone"
+            value={form.customerPhone}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, customerPhone: value }))
+            }
+            placeholder="07..."
+          />
+
+          <div className="md:col-span-2">
+            <AddressAutofillInput
+              label="Pickup address"
+              value={form.pickupAddress}
+              placeholder="Search pickup address"
+              autoComplete="off"
+              onChangeValue={(value) =>
+                setForm((prev) => ({
+                  ...prev,
+                  pickupAddress: value,
+                }))
+              }
+              onSelectAddress={(address: SelectedAddress) =>
+                setForm((prev) => ({
+                  ...prev,
+                  pickupAddress: address.label,
+                  pickupLatitude: address.lat,
+                  pickupLongitude: address.lng,
+                }))
+              }
+            />
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 text-sm">
+          <div className="md:col-span-2">
+            <AddressAutofillInput
+              label="Dropoff address"
+              value={form.dropoffAddress}
+              placeholder="Search dropoff address"
+              autoComplete="off"
+              onChangeValue={(value) =>
+                setForm((prev) => ({
+                  ...prev,
+                  dropoffAddress: value,
+                }))
+              }
+              onSelectAddress={(address: SelectedAddress) =>
+                setForm((prev) => ({
+                  ...prev,
+                  dropoffAddress: address.label,
+                  dropoffLatitude: address.lat,
+                  dropoffLongitude: address.lng,
+                }))
+              }
+            />
+          </div>
+
+          <DateTimeField
+            label="Pickup time"
+            value={form.pickupAt}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, pickupAt: value }))
+            }
+          />
+
+          <NumberField
+            label="Passenger count"
+            value={form.passengerCount}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, passengerCount: value }))
+            }
+          />
+
+          <Field
+            label="Quoted price"
+            value={form.quotedPrice}
+            onChange={(value) =>
+              setForm((prev) => ({ ...prev, quotedPrice: value }))
+            }
+            placeholder="12.50"
+          />
+
+          <div className="md:col-span-2">
+            <TextAreaField
+              label="Notes"
+              value={form.notes}
+              onChange={(value) =>
+                setForm((prev) => ({ ...prev, notes: value }))
+              }
+              placeholder="Booking notes, gate code, wheelchair, etc."
+            />
+          </div>
+        </div>
+
+        {bookingError ? (
+          <div className="mt-4 rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {bookingError}
+          </div>
+        ) : null}
+
+        <div className="mt-6 flex flex-wrap gap-3">
+          <button
+            onClick={() => void createBooking(false)}
+            disabled={creatingBooking}
+            className="rounded bg-cyan-700 px-4 py-2 text-sm font-medium hover:bg-cyan-600 disabled:opacity-50"
+          >
+            {creatingBooking ? 'Creating...' : 'Create Job'}
+          </button>
+
+          <button
+            onClick={() => void createBooking(true)}
+            disabled={creatingBooking}
+            className="rounded bg-emerald-700 px-4 py-2 text-sm font-medium hover:bg-emerald-600 disabled:opacity-50"
+          >
+            {creatingBooking ? 'Creating...' : 'Create & Auto Dispatch'}
+          </button>
+        </div>
+      </section>
+
+      <section className="mb-8 rounded-2xl border border-white/10 bg-gray-950 p-5">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold">Live Driver Map</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Real-time vehicle positions with booking markers
+            </p>
+          </div>
+
+          <button
+            onClick={() => void loadDrivers(true)}
+            className="rounded bg-cyan-700 px-4 py-2 text-sm font-medium hover:bg-cyan-600"
+          >
+            Refresh Drivers
+          </button>
+        </div>
+
+        {driversError ? (
+          <div className="mb-4 rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {driversError}
+          </div>
+        ) : null}
+
+        <div className="overflow-hidden rounded-2xl border border-white/10">
+          <div className="h-[420px] w-full bg-gray-900">
+            <MapContainer
+              center={mapCenter}
+              zoom={12}
+              scrollWheelZoom
+              className="h-full w-full"
+              ref={(map) => {
+                if (map) mapRef.current = map;
+              }}
+            >
+              <TileLayer
+                attribution="&copy; OpenStreetMap contributors"
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+
+              {driverIconFactory &&
+                liveDrivers.map((driver) => (
+                  <Marker
+                    key={driver.id}
+                    position={[
+                      driver.latitude as number,
+                      driver.longitude as number,
+                    ] as LatLngTuple}
+                    icon={driverIconFactory(driver)}
+                  >
+                    <Popup>
+                      <div className="min-w-[180px] text-black">
+                        <div className="font-bold">{getDriverName(driver)}</div>
+                        <div className="mt-1 text-sm">
+                          {(driver.status || 'UNKNOWN').replace(/_/g, ' ')}
+                        </div>
+                        <div className="mt-1 text-sm">
+                          {getVehicleLabel(driver.vehicle ?? null)}
+                        </div>
+                        <div className="mt-2 text-xs text-gray-600">
+                          GPS: {formatDateTime(driver.lastLocationAt)}
+                        </div>
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
+
+              {bookingIconFactory && selectedPickupPosition ? (
+                <Marker
+                  position={selectedPickupPosition}
+                  icon={bookingIconFactory('#2563eb', 'P')}
+                >
+                  <Popup>
+                    <div className="text-black">
+                      <div className="font-bold">Pickup</div>
+                      <div className="mt-1 text-sm">
+                        {selectedBooking ? getPickupLabel(selectedBooking) : '—'}
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              ) : null}
+
+              {bookingIconFactory && selectedDropoffPosition ? (
+                <Marker
+                  position={selectedDropoffPosition}
+                  icon={bookingIconFactory('#7c3aed', 'D')}
+                >
+                  <Popup>
+                    <div className="text-black">
+                      <div className="font-bold">Dropoff</div>
+                      <div className="mt-1 text-sm">
+                        {selectedBooking ? getDropoffLabel(selectedBooking) : '—'}
+                      </div>
+                    </div>
+                  </Popup>
+                </Marker>
+              ) : null}
+            </MapContainer>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {driversLoading && drivers.length === 0 ? (
+            <div className="rounded border border-white/10 bg-black/30 p-4 text-sm text-gray-400">
+              Loading drivers...
+            </div>
+          ) : null}
+
+          {!driversLoading && drivers.length === 0 ? (
+            <div className="rounded border border-white/10 bg-black/30 p-4 text-sm text-gray-400">
+              No drivers found.
+            </div>
+          ) : null}
+
+          {drivers.map((driver) => (
             <div
-              className={`rounded-full border px-3 py-1 font-semibold ${
-                connected
-                  ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
-                  : 'border-rose-500/30 bg-rose-500/15 text-rose-300'
+              key={driver.id}
+              className="rounded-xl border border-white/10 bg-black/30 p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-semibold">
+                    {getDriverName(driver)}
+                  </div>
+                  <div className="mt-1 text-sm text-gray-400">
+                    {getVehicleLabel(driver.vehicle ?? null)}
+                  </div>
+                </div>
+
+                <div className="rounded-full bg-cyan-900/50 px-3 py-1 text-xs font-semibold text-cyan-200">
+                  {(driver.status || (driver.isAvailable ? 'AVAILABLE' : 'UNKNOWN')).replace(
+                    /_/g,
+                    ' ',
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2 text-sm text-gray-200">
+                <div>
+                  <span className="text-gray-500">Latitude:</span>{' '}
+                  {driver.latitude ?? '—'}
+                </div>
+                <div>
+                  <span className="text-gray-500">Longitude:</span>{' '}
+                  {driver.longitude ?? '—'}
+                </div>
+                <div>
+                  <span className="text-gray-500">Last GPS update:</span>{' '}
+                  {formatDateTime(driver.lastLocationAt)}
+                </div>
+                <div>
+                  <span className="text-gray-500">Duty:</span>{' '}
+                  {driver.isOnDuty ? 'On duty' : 'Off duty'}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="mb-8">
+        <h2 className="mb-2 text-xl">Bookings</h2>
+
+        {loading ? (
+          <div>Loading...</div>
+        ) : (
+          bookings.map((b) => (
+            <div
+              key={b.id}
+              onClick={() => setSelectedBooking(b)}
+              className={`mb-3 cursor-pointer rounded border p-4 transition ${
+                selectedBooking?.id === b.id
+                  ? 'border-cyan-500 bg-cyan-500/5'
+                  : 'border-white/10 hover:border-cyan-700/50'
               }`}
             >
-              {connected ? 'LIVE' : 'OFFLINE'}
+              <div className="font-bold">{b.reference}</div>
+              <div className="text-sm text-gray-400">
+                {getPickupLabel(b)} → {getDropoffLabel(b)}
+              </div>
+              {getPickupTimeLabel(b) ? (
+                <div className="mt-1 text-sm text-gray-500">
+                  Pickup: {formatDateTime(getPickupTimeLabel(b))}
+                </div>
+              ) : null}
+
+              <div className="mt-2 text-sm">
+                Status: {b.status} | Driver: {b.driver ? getDriverName(b.driver) : 'None'}
+              </div>
+
+              {b.suggestedDrivers?.length ? (
+                <div className="mt-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                  <div className="mb-2 text-sm font-semibold text-emerald-300">
+                    Suggested Drivers
+                  </div>
+
+                  <div className="space-y-2">
+                    {b.suggestedDrivers.slice(0, 3).map((suggested, index) => {
+                      const key = `${b.id}:${suggested.id}`;
+                      return (
+                        <div
+                          key={suggested.id}
+                          className="flex flex-col gap-2 rounded-lg border border-white/10 bg-black/20 p-3 md:flex-row md:items-center md:justify-between"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div>
+                            <div className="text-sm font-semibold text-white">
+                              #{index + 1} {suggested.name}
+                            </div>
+                            <div className="mt-1 text-xs text-gray-400">
+                              {(suggested.status || 'UNKNOWN').replace(/_/g, ' ')} •{' '}
+                              {getVehicleLabel(suggested.vehicle ?? null)}
+                            </div>
+                            <div className="mt-1 text-xs text-gray-400">
+                              Score: {suggested.score ?? '—'} • Distance:{' '}
+                              {formatDistance(suggested.distanceMiles)} • GPS:{' '}
+                              {formatDateTime(suggested.lastLocationAt)}
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={() => assignDriver(b.id, suggested.id)}
+                            disabled={assigningKey === key}
+                            className="rounded bg-emerald-600 px-3 py-2 text-xs font-medium hover:bg-emerald-500 disabled:opacity-50"
+                          >
+                            {assigningKey === key ? 'Assigning...' : 'Assign'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              <div
+                className="mt-4 flex flex-wrap gap-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  onClick={() => autoDispatch(b.id)}
+                  disabled={autoDispatchingId === b.id}
+                  className="rounded bg-blue-600 px-3 py-1 disabled:opacity-50"
+                >
+                  {autoDispatchingId === b.id ? 'Running...' : 'Auto Dispatch'}
+                </button>
+
+                {drivers.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => assignDriver(b.id, d.id)}
+                    disabled={assigningKey === `${b.id}:${d.id}`}
+                    className="rounded bg-gray-700 px-2 py-1 text-xs disabled:opacity-50"
+                  >
+                    {assigningKey === `${b.id}:${d.id}`
+                      ? 'Assigning...'
+                      : getDriverName(d)}
+                  </button>
+                ))}
+
+                <button
+                  onClick={async () => {
+                    setSelectedBooking(b);
+                    setTimelineBooking(b);
+                    await loadTimeline(b.id);
+                  }}
+                  className="rounded bg-purple-600 px-3 py-1"
+                >
+                  Timeline
+                </button>
+              </div>
             </div>
+          ))
+        )}
+      </div>
+
+      {selectedBooking ? (
+        <div className="mb-8 rounded-2xl border border-cyan-500/30 bg-cyan-500/5 p-4">
+          <div className="text-lg font-semibold text-cyan-200">
+            Selected Booking: {selectedBooking.reference}
+          </div>
+          <div className="mt-2 text-sm text-white/80">
+            Pickup: {getPickupLabel(selectedBooking)}
+          </div>
+          <div className="mt-1 text-sm text-white/80">
+            Dropoff: {getDropoffLabel(selectedBooking)}
+          </div>
+          <div className="mt-1 text-sm text-white/80">
+            Pickup coords:{' '}
+            {selectedBooking.pickupLatitude != null &&
+            selectedBooking.pickupLongitude != null
+              ? `${selectedBooking.pickupLatitude}, ${selectedBooking.pickupLongitude}`
+              : 'Not available'}
+          </div>
+          <div className="mt-1 text-sm text-white/80">
+            Dropoff coords:{' '}
+            {selectedBooking.dropoffLatitude != null &&
+            selectedBooking.dropoffLongitude != null
+              ? `${selectedBooking.dropoffLatitude}, ${selectedBooking.dropoffLongitude}`
+              : 'Not available'}
+          </div>
+        </div>
+      ) : null}
+
+      <div>
+        <h2 className="mb-2 text-xl">Drivers</h2>
+
+        {drivers.map((d) => (
+          <div key={d.id} className="mb-2 rounded border p-3">
+            {getDriverName(d)} -{' '}
+            {d.isAvailable || d.status === 'AVAILABLE' ? 'Available' : 'Busy'}
+            {d.latitude != null && d.longitude != null ? (
+              <span className="ml-2 text-xs text-cyan-300">
+                ({d.latitude}, {d.longitude})
+              </span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      {timelineBooking ? (
+        <div className="fixed inset-0 z-50 bg-black/80 p-10">
+          <div className="mx-auto max-w-xl rounded bg-gray-900 p-6">
+            <h2 className="mb-4 text-xl">
+              Timeline - {timelineBooking.reference}
+            </h2>
+
+            {timeline.length === 0 ? (
+              <div className="text-sm text-gray-400">No timeline events yet.</div>
+            ) : (
+              timeline.map((t) => (
+                <div key={t.id} className="mb-2 text-sm">
+                  {new Date(t.createdAt).toLocaleTimeString()} -{' '}
+                  {t.message || t.type || 'Event'}
+                  {t.note ? ` (${t.note})` : ''}
+                </div>
+              ))
+            )}
+
             <button
-              onClick={() => void hardRefresh()}
-              className="rounded-full border border-cyan-500/30 bg-cyan-500/15 px-3 py-1 font-semibold text-cyan-200"
+              onClick={() => {
+                setTimelineBooking(null);
+                setTimeline([]);
+              }}
+              className="mt-4 rounded bg-red-600 px-4 py-2"
             >
-              Refresh Now
+              Close
             </button>
           </div>
         </div>
-
-        <div className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-          <Card label="Live Jobs" value={stats.liveBookings} />
-          <Card label="Completed" value={stats.completed} />
-          <Card label="Drivers" value={stats.drivers} />
-          <Card label="Available" value={stats.available} />
-          <Card label="Busy" value={stats.busy} />
-          <Card label="GPS Live" value={stats.liveGps} />
-        </div>
-
-        <div className="mb-6 grid gap-4 xl:grid-cols-[1.15fr_0.72fr_1.15fr]">
-          <section className="rounded-2xl border border-white/10 bg-[#0d1120] p-4">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold">New Booking</h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Create and dispatch directly from operator view.
-              </p>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field
-                label="Customer name"
-                value={form.customerName}
-                onChange={(value) =>
-                  setForm((prev) => ({ ...prev, customerName: value }))
-                }
-                placeholder="John Smith"
-              />
-
-              <Field
-                label="Customer phone"
-                value={form.customerPhone}
-                onChange={(value) =>
-                  setForm((prev) => ({ ...prev, customerPhone: value }))
-                }
-                placeholder="07..."
-              />
-
-              <div className="md:col-span-2">
-                <AddressAutofillInput
-                  label="Pickup address"
-                  value={form.pickupAddress}
-                  placeholder="Search pickup address"
-                  autoComplete="off"
-                  onChangeValue={(value) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      pickupAddress: value,
-                    }))
-                  }
-                  onSelectAddress={(address: SelectedAddress) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      pickupAddress: address.label,
-                      pickupLatitude: address.lat,
-                      pickupLongitude: address.lng,
-                    }))
-                  }
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <AddressAutofillInput
-                  label="Dropoff address"
-                  value={form.dropoffAddress}
-                  placeholder="Search dropoff address"
-                  autoComplete="off"
-                  onChangeValue={(value) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      dropoffAddress: value,
-                    }))
-                  }
-                  onSelectAddress={(address: SelectedAddress) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      dropoffAddress: address.label,
-                      dropoffLatitude: address.lat,
-                      dropoffLongitude: address.lng,
-                    }))
-                  }
-                />
-              </div>
-
-              <SelectField
-                label="When"
-                value={form.whenType}
-                onChange={(value) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    whenType: value as 'ASAP' | 'SCHEDULED',
-                    pickupAt:
-                      value === 'ASAP'
-                        ? ''
-                        : prev.pickupAt || toDateTimeLocalValue(),
-                  }))
-                }
-                options={[
-                  { label: 'ASAP', value: 'ASAP' },
-                  { label: 'Scheduled', value: 'SCHEDULED' },
-                ]}
-              />
-
-              {form.whenType === 'SCHEDULED' ? (
-                <DateTimeField
-                  label="Pickup date & time"
-                  value={form.pickupAt}
-                  min={toDateTimeLocalValue()}
-                  onChange={(value) =>
-                    setForm((prev) => ({ ...prev, pickupAt: value }))
-                  }
-                />
-              ) : (
-                <InfoField label="Pickup date & time" value="ASAP" />
-              )}
-
-              <NumberField
-                label="Passenger count"
-                value={form.passengerCount}
-                onChange={(value) =>
-                  setForm((prev) => ({ ...prev, passengerCount: value }))
-                }
-              />
-
-              <Field
-                label="Quoted price"
-                value={form.quotedPrice}
-                onChange={(value) =>
-                  setForm((prev) => ({ ...prev, quotedPrice: value }))
-                }
-                placeholder="12.50"
-              />
-
-              <div className="md:col-span-2">
-                <TextAreaField
-                  label="Notes"
-                  value={form.notes}
-                  onChange={(value) =>
-                    setForm((prev) => ({ ...prev, notes: value }))
-                  }
-                  placeholder="Gate code, wheelchair, account note, etc."
-                />
-              </div>
-            </div>
-
-            {bookingError ? (
-              <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-                {bookingError}
-              </div>
-            ) : null}
-
-            <div className="mt-5 flex flex-wrap gap-3">
-              <button
-                onClick={() => void createBooking(false)}
-                disabled={creatingBooking}
-                className="rounded-xl bg-cyan-700 px-4 py-2.5 text-sm font-semibold hover:bg-cyan-600 disabled:opacity-50"
-              >
-                {creatingBooking ? 'Creating...' : 'Create Job'}
-              </button>
-
-              <button
-                onClick={() => void createBooking(true)}
-                disabled={creatingBooking}
-                className="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-semibold hover:bg-emerald-600 disabled:opacity-50"
-              >
-                {creatingBooking ? 'Creating...' : 'Create & Auto Dispatch'}
-              </button>
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-white/10 bg-[#0d1120] p-4">
-            <div className="mb-4">
-              <h2 className="text-lg font-semibold">Dispatch Overview</h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Live buckets and selected booking context.
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                  Driver Buckets
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-lg bg-emerald-500/10 p-3">
-                    <div className="text-slate-400">Available</div>
-                    <div className="mt-1 text-2xl font-bold text-emerald-300">
-                      {stats.available}
-                    </div>
-                  </div>
-                  <div className="rounded-lg bg-amber-500/10 p-3">
-                    <div className="text-slate-400">Busy</div>
-                    <div className="mt-1 text-2xl font-bold text-amber-300">
-                      {stats.busy}
-                    </div>
-                  </div>
-                  <div className="rounded-lg bg-cyan-500/10 p-3">
-                    <div className="text-slate-400">GPS Live</div>
-                    <div className="mt-1 text-2xl font-bold text-cyan-300">
-                      {stats.liveGps}
-                    </div>
-                  </div>
-                  <div className="rounded-lg bg-violet-500/10 p-3">
-                    <div className="text-slate-400">Live Jobs</div>
-                    <div className="mt-1 text-2xl font-bold text-violet-300">
-                      {stats.liveBookings}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                  Selected Booking
-                </div>
-                {selectedBooking ? (
-                  <div className="mt-3 space-y-2 text-sm">
-                    <div className="font-semibold text-white">
-                      {selectedBooking.reference}
-                    </div>
-                    <div className="text-slate-300">
-                      {getPickupLabel(selectedBooking)}
-                    </div>
-                    <div className="text-slate-400">
-                      → {getDropoffLabel(selectedBooking)}
-                    </div>
-                    <div className="text-slate-400">
-                      Time: {formatDateTime(getPickupTimeLabel(selectedBooking))}
-                    </div>
-                    <div className="text-slate-400">
-                      Driver:{' '}
-                      {selectedBooking.driver ? getDriverName(selectedBooking.driver) : 'Unassigned'}
-                    </div>
-                    <div className="text-slate-400">
-                      Fare: {formatPrice(selectedBooking.quotedPrice)}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-3 text-sm text-slate-400">
-                    Select a booking to view map route and dispatch context.
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-xl border border-white/10 bg-black/25 p-4">
-                <div className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                  Nearest Suggestions
-                </div>
-                {nearestDrivers.length > 0 ? (
-                  <div className="mt-3 space-y-2">
-                    {nearestDrivers.map((driver, index) => (
-                      <div
-                        key={driver.id}
-                        className="flex items-center justify-between rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-white">
-                            #{index + 1} {driver.name}
-                          </div>
-                          <div className="truncate text-xs text-slate-400">
-                            {formatDistance(driver.distanceMiles)} •{' '}
-                            {(driver.status || 'UNKNOWN').replace(/_/g, ' ')}
-                          </div>
-                        </div>
-                        {selectedBooking ? (
-                          <button
-                            onClick={() => assignDriver(selectedBooking.id, driver.id)}
-                            disabled={
-                              assigningKey === `${selectedBooking.id}:${driver.id}`
-                            }
-                            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                          >
-                            {assigningKey === `${selectedBooking.id}:${driver.id}`
-                              ? '...'
-                              : 'Assign'}
-                          </button>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="mt-3 text-sm text-slate-400">
-                    No suggestions yet.
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-white/10 bg-[#0d1120] p-4">
-            <div className="mb-4 flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold">Live Map</h2>
-                <p className="mt-1 text-sm text-slate-400">
-                  Drivers, selected pickup, dropoff and route lines.
-                </p>
-              </div>
-
-              <button
-                onClick={() => void loadDrivers(true)}
-                className="rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold hover:bg-cyan-600"
-              >
-                Refresh Drivers
-              </button>
-            </div>
-
-            {driversError ? (
-              <div className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-                {driversError}
-              </div>
-            ) : null}
-
-            <div className="overflow-hidden rounded-2xl border border-white/10">
-              <div className="h-[520px] w-full bg-gray-900">
-                <MapContainer
-                  center={mapCenter}
-                  zoom={12}
-                  scrollWheelZoom
-                  className="h-full w-full"
-                  ref={(map) => {
-                    if (map) mapRef.current = map;
-                  }}
-                >
-                  <TileLayer
-                    attribution="&copy; OpenStreetMap contributors"
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-
-                  {driverIconFactory &&
-                    liveDrivers.map((driver) => (
-                      <Marker
-                        key={driver.id}
-                        position={[
-                          driver.latitude as number,
-                          driver.longitude as number,
-                        ] as LatLngTuple}
-                        icon={driverIconFactory(driver)}
-                      >
-                        <Popup>
-                          <div className="min-w-[180px] text-black">
-                            <div className="font-bold">{getDriverName(driver)}</div>
-                            <div className="mt-1 text-sm">
-                              {(driver.status || 'UNKNOWN').replace(/_/g, ' ')}
-                            </div>
-                            <div className="mt-1 text-sm">
-                              {getVehicleLabel(driver.vehicle ?? null)}
-                            </div>
-                            <div className="mt-2 text-xs text-gray-600">
-                              GPS: {formatDateTime(driver.lastLocationAt)}
-                            </div>
-                          </div>
-                        </Popup>
-                      </Marker>
-                    ))}
-
-                  {driverIconFactory && selectedDriver && selectedDriverPosition ? (
-                    <Marker
-                      position={selectedDriverPosition}
-                      icon={driverIconFactory(selectedDriver)}
-                    >
-                      <Popup>
-                        <div className="min-w-[180px] text-black">
-                          <div className="font-bold">
-                            Assigned Driver: {getDriverName(selectedDriver)}
-                          </div>
-                          <div className="mt-1 text-sm">
-                            {(selectedDriver.status || 'UNKNOWN').replace(
-                              /_/g,
-                              ' ',
-                            )}
-                          </div>
-                          <div className="mt-1 text-sm">
-                            {getVehicleLabel(selectedDriver.vehicle ?? null)}
-                          </div>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  ) : null}
-
-                  {bookingIconFactory && selectedPickupPosition ? (
-                    <Marker
-                      position={selectedPickupPosition}
-                      icon={bookingIconFactory('#2563eb', 'P')}
-                    >
-                      <Popup>
-                        <div className="text-black">
-                          <div className="font-bold">Pickup</div>
-                          <div className="mt-1 text-sm">
-                            {selectedBooking ? getPickupLabel(selectedBooking) : '—'}
-                          </div>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  ) : null}
-
-                  {bookingIconFactory && selectedDropoffPosition ? (
-                    <Marker
-                      position={selectedDropoffPosition}
-                      icon={bookingIconFactory('#7c3aed', 'D')}
-                    >
-                      <Popup>
-                        <div className="text-black">
-                          <div className="font-bold">Dropoff</div>
-                          <div className="mt-1 text-sm">
-                            {selectedBooking
-                              ? getDropoffLabel(selectedBooking)
-                              : '—'}
-                          </div>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  ) : null}
-
-                  {selectedDriverPosition && selectedPickupPosition ? (
-                    <Polyline
-                      positions={[selectedDriverPosition, selectedPickupPosition]}
-                      pathOptions={{
-                        color: '#22c55e',
-                        weight: 4,
-                        opacity: 0.85,
-                      }}
-                    />
-                  ) : null}
-
-                  {selectedPickupPosition && selectedDropoffPosition ? (
-                    <Polyline
-                      positions={[selectedPickupPosition, selectedDropoffPosition]}
-                      pathOptions={{
-                        color: '#8b5cf6',
-                        weight: 4,
-                        opacity: 0.85,
-                      }}
-                    />
-                  ) : null}
-                </MapContainer>
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <section className="rounded-2xl border border-white/10 bg-[#0d1120] p-4">
-          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold">Dispatch Board</h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Compact operator strips for live and completed work.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <TabButton
-                active={activeTab === 'LIVE'}
-                onClick={() => setActiveTab('LIVE')}
-                label={`Live (${liveBookingRows.length})`}
-              />
-              <TabButton
-                active={activeTab === 'COMPLETED'}
-                onClick={() => setActiveTab('COMPLETED')}
-                label={`Completed (${completedBookingRows.length})`}
-              />
-            </div>
-          </div>
-
-          <div className="hidden grid-cols-[110px_90px_1.8fr_130px_150px_120px_320px] gap-3 border-b border-white/10 px-3 pb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 xl:grid">
-            <div>Reference</div>
-            <div>Time</div>
-            <div>Route</div>
-            <div>Status</div>
-            <div>Driver</div>
-            <div>Fare</div>
-            <div>Actions</div>
-          </div>
-
-          <div className="mt-3 space-y-2">
-            {loading ? (
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-slate-400">
-                Loading bookings...
-              </div>
-            ) : displayedBookings.length === 0 ? (
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-slate-400">
-                No bookings in this view.
-              </div>
-            ) : (
-              displayedBookings.map((booking) => {
-                const rowKey = booking.id;
-                return (
-                  <div
-                    key={rowKey}
-                    className={`rounded-xl border px-3 py-3 transition ${
-                      selectedBooking?.id === booking.id
-                        ? 'border-cyan-500/40 bg-cyan-500/8'
-                        : 'border-white/10 bg-black/20'
-                    }`}
-                  >
-                    <div className="grid gap-3 xl:grid-cols-[110px_90px_1.8fr_130px_150px_120px_320px] xl:items-center">
-                      <div>
-                        <div className="text-sm font-bold text-white">
-                          {booking.reference}
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          {booking.customerName || 'No name'}
-                        </div>
-                      </div>
-
-                      <div className="text-sm text-slate-300">
-                        {formatTimeOnly(getPickupTimeLabel(booking))}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="truncate text-sm text-white">
-                          {getPickupLabel(booking)}
-                        </div>
-                        <div className="truncate text-sm text-slate-400">
-                          → {getDropoffLabel(booking)}
-                        </div>
-                      </div>
-
-                      <div>
-                        <span
-                          className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(
-                            booking.status,
-                          )}`}
-                        >
-                          {(booking.status || 'UNKNOWN').replace(/_/g, ' ')}
-                        </span>
-                      </div>
-
-                      <div className="text-sm text-slate-300">
-                        {booking.driver ? getDriverName(booking.driver) : 'Unassigned'}
-                      </div>
-
-                      <div className="text-sm font-semibold text-white">
-                        {formatPrice(booking.quotedPrice)}
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        {activeTab === 'LIVE' ? (
-                          <>
-                            <button
-                              onClick={() => void autoDispatch(booking.id)}
-                              disabled={autoDispatchingId === booking.id}
-                              className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                            >
-                              {autoDispatchingId === booking.id
-                                ? 'Running...'
-                                : 'Auto Dispatch'}
-                            </button>
-
-                            {nearestDrivers.length > 0 && selectedBooking?.id === booking.id
-                              ? null
-                              : drivers.slice(0, 3).map((driver) => (
-                                  <button
-                                    key={driver.id}
-                                    onClick={() => assignDriver(booking.id, driver.id)}
-                                    disabled={
-                                      assigningKey === `${booking.id}:${driver.id}`
-                                    }
-                                    className="rounded-lg bg-slate-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                                  >
-                                    {assigningKey === `${booking.id}:${driver.id}`
-                                      ? 'Assigning...'
-                                      : getDriverName(driver)}
-                                  </button>
-                                ))}
-                          </>
-                        ) : null}
-
-                        <button
-                          onClick={() => {
-                            setSelectedBooking(booking);
-                            void loadTimeline(booking.id);
-                          }}
-                          className="rounded-lg bg-violet-600 px-3 py-2 text-xs font-semibold text-white"
-                        >
-                          Timeline
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            setSelectedBooking(booking);
-                            void loadTimeline(booking.id);
-                          }}
-                          className="rounded-lg bg-cyan-700 px-3 py-2 text-xs font-semibold text-white"
-                        >
-                          Show on Map
-                        </button>
-                      </div>
-                    </div>
-
-                    {booking.suggestedDrivers?.length && activeTab === 'LIVE' ? (
-                      <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-                        <div className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">
-                          Suggested Drivers
-                        </div>
-                        <div className="grid gap-2 lg:grid-cols-3">
-                          {booking.suggestedDrivers.slice(0, 3).map((suggested) => {
-                            const key = `${booking.id}:${suggested.id}`;
-                            return (
-                              <div
-                                key={suggested.id}
-                                className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2"
-                              >
-                                <div className="min-w-0">
-                                  <div className="truncate text-sm font-semibold text-white">
-                                    {suggested.name}
-                                  </div>
-                                  <div className="truncate text-xs text-slate-400">
-                                    {formatDistance(suggested.distanceMiles)} •{' '}
-                                    {(suggested.status || 'UNKNOWN').replace(
-                                      /_/g,
-                                      ' ',
-                                    )}
-                                  </div>
-                                </div>
-                                <button
-                                  onClick={() =>
-                                    assignDriver(booking.id, suggested.id)
-                                  }
-                                  disabled={assigningKey === key}
-                                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                                >
-                                  {assigningKey === key ? '...' : 'Assign'}
-                                </button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </section>
-
-        {selectedBooking ? (
-          <section className="mt-6 rounded-2xl border border-white/10 bg-[#0d1120] p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">
-                  Timeline · {selectedBooking.reference}
-                </h2>
-                <p className="mt-1 text-sm text-slate-400">
-                  Pickup: {getPickupLabel(selectedBooking)} →{' '}
-                  {getDropoffLabel(selectedBooking)}
-                </p>
-              </div>
-
-              <button
-                onClick={() => setSelectedBooking(null)}
-                className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-semibold text-white"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {timeline.length === 0 ? (
-                <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-sm text-slate-400">
-                  No timeline items yet.
-                </div>
-              ) : (
-                timeline.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm"
-                  >
-                    <div className="font-semibold text-white">
-                      {new Date(item.createdAt).toLocaleTimeString()}
-                    </div>
-                    <div className="mt-1 text-slate-300">{item.type}</div>
-                    {item.note ? (
-                      <div className="mt-1 text-slate-400">{item.note}</div>
-                    ) : null}
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-        ) : null}
-      </div>
+      ) : null}
     </main>
-  );
-}
-
-function TabButton({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-full px-4 py-2 text-sm font-semibold ${
-        active
-          ? 'bg-cyan-600 text-white'
-          : 'bg-white/5 text-slate-300 hover:bg-white/10'
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -1506,12 +1137,12 @@ function Field({
 }) {
   return (
     <label className="space-y-2">
-      <span className="block text-sm text-slate-300">{label}</span>
+      <span className="block text-sm text-gray-300">{label}</span>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-white outline-none focus:border-cyan-500"
+        className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white outline-none focus:border-cyan-500"
       />
     </label>
   );
@@ -1528,43 +1159,14 @@ function NumberField({
 }) {
   return (
     <label className="space-y-2">
-      <span className="block text-sm text-slate-300">{label}</span>
+      <span className="block text-sm text-gray-300">{label}</span>
       <input
         type="number"
         min={1}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-white outline-none focus:border-cyan-500"
+        className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white outline-none focus:border-cyan-500"
       />
-    </label>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ label: string; value: string }>;
-}) {
-  return (
-    <label className="space-y-2">
-      <span className="block text-sm text-slate-300">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-white outline-none focus:border-cyan-500"
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
     </label>
   );
 }
@@ -1573,41 +1175,21 @@ function DateTimeField({
   label,
   value,
   onChange,
-  min,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  min?: string;
 }) {
   return (
     <label className="space-y-2">
-      <span className="block text-sm text-slate-300">{label}</span>
+      <span className="block text-sm text-gray-300">{label}</span>
       <input
         type="datetime-local"
         value={value}
-        min={min}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-white outline-none focus:border-cyan-500"
+        className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white outline-none focus:border-cyan-500"
       />
     </label>
-  );
-}
-
-function InfoField({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="space-y-2">
-      <span className="block text-sm text-slate-300">{label}</span>
-      <div className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-white">
-        {value}
-      </div>
-    </div>
   );
 }
 
@@ -1624,13 +1206,13 @@ function TextAreaField({
 }) {
   return (
     <label className="space-y-2">
-      <span className="block text-sm text-slate-300">{label}</span>
+      <span className="block text-sm text-gray-300">{label}</span>
       <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={4}
-        className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-3 text-white outline-none focus:border-cyan-500"
+        className="w-full rounded border border-white/10 bg-black px-3 py-3 text-white outline-none focus:border-cyan-500"
       />
     </label>
   );
