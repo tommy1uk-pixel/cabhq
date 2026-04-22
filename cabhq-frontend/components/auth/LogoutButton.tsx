@@ -1,7 +1,12 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
+
 export default function LogoutButton() {
+  const router = useRouter();
+
   function handleLogout() {
+    // localStorage
     localStorage.removeItem('cabhq_token');
     localStorage.removeItem('cabhq_user');
     localStorage.removeItem('token');
@@ -9,9 +14,24 @@ export default function LogoutButton() {
     localStorage.removeItem('driverToken');
     localStorage.removeItem('driver');
 
+    // session
     sessionStorage.clear();
 
-    window.location.replace('/login');
+    // cookies (important)
+    document.cookie =
+      'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    document.cookie =
+      'cabhq_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    document.cookie =
+      'authToken=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+
+    // hard redirect
+    router.replace('/login');
+    router.refresh();
+
+    setTimeout(() => {
+      window.location.href = '/login';
+    }, 100);
   }
 
   return (
