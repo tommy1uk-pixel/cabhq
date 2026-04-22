@@ -11,8 +11,7 @@ export default function LogoutButton() {
     localStorage.removeItem('driverToken');
     localStorage.removeItem('driver');
 
-    router.push('/login');
-    router.refresh();
+    window.location.href = '/login';
   }
 
   return (
