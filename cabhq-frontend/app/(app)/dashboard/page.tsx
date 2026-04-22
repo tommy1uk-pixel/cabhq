@@ -1,7 +1,37 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 import { getStoredUser } from '@/lib/auth';
+import { apiFetch } from '@/lib/api';
+
+type Booking = {
+  id: string;
+  reference: string;
+  status: string;
+  pickupTime?: string;
+  pickupAt?: string;
+  quotedPrice?: number | null;
+  customerName?: string | null;
+  driver?: {
+    id: string;
+    name?: string;
+    fullName?: string;
+  } | null;
+};
+
+type Driver = {
+  id: string;
+  name?: string;
+  fullName?: string;
+  status?: string;
+};
+
+type Vehicle = {
+  id: string;
+  reg: string;
+  status: string;
+};
 
 const quickLinks = [
   {
@@ -30,8 +60,221 @@ const quickLinks = [
   },
 ];
 
+function getPickupTime(booking: Booking) {
+  return booking.pickupAt || booking.pickupTime || null;
+}
+
+function isToday(value?: string | null) {
+  if (!value) return false;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const now = new Date();
+
+  return (
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear()
+  );
+}
+
+function isPending(status?: string) {
+  return ['BOOKED', 'OFFERED'].includes((status || '').toUpperCase());
+}
+
+function isCompleted(status?: string) {
+  return (status || '').toUpperCase() === 'COMPLETED';
+}
+
+function isCancelled(status?: string) {
+  return ['CANCELLED', 'NO_SHOW'].includes((status || '').toUpperCase());
+}
+
+function isLive(status?: string) {
+  return ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB', 'ALLOCATED'].includes(
+    (status || '').toUpperCase(),
+  );
+}
+
+function driverState(status?: string) {
+  return (status || '').toUpperCase();
+}
+
 export default function DashboardPage() {
   const user = getStoredUser();
+
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadDashboard() {
+      try {
+        setLoading(true);
+        setError('');
+
+        const [bookingsData, driversData, vehiclesData] = await Promise.all([
+          apiFetch<Booking[]>('/bookings').catch(() => []),
+          apiFetch<Driver[]>('/drivers').catch(() => []),
+          apiFetch<Vehicle[]>('/vehicles').catch(() => []),
+        ]);
+
+        if (!mounted) return;
+
+        setBookings(Array.isArray(bookingsData) ? bookingsData : []);
+        setDrivers(Array.isArray(driversData) ? driversData : []);
+        setVehicles(Array.isArray(vehiclesData) ? vehiclesData : []);
+      } catch (err) {
+        console.error(err);
+        if (mounted) {
+          setError(
+            err instanceof Error ? err.message : 'Failed to load dashboard',
+          );
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadDashboard();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const stats = useMemo(() => {
+    const todaysBookings = bookings.filter((booking) =>
+      isToday(getPickupTime(booking)),
+    );
+
+    const jobsToday = todaysBookings.length;
+    const pendingJobs = todaysBookings.filter((booking) =>
+      isPending(booking.status),
+    ).length;
+    const completedJobs = todaysBookings.filter((booking) =>
+      isCompleted(booking.status),
+    ).length;
+    const cancelledJobs = todaysBookings.filter((booking) =>
+      isCancelled(booking.status),
+    ).length;
+
+    const estimatedRevenue = todaysBookings.reduce((sum, booking) => {
+      if (!isCompleted(booking.status)) return sum;
+      return sum + (booking.quotedPrice ?? 0);
+    }, 0);
+
+    const driversOnline = drivers.filter((driver) =>
+      ['AVAILABLE', 'ONLINE', 'ON_DUTY', 'BUSY'].includes(
+        driverState(driver.status),
+      ),
+    ).length;
+
+    const driversBusy = drivers.filter(
+      (driver) => driverState(driver.status) === 'BUSY',
+    ).length;
+
+    const driversAvailable = drivers.filter((driver) =>
+      ['AVAILABLE', 'ONLINE', 'ON_DUTY'].includes(driverState(driver.status)),
+    ).length;
+
+    const driversOffDuty = Math.max(
+      drivers.length - driversOnline,
+      0,
+    );
+
+    const vehiclesActive = vehicles.filter(
+      (vehicle) => (vehicle.status || '').toUpperCase() === 'ACTIVE',
+    ).length;
+
+    const liveJobs = todaysBookings.filter((booking) =>
+      isLive(booking.status),
+    );
+
+    const recentCompleted = [...todaysBookings]
+      .filter((booking) => isCompleted(booking.status))
+      .slice(0, 1).length;
+
+    return {
+      jobsToday,
+      pendingJobs,
+      completedJobs,
+      cancelledJobs,
+      estimatedRevenue,
+      driversOnline,
+      driversBusy,
+      driversAvailable,
+      driversOffDuty,
+      vehiclesActive,
+      liveJobs: liveJobs.length,
+      preBooked: todaysBookings.filter((booking) => isPending(booking.status))
+        .length,
+      asap: todaysBookings.filter((booking) => isLive(booking.status)).length,
+      airport: bookings.filter((booking) =>
+        String(booking.reference || '').toUpperCase().includes('AIR'),
+      ).length,
+      recentCompleted,
+    };
+  }, [bookings, drivers, vehicles]);
+
+  const liveActivities = useMemo(() => {
+    const items: Array<{
+      title: string;
+      meta: string;
+      status: 'Pending' | 'Live' | 'Complete' | 'Alert';
+    }> = [];
+
+    const pending = bookings.find((booking) => isPending(booking.status));
+    if (pending) {
+      items.push({
+        title: `Booking ${pending.reference} waiting for assignment`,
+        meta: pending.customerName
+          ? `Customer ${pending.customerName}`
+          : 'Awaiting driver allocation',
+        status: 'Pending',
+      });
+    }
+
+    const live = bookings.find((booking) => isLive(booking.status));
+    if (live) {
+      items.push({
+        title: `Booking ${live.reference} is currently live`,
+        meta: live.driver?.name || live.driver?.fullName || 'Driver assigned',
+        status: 'Live',
+      });
+    }
+
+    const complete = bookings.find((booking) => isCompleted(booking.status));
+    if (complete) {
+      items.push({
+        title: `Booking ${complete.reference} completed`,
+        meta: complete.customerName
+          ? `Customer ${complete.customerName}`
+          : 'Completed successfully',
+        status: 'Complete',
+      });
+    }
+
+    const inactiveVehicle = vehicles.find(
+      (vehicle) => (vehicle.status || '').toUpperCase() === 'OFF_ROAD',
+    );
+    if (inactiveVehicle) {
+      items.push({
+        title: `Vehicle ${inactiveVehicle.reg} needs attention`,
+        meta: 'Marked off road',
+        status: 'Alert',
+      });
+    }
+
+    return items.slice(0, 4);
+  }, [bookings, vehicles]);
 
   return (
     <div className="space-y-6">
@@ -60,8 +303,16 @@ export default function DashboardPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 xl:w-[420px]">
-              <HeroStat label="Jobs Today" value="24" hint="Scheduled and active" />
-              <HeroStat label="Drivers Online" value="12" hint="Available or live" />
+              <HeroStat
+                label="Jobs Today"
+                value={loading ? '—' : String(stats.jobsToday)}
+                hint="Scheduled and active"
+              />
+              <HeroStat
+                label="Drivers Online"
+                value={loading ? '—' : String(stats.driversOnline)}
+                hint="Available or live"
+              />
             </div>
           </div>
 
@@ -90,28 +341,34 @@ export default function DashboardPage() {
         </div>
       </section>
 
+      {error ? (
+        <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {error}
+        </div>
+      ) : null}
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Jobs Today"
-          value="24"
+          value={loading ? '—' : String(stats.jobsToday)}
           subtext="Scheduled and active jobs"
           tone="cyan"
         />
         <MetricCard
           label="Pending Jobs"
-          value="5"
+          value={loading ? '—' : String(stats.pendingJobs)}
           subtext="Waiting for assignment"
           tone="amber"
         />
         <MetricCard
           label="Drivers Online"
-          value="12"
+          value={loading ? '—' : String(stats.driversOnline)}
           subtext="Currently available or active"
           tone="emerald"
         />
         <MetricCard
           label="Vehicles Active"
-          value="9"
+          value={loading ? '—' : String(stats.vehiclesActive)}
           subtext="Operational fleet right now"
           tone="violet"
         />
@@ -122,7 +379,9 @@ export default function DashboardPage() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <SectionEyebrow>Live Operations</SectionEyebrow>
-              <h2 className="mt-2 text-2xl font-bold text-white">What needs attention now</h2>
+              <h2 className="mt-2 text-2xl font-bold text-white">
+                What needs attention now
+              </h2>
               <p className="mt-2 text-sm text-slate-400">
                 Current activity across dispatch, compliance and active jobs.
               </p>
@@ -137,33 +396,29 @@ export default function DashboardPage() {
           </div>
 
           <div className="mt-6 space-y-3">
-            <ActivityRow
-              title="Airport transfer waiting for assignment"
-              meta="Booking CAB-1043 • Pickup in 18 minutes"
-              status="Pending"
-            />
-            <ActivityRow
-              title="Driver en route to hospital return"
-              meta="Booking CAB-1044 • Driver 12"
-              status="Live"
-            />
-            <ActivityRow
-              title="School run completed successfully"
-              meta="Booking CAB-1039 • Completed 7 mins ago"
-              status="Complete"
-            />
-            <ActivityRow
-              title="Vehicle compliance reminder due"
-              meta="Vehicle LG21 XYZ • MOT in 3 days"
-              status="Alert"
-            />
+            {loading ? (
+              <LoadingBlock label="Loading activity..." />
+            ) : liveActivities.length === 0 ? (
+              <LoadingBlock label="No live activity found." />
+            ) : (
+              liveActivities.map((item, index) => (
+                <ActivityRow
+                  key={`${item.title}-${index}`}
+                  title={item.title}
+                  meta={item.meta}
+                  status={item.status}
+                />
+              ))
+            )}
           </div>
         </div>
 
         <div className="space-y-6">
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <SectionEyebrow>Quick Access</SectionEyebrow>
-            <h2 className="mt-2 text-2xl font-bold text-white">Core operator tools</h2>
+            <h2 className="mt-2 text-2xl font-bold text-white">
+              Core operator tools
+            </h2>
             <p className="mt-2 text-sm text-slate-400">
               Jump straight into the areas used most throughout the day.
             </p>
@@ -183,13 +438,27 @@ export default function DashboardPage() {
 
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
             <SectionEyebrow>Today’s Snapshot</SectionEyebrow>
-            <h2 className="mt-2 text-2xl font-bold text-white">Performance today</h2>
+            <h2 className="mt-2 text-2xl font-bold text-white">
+              Performance today
+            </h2>
 
             <div className="mt-6 space-y-4">
-              <SnapshotRow label="Completed Jobs" value="18" />
-              <SnapshotRow label="Cancelled Jobs" value="2" />
-              <SnapshotRow label="Average Wait Time" value="6 min" />
-              <SnapshotRow label="Estimated Revenue" value="£486" />
+              <SnapshotRow
+                label="Completed Jobs"
+                value={loading ? '—' : String(stats.completedJobs)}
+              />
+              <SnapshotRow
+                label="Cancelled Jobs"
+                value={loading ? '—' : String(stats.cancelledJobs)}
+              />
+              <SnapshotRow
+                label="Live Jobs"
+                value={loading ? '—' : String(stats.liveJobs)}
+              />
+              <SnapshotRow
+                label="Estimated Revenue"
+                value={loading ? '—' : `£${stats.estimatedRevenue.toFixed(2)}`}
+              />
             </div>
           </div>
         </div>
@@ -200,9 +469,18 @@ export default function DashboardPage() {
           title="Driver Status"
           subtitle="Live workforce overview"
           items={[
-            { label: 'Available', value: '7' },
-            { label: 'Busy', value: '4' },
-            { label: 'Off Duty', value: '3' },
+            {
+              label: 'Available',
+              value: loading ? '—' : String(stats.driversAvailable),
+            },
+            {
+              label: 'Busy',
+              value: loading ? '—' : String(stats.driversBusy),
+            },
+            {
+              label: 'Off Duty',
+              value: loading ? '—' : String(stats.driversOffDuty),
+            },
           ]}
         />
 
@@ -210,19 +488,37 @@ export default function DashboardPage() {
           title="Booking Mix"
           subtitle="Current job composition"
           items={[
-            { label: 'Pre-booked', value: '11' },
-            { label: 'ASAP', value: '8' },
-            { label: 'Airport', value: '5' },
+            {
+              label: 'Pre-booked',
+              value: loading ? '—' : String(stats.preBooked),
+            },
+            {
+              label: 'Live',
+              value: loading ? '—' : String(stats.asap),
+            },
+            {
+              label: 'Completed',
+              value: loading ? '—' : String(stats.completedJobs),
+            },
           ]}
         />
 
         <DashboardPanel
-          title="Compliance Watch"
-          subtitle="Upcoming attention points"
+          title="Fleet Status"
+          subtitle="Current vehicle overview"
           items={[
-            { label: 'MOT Due', value: '2' },
-            { label: 'Insurance Due', value: '1' },
-            { label: 'Badge Alerts', value: '3' },
+            {
+              label: 'Active',
+              value: loading ? '—' : String(stats.vehiclesActive),
+            },
+            {
+              label: 'Total Drivers',
+              value: loading ? '—' : String(drivers.length),
+            },
+            {
+              label: 'Total Vehicles',
+              value: loading ? '—' : String(vehicles.length),
+            },
           ]}
         />
       </section>
@@ -260,7 +556,9 @@ function HeroStat({
       <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">
         {label}
       </div>
-      <div className="mt-2 text-3xl font-black tracking-tight text-white">{value}</div>
+      <div className="mt-2 text-3xl font-black tracking-tight text-white">
+        {value}
+      </div>
       <div className="mt-1 text-sm text-slate-400">{hint}</div>
     </div>
   );
@@ -396,10 +694,20 @@ function DashboardPanel({
             className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/20 px-4 py-3"
           >
             <span className="text-sm text-slate-400">{item.label}</span>
-            <span className="text-lg font-semibold text-white">{item.value}</span>
+            <span className="text-lg font-semibold text-white">
+              {item.value}
+            </span>
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function LoadingBlock({ label }: { label: string }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-6 text-sm text-white/60">
+      {label}
     </div>
   );
 }
