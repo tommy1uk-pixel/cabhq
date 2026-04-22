@@ -30,10 +30,22 @@ function getDefaultRouteForRole(role?: string) {
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const token = req.cookies.get('cabhq_token')?.value;
-  const payload = token ? decodePayload(token) : null;
-  const role = payload?.role as string | undefined;
 
-  const isLoggedIn = !!payload;
+  const payload = token ? decodePayload(token) : null;
+  const role =
+    typeof payload?.role === 'string' ? payload.role : undefined;
+
+  const isLoggedIn = !!payload && !!role;
+
+  if (pathname === '/') {
+    if (isLoggedIn) {
+      return NextResponse.redirect(
+        new URL(getDefaultRouteForRole(role), req.url),
+      );
+    }
+
+    return NextResponse.redirect(new URL('/login', req.url));
+  }
 
   if (pathname === '/login') {
     if (isLoggedIn) {
@@ -45,48 +57,46 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (
-    pathname.startsWith('/super-admin') ||
-    pathname.startsWith('/dashboard') ||
-    pathname.startsWith('/driver')
-  ) {
+  if (pathname.startsWith('/super-admin')) {
     if (!isLoggedIn) {
       return NextResponse.redirect(new URL('/login', req.url));
     }
 
-    if (pathname.startsWith('/super-admin') && role !== 'SUPER_ADMIN') {
+    if (role !== 'SUPER_ADMIN') {
       return NextResponse.redirect(
         new URL(getDefaultRouteForRole(role), req.url),
       );
     }
 
-    if (
-      pathname.startsWith('/dashboard') &&
-      !['SUPER_ADMIN', 'ADMIN', 'OPERATOR'].includes(role || '')
-    ) {
-      return NextResponse.redirect(
-        new URL(getDefaultRouteForRole(role), req.url),
-      );
-    }
-
-    if (
-      pathname.startsWith('/driver') &&
-      role !== 'DRIVER'
-    ) {
-      return NextResponse.redirect(
-        new URL(getDefaultRouteForRole(role), req.url),
-      );
-    }
+    return NextResponse.next();
   }
 
-  if (pathname === '/') {
-    if (isLoggedIn) {
+  if (pathname.startsWith('/dashboard')) {
+    if (!isLoggedIn) {
+      return NextResponse.redirect(new URL('/login', req.url));
+    }
+
+    if (!['SUPER_ADMIN', 'ADMIN', 'OPERATOR'].includes(role)) {
       return NextResponse.redirect(
         new URL(getDefaultRouteForRole(role), req.url),
       );
     }
 
-    return NextResponse.redirect(new URL('/login', req.url));
+    return NextResponse.next();
+  }
+
+  if (pathname.startsWith('/driver')) {
+    if (!isLoggedIn) {
+      return NextResponse.redirect(new URL('/login', req.url));
+    }
+
+    if (role !== 'DRIVER') {
+      return NextResponse.redirect(
+        new URL(getDefaultRouteForRole(role), req.url),
+      );
+    }
+
+    return NextResponse.next();
   }
 
   return NextResponse.next();
