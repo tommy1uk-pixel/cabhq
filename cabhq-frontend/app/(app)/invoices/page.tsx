@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AdminShell from '@/components/AdminShell';
+import { apiFetch } from '@/lib/api';
 
 type InvoiceStatus =
   | 'DRAFT'
@@ -24,7 +25,7 @@ type Invoice = {
   total: number;
   paidAmount: number;
   balanceDue: number;
-  notes?: string;
+  notes?: string | null;
 };
 
 type InvoiceFormState = {
@@ -38,54 +39,6 @@ type InvoiceFormState = {
 };
 
 const today = new Date().toISOString().slice(0, 10);
-
-const initialInvoices: Invoice[] = [
-  {
-    id: '1',
-    invoiceNumber: 'INV-2025-001',
-    accountName: 'Northside Medical Centre',
-    status: 'SENT',
-    issueDate: '2025-04-01',
-    dueDate: '2025-04-30',
-    tripCount: 44,
-    subtotal: 1800,
-    vat: 360,
-    total: 2160,
-    paidAmount: 0,
-    balanceDue: 2160,
-    notes: 'Monthly medical transport invoice',
-  },
-  {
-    id: '2',
-    invoiceNumber: 'INV-2025-002',
-    accountName: 'Greenfield School Transport',
-    status: 'PART_PAID',
-    issueDate: '2025-04-01',
-    dueDate: '2025-04-30',
-    tripCount: 102,
-    subtotal: 4075,
-    vat: 815,
-    total: 4890,
-    paidAmount: 2000,
-    balanceDue: 2890,
-    notes: 'School run contract billing',
-  },
-  {
-    id: '3',
-    invoiceNumber: 'INV-2025-003',
-    accountName: 'City Stay Hotel',
-    status: 'OVERDUE',
-    issueDate: '2025-03-01',
-    dueDate: '2025-03-31',
-    tripCount: 21,
-    subtotal: 995.83,
-    vat: 199.17,
-    total: 1195,
-    paidAmount: 0,
-    balanceDue: 1195,
-    notes: 'Guest transport account',
-  },
-];
 
 const initialForm: InvoiceFormState = {
   accountName: '',
@@ -129,14 +82,56 @@ function statusClasses(status: InvoiceStatus) {
   return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
 }
 
+function toDateInput(value?: string | null) {
+  if (!value) return today;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return today;
+  return date.toISOString().slice(0, 10);
+}
+
 export default function InvoicesPage() {
-  const [invoices, setInvoices] = useState<Invoice[]>(initialInvoices);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(
-    initialInvoices[0]?.id ?? null,
-  );
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
   const [form, setForm] = useState<InvoiceFormState>(initialForm);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadInvoices() {
+      try {
+        setLoading(true);
+        setError('');
+
+        const data = await apiFetch<Invoice[]>('/invoices');
+        if (!mounted) return;
+
+        const next = Array.isArray(data) ? data : [];
+        setInvoices(next);
+        setSelectedInvoiceId((current) => current ?? next[0]?.id ?? null);
+      } catch (err) {
+        console.error(err);
+        if (mounted) {
+          setError(err instanceof Error ? err.message : 'Failed to load invoices');
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadInvoices();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const filteredInvoices = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -196,55 +191,65 @@ export default function InvoicesPage() {
     setEditingInvoiceId(null);
   }
 
-  function generateInvoiceNumber() {
-    const next = invoices.length + 1;
-    return `INV-2025-${String(next).padStart(3, '0')}`;
+  function setNotice(message: string) {
+    setSuccess(message);
+    setTimeout(() => setSuccess(''), 2500);
   }
 
-  function submitInvoice(e: React.FormEvent) {
+  async function submitInvoice(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setSaving(true);
+    setError('');
+    setSuccess('');
 
-    const subtotal = Number(form.subtotal || 0);
-    const vat = Number(form.vat || 0);
-    const total = subtotal + vat;
+    try {
+      const payload = {
+        accountName: form.accountName.trim(),
+        issueDate: form.issueDate,
+        dueDate: form.dueDate,
+        tripCount: Number(form.tripCount || 0),
+        subtotal: Number(form.subtotal || 0),
+        vat: Number(form.vat || 0),
+        notes: form.notes.trim(),
+      };
 
-    const existing = editingInvoiceId
-      ? invoices.find((invoice) => invoice.id === editingInvoiceId)
-      : null;
-
-    const paidAmount = existing?.paidAmount ?? 0;
-    const balanceDue = Math.max(total - paidAmount, 0);
-
-    const payload: Invoice = {
-      id: editingInvoiceId ?? crypto.randomUUID(),
-      invoiceNumber: existing?.invoiceNumber ?? generateInvoiceNumber(),
-      accountName: form.accountName.trim(),
-      status: existing?.status ?? 'DRAFT',
-      issueDate: form.issueDate,
-      dueDate: form.dueDate,
-      tripCount: Number(form.tripCount || 0),
-      subtotal,
-      vat,
-      total,
-      paidAmount,
-      balanceDue,
-      notes: form.notes.trim(),
-    };
-
-    if (!payload.accountName) return;
-
-    setInvoices((prev) => {
-      const exists = prev.some((invoice) => invoice.id === payload.id);
-      if (exists) {
-        return prev.map((invoice) =>
-          invoice.id === payload.id ? payload : invoice,
-        );
+      if (!payload.accountName) {
+        throw new Error('Account name is required');
       }
-      return [payload, ...prev];
-    });
 
-    setSelectedInvoiceId(payload.id);
-    resetForm();
+      let savedInvoice: Invoice;
+
+      if (editingInvoiceId) {
+        savedInvoice = await apiFetch<Invoice>(`/invoices/${editingInvoiceId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+
+        setInvoices((prev) =>
+          prev.map((invoice) =>
+            invoice.id === editingInvoiceId ? savedInvoice : invoice,
+          ),
+        );
+
+        setNotice('Invoice updated');
+      } else {
+        savedInvoice = await apiFetch<Invoice>('/invoices', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+
+        setInvoices((prev) => [savedInvoice, ...prev]);
+        setNotice('Invoice created');
+      }
+
+      setSelectedInvoiceId(savedInvoice.id);
+      resetForm();
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to save invoice');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function startEdit(invoice: Invoice) {
@@ -252,8 +257,8 @@ export default function InvoicesPage() {
     setSelectedInvoiceId(invoice.id);
     setForm({
       accountName: invoice.accountName,
-      issueDate: invoice.issueDate,
-      dueDate: invoice.dueDate,
+      issueDate: toDateInput(invoice.issueDate),
+      dueDate: toDateInput(invoice.dueDate),
       tripCount: String(invoice.tripCount),
       subtotal: String(invoice.subtotal),
       vat: String(invoice.vat),
@@ -263,43 +268,57 @@ export default function InvoicesPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function deleteInvoice(invoiceId: string) {
+  async function deleteInvoice(invoiceId: string) {
     const confirmed = window.confirm('Delete this invoice?');
     if (!confirmed) return;
 
-    const remaining = invoices.filter((invoice) => invoice.id !== invoiceId);
-    setInvoices(remaining);
+    setError('');
+    setSuccess('');
 
-    if (selectedInvoiceId === invoiceId) {
-      setSelectedInvoiceId(remaining[0]?.id ?? null);
-    }
+    try {
+      await apiFetch(`/invoices/${invoiceId}`, {
+        method: 'DELETE',
+      });
 
-    if (editingInvoiceId === invoiceId) {
-      resetForm();
+      const remaining = invoices.filter((invoice) => invoice.id !== invoiceId);
+      setInvoices(remaining);
+
+      if (selectedInvoiceId === invoiceId) {
+        setSelectedInvoiceId(remaining[0]?.id ?? null);
+      }
+
+      if (editingInvoiceId === invoiceId) {
+        resetForm();
+      }
+
+      setNotice('Invoice deleted');
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to delete invoice');
     }
   }
 
-  function updateInvoiceStatus(invoiceId: string, status: InvoiceStatus) {
-    setInvoices((prev) =>
-      prev.map((invoice) => {
-        if (invoice.id !== invoiceId) return invoice;
+  async function updateInvoiceStatus(invoiceId: string, status: InvoiceStatus) {
+    setError('');
+    setSuccess('');
 
-        if (status === 'PAID') {
-          return {
-            ...invoice,
-            status,
-            paidAmount: invoice.total,
-            balanceDue: 0,
-          };
-        }
+    try {
+      const updatedInvoice = await apiFetch<Invoice>(`/invoices/${invoiceId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
 
-        return {
-          ...invoice,
-          status,
-          balanceDue: Math.max(invoice.total - invoice.paidAmount, 0),
-        };
-      }),
-    );
+      setInvoices((prev) =>
+        prev.map((invoice) =>
+          invoice.id === invoiceId ? updatedInvoice : invoice,
+        ),
+      );
+
+      setNotice(`Invoice marked ${prettifyEnum(status).toLowerCase()}`);
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to update status');
+    }
   }
 
   const liveSubtotal = Number(form.subtotal || 0);
@@ -323,6 +342,18 @@ export default function InvoicesPage() {
           />
           <StatCard label="Overdue" value={formatCurrency(stats.overdue)} hint="Past due date" />
         </section>
+
+        {(error || success) && (
+          <div
+            className={`rounded-2xl border px-4 py-3 text-sm ${
+              error
+                ? 'border-red-500/30 bg-red-500/10 text-red-200'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+            }`}
+          >
+            {error || success}
+          </div>
+        )}
 
         <div className="grid gap-6 xl:grid-cols-[430px_1fr]">
           <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
@@ -453,9 +484,16 @@ export default function InvoicesPage() {
 
               <button
                 type="submit"
-                className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500"
+                disabled={saving}
+                className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {editingInvoiceId ? 'Save Invoice Changes' : 'Create Invoice'}
+                {saving
+                  ? editingInvoiceId
+                    ? 'Saving Invoice...'
+                    : 'Creating Invoice...'
+                  : editingInvoiceId
+                    ? 'Save Invoice Changes'
+                    : 'Create Invoice'}
               </button>
             </form>
           </section>
@@ -477,7 +515,11 @@ export default function InvoicesPage() {
               />
             </div>
 
-            {filteredInvoices.length === 0 ? (
+            {loading ? (
+              <div className="rounded-2xl bg-[#0b1728] p-6 text-white/60">
+                Loading invoices...
+              </div>
+            ) : filteredInvoices.length === 0 ? (
               <div className="rounded-2xl bg-[#0b1728] p-6 text-white/60">
                 No invoices found.
               </div>
@@ -524,8 +566,8 @@ export default function InvoicesPage() {
                           </p>
 
                           <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/50">
-                            <span>Issued: {invoice.issueDate}</span>
-                            <span>Due: {invoice.dueDate}</span>
+                            <span>Issued: {toDateInput(invoice.issueDate)}</span>
+                            <span>Due: {toDateInput(invoice.dueDate)}</span>
                             <span>Trips: {invoice.tripCount}</span>
                           </div>
                         </button>
@@ -578,8 +620,8 @@ export default function InvoicesPage() {
                             </h4>
 
                             <DetailRow label="Account" value={invoice.accountName} />
-                            <DetailRow label="Issue Date" value={invoice.issueDate} />
-                            <DetailRow label="Due Date" value={invoice.dueDate} />
+                            <DetailRow label="Issue Date" value={toDateInput(invoice.issueDate)} />
+                            <DetailRow label="Due Date" value={toDateInput(invoice.dueDate)} />
                             <DetailRow
                               label="Trip Count"
                               value={String(invoice.tripCount)}
