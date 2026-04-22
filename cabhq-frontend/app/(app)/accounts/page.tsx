@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AdminShell from '@/components/AdminShell';
+import { apiFetch } from '@/lib/api';
 
 type AccountStatus = 'ACTIVE' | 'ON_HOLD' | 'CLOSED';
 
@@ -16,23 +17,29 @@ type AccountType =
 type Account = {
   id: string;
   name: string;
-  type: AccountType;
-  status: AccountStatus;
-  contactName: string;
-  email: string;
-  phone: string;
-  billingAddress: string;
-  paymentTermsDays: number;
-  creditLimit: number;
-  currentBalance: number;
-  invoiceCount: number;
-  tripsThisMonth: number;
-  monthlyRevenue: number;
-  notes?: string;
+  code?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  contactName?: string | null;
+  address1?: string | null;
+  address2?: string | null;
+  city?: string | null;
+  postcode?: string | null;
+  vatNumber?: string | null;
+  paymentTerms?: number;
+  creditLimit?: number | null;
+  status: string;
+  notes?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  invoices?: Array<{ id: string; total?: number; balanceDue?: number }>;
+  payments?: Array<{ id: string; amount?: number }>;
+  bookings?: Array<{ id: string }>;
 };
 
 type AccountFormState = {
   name: string;
+  code: string;
   type: AccountType;
   status: AccountStatus;
   contactName: string;
@@ -41,65 +48,13 @@ type AccountFormState = {
   billingAddress: string;
   paymentTermsDays: string;
   creditLimit: string;
+  vatNumber: string;
   notes: string;
 };
 
-const initialAccounts: Account[] = [
-  {
-    id: '1',
-    name: 'Northside Medical Centre',
-    type: 'NHS',
-    status: 'ACTIVE',
-    contactName: 'Sarah Malik',
-    email: 'accounts@northsidemedical.co.uk',
-    phone: '02070001111',
-    billingAddress: '12 High Street, London',
-    paymentTermsDays: 30,
-    creditLimit: 5000,
-    currentBalance: 1280,
-    invoiceCount: 6,
-    tripsThisMonth: 44,
-    monthlyRevenue: 2160,
-    notes: 'Monthly invoice account',
-  },
-  {
-    id: '2',
-    name: 'Greenfield School Transport',
-    type: 'SCHOOL',
-    status: 'ACTIVE',
-    contactName: 'Peter Jones',
-    email: 'transport@greenfieldschool.co.uk',
-    phone: '02070002222',
-    billingAddress: '45 Station Road, Essex',
-    paymentTermsDays: 30,
-    creditLimit: 8000,
-    currentBalance: 3320,
-    invoiceCount: 11,
-    tripsThisMonth: 102,
-    monthlyRevenue: 4890,
-    notes: 'AM/PM school run contract',
-  },
-  {
-    id: '3',
-    name: 'City Stay Hotel',
-    type: 'HOTEL',
-    status: 'ON_HOLD',
-    contactName: 'Laura Price',
-    email: 'frontdesk@citystayhotel.co.uk',
-    phone: '02070003333',
-    billingAddress: '88 Central Avenue, Birmingham',
-    paymentTermsDays: 14,
-    creditLimit: 2500,
-    currentBalance: 2410,
-    invoiceCount: 4,
-    tripsThisMonth: 21,
-    monthlyRevenue: 1195,
-    notes: 'Hold new jobs if unpaid invoices increase',
-  },
-];
-
 const initialForm: AccountFormState = {
   name: '',
+  code: '',
   type: 'BUSINESS',
   status: 'ACTIVE',
   contactName: '',
@@ -108,6 +63,7 @@ const initialForm: AccountFormState = {
   billingAddress: '',
   paymentTermsDays: '30',
   creditLimit: '5000',
+  vatNumber: '',
   notes: '',
 };
 
@@ -115,7 +71,7 @@ function formatCurrency(value: number) {
   return `£${value.toFixed(2)}`;
 }
 
-function statusClasses(status: AccountStatus) {
+function statusClasses(status: string) {
   if (status === 'ACTIVE') {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   }
@@ -140,54 +96,150 @@ function typeClasses(type: AccountType) {
   return map[type];
 }
 
-export default function AccountsPage() {
-  const [accounts, setAccounts] = useState<Account[]>(initialAccounts);
-  const [search, setSearch] = useState('');
-  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(
-    initialAccounts[0]?.id ?? null,
+function inferAccountType(name: string): AccountType {
+  const normalized = name.toLowerCase();
+
+  if (normalized.includes('school')) return 'SCHOOL';
+  if (
+    normalized.includes('nhs') ||
+    normalized.includes('medical') ||
+    normalized.includes('hospital') ||
+    normalized.includes('clinic')
+  ) {
+    return 'NHS';
+  }
+  if (normalized.includes('hotel')) return 'HOTEL';
+  if (normalized.includes('agency')) return 'AGENCY';
+  if (normalized.includes('corporate') || normalized.includes('company')) {
+    return 'CORPORATE';
+  }
+
+  return 'BUSINESS';
+}
+
+function parseBillingAddress(account: Account) {
+  return [account.address1, account.address2, account.city, account.postcode]
+    .filter(Boolean)
+    .join(', ');
+}
+
+function toUiAccount(account: Account) {
+  const invoiceCount = account.invoices?.length ?? 0;
+  const currentBalance = (account.invoices ?? []).reduce(
+    (sum, invoice) => sum + Number(invoice.balanceDue ?? 0),
+    0,
   );
+  const monthlyRevenue = (account.invoices ?? []).reduce(
+    (sum, invoice) => sum + Number(invoice.total ?? 0),
+    0,
+  );
+  const tripsThisMonth = account.bookings?.length ?? 0;
+
+  return {
+    ...account,
+    uiType: inferAccountType(account.name),
+    uiStatus: (account.status as AccountStatus) || 'ACTIVE',
+    paymentTermsDays: Number(account.paymentTerms ?? 30),
+    creditLimitValue: Number(account.creditLimit ?? 0),
+    currentBalance,
+    invoiceCount,
+    tripsThisMonth,
+    monthlyRevenue,
+    billingAddress: parseBillingAddress(account),
+  };
+}
+
+export default function AccountsPage() {
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [form, setForm] = useState<AccountFormState>(initialForm);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadAccounts() {
+      try {
+        setLoading(true);
+        setError('');
+
+        const data = await apiFetch<Account[]>('/accounts');
+        if (!mounted) return;
+
+        const next = Array.isArray(data) ? data : [];
+        setAccounts(next);
+        setSelectedAccountId((current) => current ?? next[0]?.id ?? null);
+      } catch (err) {
+        console.error(err);
+        if (mounted) {
+          setError(err instanceof Error ? err.message : 'Failed to load accounts');
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    void loadAccounts();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const enrichedAccounts = useMemo(
+    () => accounts.map((account) => toUiAccount(account)),
+    [accounts],
+  );
 
   const filteredAccounts = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return accounts;
+    if (!q) return enrichedAccounts;
 
-    return accounts.filter((account) =>
+    return enrichedAccounts.filter((account) =>
       [
         account.name,
-        account.type,
-        account.status,
+        account.code,
+        account.uiType,
+        account.uiStatus,
         account.contactName,
         account.email,
         account.phone,
       ]
+        .filter(Boolean)
         .join(' ')
         .toLowerCase()
         .includes(q),
     );
-  }, [accounts, search]);
+  }, [enrichedAccounts, search]);
 
   const selectedAccount = useMemo(
     () =>
-      accounts.find((account) => account.id === selectedAccountId) ?? null,
-    [accounts, selectedAccountId],
+      enrichedAccounts.find((account) => account.id === selectedAccountId) ?? null,
+    [enrichedAccounts, selectedAccountId],
   );
 
   const stats = useMemo(() => {
-    const active = accounts.filter((a) => a.status === 'ACTIVE').length;
-    const onHold = accounts.filter((a) => a.status === 'ON_HOLD').length;
-    const revenue = accounts.reduce((sum, a) => sum + a.monthlyRevenue, 0);
-    const outstanding = accounts.reduce((sum, a) => sum + a.currentBalance, 0);
+    const active = enrichedAccounts.filter((a) => a.uiStatus === 'ACTIVE').length;
+    const onHold = enrichedAccounts.filter((a) => a.uiStatus === 'ON_HOLD').length;
+    const revenue = enrichedAccounts.reduce((sum, a) => sum + a.monthlyRevenue, 0);
+    const outstanding = enrichedAccounts.reduce(
+      (sum, a) => sum + a.currentBalance,
+      0,
+    );
 
     return {
-      total: accounts.length,
+      total: enrichedAccounts.length,
       active,
       onHold,
       revenue,
       outstanding,
     };
-  }, [accounts]);
+  }, [enrichedAccounts]);
 
   function setField<K extends keyof AccountFormState>(
     key: K,
@@ -204,85 +256,126 @@ export default function AccountsPage() {
     setEditingAccountId(null);
   }
 
-  function submitAccount(e: React.FormEvent) {
-    e.preventDefault();
-
-    const payload: Account = {
-      id: editingAccountId ?? crypto.randomUUID(),
-      name: form.name.trim(),
-      type: form.type,
-      status: form.status,
-      contactName: form.contactName.trim(),
-      email: form.email.trim(),
-      phone: form.phone.trim(),
-      billingAddress: form.billingAddress.trim(),
-      paymentTermsDays: Number(form.paymentTermsDays || 30),
-      creditLimit: Number(form.creditLimit || 0),
-      currentBalance:
-        editingAccountId != null
-          ? accounts.find((a) => a.id === editingAccountId)?.currentBalance ?? 0
-          : 0,
-      invoiceCount:
-        editingAccountId != null
-          ? accounts.find((a) => a.id === editingAccountId)?.invoiceCount ?? 0
-          : 0,
-      tripsThisMonth:
-        editingAccountId != null
-          ? accounts.find((a) => a.id === editingAccountId)?.tripsThisMonth ?? 0
-          : 0,
-      monthlyRevenue:
-        editingAccountId != null
-          ? accounts.find((a) => a.id === editingAccountId)?.monthlyRevenue ?? 0
-          : 0,
-      notes: form.notes.trim(),
-    };
-
-    if (!payload.name || !payload.contactName) return;
-
-    setAccounts((prev) => {
-      const exists = prev.some((a) => a.id === payload.id);
-      if (exists) {
-        return prev.map((a) => (a.id === payload.id ? payload : a));
-      }
-      return [payload, ...prev];
-    });
-
-    setSelectedAccountId(payload.id);
-    resetForm();
+  function setNotice(message: string) {
+    setSuccess(message);
+    setTimeout(() => setSuccess(''), 2500);
   }
 
-  function startEdit(account: Account) {
+  async function submitAccount(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const [address1 = '', address2 = '', city = '', postcode = ''] = form.billingAddress
+        .split(',')
+        .map((part) => part.trim());
+
+      const payload = {
+        name: form.name.trim(),
+        code: form.code.trim() || null,
+        email: form.email.trim() || null,
+        phone: form.phone.trim() || null,
+        contactName: form.contactName.trim() || null,
+        address1: address1 || null,
+        address2: address2 || null,
+        city: city || null,
+        postcode: postcode || null,
+        vatNumber: form.vatNumber.trim() || null,
+        paymentTerms: Number(form.paymentTermsDays || 30),
+        creditLimit: Number(form.creditLimit || 0),
+        status: form.status,
+        notes: form.notes.trim() || null,
+      };
+
+      if (!payload.name) {
+        throw new Error('Account name is required');
+      }
+
+      let savedAccount: Account;
+
+      if (editingAccountId) {
+        savedAccount = await apiFetch<Account>(`/accounts/${editingAccountId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+
+        setAccounts((prev) =>
+          prev.map((account) =>
+            account.id === editingAccountId ? savedAccount : account,
+          ),
+        );
+
+        setNotice('Account updated');
+      } else {
+        savedAccount = await apiFetch<Account>('/accounts', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+
+        setAccounts((prev) => [savedAccount, ...prev]);
+        setNotice('Account created');
+      }
+
+      setSelectedAccountId(savedAccount.id);
+      resetForm();
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to save account');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function startEdit(account: ReturnType<typeof toUiAccount>) {
     setEditingAccountId(account.id);
     setSelectedAccountId(account.id);
     setForm({
       name: account.name,
-      type: account.type,
-      status: account.status,
-      contactName: account.contactName,
-      email: account.email,
-      phone: account.phone,
+      code: account.code ?? '',
+      type: account.uiType,
+      status: account.uiStatus,
+      contactName: account.contactName ?? '',
+      email: account.email ?? '',
+      phone: account.phone ?? '',
       billingAddress: account.billingAddress,
       paymentTermsDays: String(account.paymentTermsDays),
-      creditLimit: String(account.creditLimit),
+      creditLimit: String(account.creditLimitValue),
+      vatNumber: account.vatNumber ?? '',
       notes: account.notes ?? '',
     });
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function deleteAccount(accountId: string) {
+  async function deleteAccount(accountId: string) {
     const confirmed = window.confirm('Delete this account?');
     if (!confirmed) return;
 
-    setAccounts((prev) => prev.filter((a) => a.id !== accountId));
+    setError('');
+    setSuccess('');
 
-    if (selectedAccountId === accountId) {
+    try {
+      await apiFetch(`/accounts/${accountId}`, {
+        method: 'DELETE',
+      });
+
       const remaining = accounts.filter((a) => a.id !== accountId);
-      setSelectedAccountId(remaining[0]?.id ?? null);
-    }
+      setAccounts(remaining);
 
-    if (editingAccountId === accountId) {
-      resetForm();
+      if (selectedAccountId === accountId) {
+        setSelectedAccountId(remaining[0]?.id ?? null);
+      }
+
+      if (editingAccountId === accountId) {
+        resetForm();
+      }
+
+      setNotice('Account deleted');
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to delete account');
     }
   }
 
@@ -310,6 +403,18 @@ export default function AccountsPage() {
             </div>
           </div>
         </section>
+
+        {(error || success) && (
+          <div
+            className={`rounded-2xl border px-4 py-3 text-sm ${
+              error
+                ? 'border-red-500/30 bg-red-500/10 text-red-200'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+            }`}
+          >
+            {error || success}
+          </div>
+        )}
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <StatCard
@@ -384,22 +489,14 @@ export default function AccountsPage() {
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field
-                    label="Account Type"
+                    label="Account Code"
                     input={
-                      <select
-                        value={form.type}
-                        onChange={(e) =>
-                          setField('type', e.target.value as AccountType)
-                        }
+                      <input
+                        value={form.code}
+                        onChange={(e) => setField('code', e.target.value)}
+                        placeholder="NSMC"
                         className={inputClassName}
-                      >
-                        <option value="BUSINESS">BUSINESS</option>
-                        <option value="SCHOOL">SCHOOL</option>
-                        <option value="NHS">NHS</option>
-                        <option value="HOTEL">HOTEL</option>
-                        <option value="AGENCY">AGENCY</option>
-                        <option value="CORPORATE">CORPORATE</option>
-                      </select>
+                      />
                     }
                   />
 
@@ -422,13 +519,12 @@ export default function AccountsPage() {
                 </div>
 
                 <Field
-                  label="Contact Name *"
+                  label="Contact Name"
                   input={
                     <input
                       value={form.contactName}
                       onChange={(e) => setField('contactName', e.target.value)}
                       placeholder="Sarah Malik"
-                      required
                       className={inputClassName}
                     />
                   }
@@ -468,7 +564,7 @@ export default function AccountsPage() {
                       rows={3}
                       value={form.billingAddress}
                       onChange={(e) => setField('billingAddress', e.target.value)}
-                      placeholder="Billing address"
+                      placeholder="Address line 1, Address line 2, City, Postcode"
                       className={`${inputClassName} resize-none`}
                     />
                   }
@@ -505,6 +601,18 @@ export default function AccountsPage() {
                 </div>
 
                 <Field
+                  label="VAT Number"
+                  input={
+                    <input
+                      value={form.vatNumber}
+                      onChange={(e) => setField('vatNumber', e.target.value)}
+                      placeholder="GB123456789"
+                      className={inputClassName}
+                    />
+                  }
+                />
+
+                <Field
                   label="Notes"
                   input={
                     <textarea
@@ -520,9 +628,16 @@ export default function AccountsPage() {
 
               <button
                 type="submit"
-                className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-semibold text-black transition hover:bg-cyan-400"
+                disabled={saving}
+                className="w-full rounded-2xl bg-cyan-500 px-4 py-3 font-semibold text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {editingAccountId ? 'Save Account Changes' : 'Create Account'}
+                {saving
+                  ? editingAccountId
+                    ? 'Saving Account...'
+                    : 'Creating Account...'
+                  : editingAccountId
+                    ? 'Save Account Changes'
+                    : 'Create Account'}
               </button>
             </form>
           </section>
@@ -544,7 +659,11 @@ export default function AccountsPage() {
               />
             </div>
 
-            {filteredAccounts.length === 0 ? (
+            {loading ? (
+              <div className="rounded-2xl bg-[#0b1728] p-6 text-white/60">
+                Loading accounts...
+              </div>
+            ) : filteredAccounts.length === 0 ? (
               <div className="rounded-2xl bg-[#0b1728] p-6 text-white/60">
                 No accounts found.
               </div>
@@ -563,8 +682,9 @@ export default function AccountsPage() {
                       }`}
                     >
                       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div
-                          className="min-w-0 cursor-pointer"
+                        <button
+                          type="button"
+                          className="min-w-0 text-left"
                           onClick={() =>
                             setSelectedAccountId((current) =>
                               current === account.id ? null : account.id,
@@ -576,32 +696,32 @@ export default function AccountsPage() {
 
                             <span
                               className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${typeClasses(
-                                account.type,
+                                account.uiType,
                               )}`}
                             >
-                              {account.type}
+                              {account.uiType}
                             </span>
 
                             <span
                               className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClasses(
-                                account.status,
+                                account.uiStatus,
                               )}`}
                             >
-                              {account.status.replace('_', ' ')}
+                              {account.uiStatus.replace('_', ' ')}
                             </span>
                           </div>
 
                           <p className="mt-2 text-sm text-white/70">
-                            {account.contactName} · {account.email || 'No email'} ·{' '}
+                            {account.contactName || 'No contact'} · {account.email || 'No email'} ·{' '}
                             {account.phone || 'No phone'}
                           </p>
 
                           <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/50">
                             <span>Invoices: {account.invoiceCount}</span>
-                            <span>Trips this month: {account.tripsThisMonth}</span>
+                            <span>Trips: {account.tripsThisMonth}</span>
                             <span>Terms: {account.paymentTermsDays} days</span>
                           </div>
-                        </div>
+                        </button>
 
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -635,10 +755,10 @@ export default function AccountsPage() {
                             />
                             <DetailRow
                               label="Credit Limit"
-                              value={formatCurrency(account.creditLimit)}
+                              value={formatCurrency(account.creditLimitValue)}
                             />
                             <DetailRow
-                              label="Monthly Revenue"
+                              label="Revenue"
                               value={formatCurrency(account.monthlyRevenue)}
                             />
                             <DetailRow
@@ -652,7 +772,7 @@ export default function AccountsPage() {
                               Contact
                             </h4>
 
-                            <DetailRow label="Contact" value={account.contactName} />
+                            <DetailRow label="Contact" value={account.contactName || '—'} />
                             <DetailRow label="Email" value={account.email || '—'} />
                             <DetailRow label="Phone" value={account.phone || '—'} />
                             <DetailRow
@@ -667,15 +787,15 @@ export default function AccountsPage() {
                             </h4>
 
                             <DetailRow
-                              label="Trips This Month"
+                              label="Trips"
                               value={String(account.tripsThisMonth)}
                             />
                             <DetailRow
                               label="Invoices"
                               value={String(account.invoiceCount)}
                             />
-                            <DetailRow label="Status" value={account.status} />
-                            <DetailRow label="Type" value={account.type} />
+                            <DetailRow label="Status" value={account.uiStatus} />
+                            <DetailRow label="Type" value={account.uiType} />
                           </div>
 
                           {account.notes ? (
