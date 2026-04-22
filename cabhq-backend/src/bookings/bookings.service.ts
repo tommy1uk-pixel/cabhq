@@ -26,6 +26,7 @@ type CreateBookingInput = {
   customerPhone?: string | null;
   passengerCount?: number | null;
   notes?: string | null;
+  accountId?: string | null;
 };
 
 type AssignDriverInput = {
@@ -71,6 +72,14 @@ export class BookingsService {
       include: {
         driver: true,
         company: true,
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            status: true,
+          },
+        },
         events: {
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         },
@@ -85,6 +94,14 @@ export class BookingsService {
       include: {
         driver: true,
         company: true,
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            status: true,
+          },
+        },
         events: {
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         },
@@ -136,11 +153,40 @@ export class BookingsService {
       throw new BadRequestException('Pickup time is invalid');
     }
 
+    let accountId: string | null = null;
+    let accountName: string | null = null;
+
+    if (input.accountId) {
+      const account = await this.prisma.account.findFirst({
+        where: {
+          id: input.accountId,
+          companyId: input.companyId,
+        },
+        select: {
+          id: true,
+          name: true,
+          status: true,
+        },
+      });
+
+      if (!account) {
+        throw new BadRequestException('Account not found');
+      }
+
+      if (account.status === 'CLOSED') {
+        throw new BadRequestException('Cannot create booking for a closed account');
+      }
+
+      accountId = account.id;
+      accountName = account.name;
+    }
+
     const reference = this.generateBookingReference();
 
     const booking = await this.prisma.booking.create({
       data: {
         companyId: input.companyId,
+        accountId,
         reference,
         pickup: input.pickup.trim(),
         dropoff: input.dropoff.trim(),
@@ -155,6 +201,10 @@ export class BookingsService {
         calculatedFare: input.calculatedFare ?? null,
         distanceMiles: input.distanceMiles ?? null,
         durationMinutes: input.durationMinutes ?? null,
+        customerName: input.customerName?.trim() || null,
+        customerPhone: input.customerPhone?.trim() || null,
+        passengerCount: input.passengerCount ?? null,
+        notes: input.notes?.trim() || null,
       },
     });
 
@@ -167,6 +217,13 @@ export class BookingsService {
         pickupTime: booking.pickupTime,
       }),
     );
+
+    if (accountName) {
+      await this.appendTimeline(
+        booking.id,
+        `ACCOUNT LINKED · ${accountName} [${accountId}]`,
+      );
+    }
 
     if (
       input.customerName?.trim() ||
@@ -503,6 +560,14 @@ export class BookingsService {
       },
       include: {
         driver: true,
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            status: true,
+          },
+        },
       },
     });
 
@@ -655,6 +720,14 @@ export class BookingsService {
       include: {
         driver: true,
         company: true,
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            status: true,
+          },
+        },
         events: {
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         },
