@@ -14,9 +14,14 @@ type ApiErrorResponse = {
 function getStoredToken(useDriverToken?: boolean): string | null {
   if (typeof window === 'undefined') return null;
 
-  return useDriverToken
-    ? localStorage.getItem('driverToken')
-    : localStorage.getItem('cabhq_token');
+  if (useDriverToken) {
+    return localStorage.getItem('driverToken');
+  }
+
+  return (
+    localStorage.getItem('token') ||
+    localStorage.getItem('cabhq_token')
+  );
 }
 
 function clearStoredAuth(useDriverToken?: boolean): void {
@@ -25,10 +30,13 @@ function clearStoredAuth(useDriverToken?: boolean): void {
   if (useDriverToken) {
     localStorage.removeItem('driverToken');
     localStorage.removeItem('driver');
-  } else {
-    localStorage.removeItem('cabhq_token');
-    localStorage.removeItem('cabhq_user');
+    return;
   }
+
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  localStorage.removeItem('cabhq_token');
+  localStorage.removeItem('cabhq_user');
 }
 
 function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
