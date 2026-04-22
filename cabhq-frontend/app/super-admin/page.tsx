@@ -1,428 +1,277 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
 
-type CompanyStatus = 'ACTIVE' | 'TRIAL' | 'SUSPENDED';
-type BillingStatus = 'PAID' | 'OVERDUE' | 'TRIAL' | 'MANUAL';
+const stats = [
+  { label: 'Total Companies', value: '15', hint: 'All active, trial and suspended tenants' },
+  { label: 'MRR', value: '£1,546', hint: 'Monthly recurring revenue' },
+  { label: 'Trials', value: '3', hint: 'Companies currently in trial' },
+  { label: 'Overdue Billing', value: '2', hint: 'Accounts needing action' },
+  { label: 'Open Tickets', value: '4', hint: 'Support queue currently open' },
+  { label: 'Critical Audit Events', value: '2', hint: 'Sensitive events in last 24h' },
+];
 
-type CompanyRow = {
-  id: string;
-  name: string;
-  slug: string;
-  status: CompanyStatus;
-  billingStatus: BillingStatus;
-  users: number;
-  drivers: number;
-  vehicles: number;
-  bookingsToday: number;
-  monthlyRevenue: number;
-  createdAt: string;
-};
-
-const initialCompanies: CompanyRow[] = [
+const companies = [
   {
-    id: '1',
     name: 'Alpha Cars',
-    slug: 'alpha-cars',
+    plan: 'OPERATOR',
     status: 'ACTIVE',
-    billingStatus: 'PAID',
-    users: 8,
-    drivers: 34,
-    vehicles: 28,
-    bookingsToday: 142,
-    monthlyRevenue: 18420,
-    createdAt: '2025-11-02T09:20:00',
+    revenue: '£89',
+    billing: 'PAID',
   },
   {
-    id: '2',
-    name: 'CityLine Transport',
-    slug: 'cityline-transport',
-    status: 'TRIAL',
-    billingStatus: 'TRIAL',
-    users: 3,
-    drivers: 11,
-    vehicles: 9,
-    bookingsToday: 37,
-    monthlyRevenue: 4120,
-    createdAt: '2026-03-18T14:40:00',
-  },
-  {
-    id: '3',
     name: 'Metro Executive',
-    slug: 'metro-executive',
-    status: 'ACTIVE',
-    billingStatus: 'PAID',
-    users: 14,
-    drivers: 61,
-    vehicles: 44,
-    bookingsToday: 206,
-    monthlyRevenue: 33780,
-    createdAt: '2025-07-21T11:00:00',
+    plan: 'PRO',
+    status: 'TRIAL',
+    revenue: '£149',
+    billing: 'DUE',
   },
   {
-    id: '4',
-    name: 'Rapid Cab Group',
-    slug: 'rapid-cab-group',
+    name: 'Premier Fleet',
+    plan: 'ENTERPRISE',
+    status: 'ACTIVE',
+    revenue: '£249',
+    billing: 'PAID',
+  },
+  {
+    name: 'Northline Travel',
+    plan: 'STARTER',
     status: 'SUSPENDED',
-    billingStatus: 'OVERDUE',
-    users: 5,
-    drivers: 19,
-    vehicles: 17,
-    bookingsToday: 0,
-    monthlyRevenue: 0,
-    createdAt: '2025-12-05T16:10:00',
+    revenue: '£49',
+    billing: 'OVERDUE',
   },
 ];
 
-function formatCurrency(value: number) {
-  return `£${value.toLocaleString('en-GB', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+const activity = [
+  {
+    title: 'Plan upgraded for Alpha Cars',
+    meta: 'Starter → Operator · 22 Apr · Super Admin',
+    tone: 'info',
+  },
+  {
+    title: 'Billing failed for Northline Travel',
+    meta: 'Monthly renewal attempt failed · 22 Apr',
+    tone: 'danger',
+  },
+  {
+    title: 'New lead created from pricing page',
+    meta: 'Skyline Cars · Enterprise interest',
+    tone: 'info',
+  },
+  {
+    title: 'Support ticket opened',
+    meta: 'Driver app not receiving jobs · Alpha Cars',
+    tone: 'warning',
+  },
+  {
+    title: 'API key revoked',
+    meta: 'Old Metro integration key removed',
+    tone: 'neutral',
+  },
+];
+
+const quickLinks = [
+  { href: '/super-admin/companies', title: 'Companies', text: 'Manage tenants, plans and status.' },
+  { href: '/super-admin/billing', title: 'Billing', text: 'Review subscriptions and invoices.' },
+  { href: '/super-admin/analytics', title: 'Analytics', text: 'Monitor growth, MRR and usage.' },
+  { href: '/super-admin/leads', title: 'Leads CRM', text: 'Track prospects, demos and trials.' },
+  { href: '/super-admin/support', title: 'Support', text: 'Handle customer issues and tickets.' },
+  { href: '/super-admin/platform', title: 'Platform Health', text: 'Monitor services and incidents.' },
+];
+
+function toneClass(tone: 'info' | 'warning' | 'danger' | 'neutral') {
+  if (tone === 'info') return 'border-cyan-500/20 bg-cyan-500/10 text-cyan-200';
+  if (tone === 'warning') return 'border-amber-500/20 bg-amber-500/10 text-amber-200';
+  if (tone === 'danger') return 'border-red-500/20 bg-red-500/10 text-red-200';
+  return 'border-white/10 bg-white/5 text-white/70';
 }
 
-function formatDate(value: string) {
-  const d = new Date(value);
-  return d.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
-function companyStatusClass(status: CompanyStatus) {
-  if (status === 'ACTIVE') {
+function badgeClass(value: string) {
+  if (value === 'ACTIVE' || value === 'PAID') {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   }
-  if (status === 'TRIAL') {
+  if (value === 'TRIAL' || value === 'DUE' || value === 'OPERATOR') {
     return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
   }
-  return 'border-red-500/30 bg-red-500/10 text-red-300';
-}
-
-function billingStatusClass(status: BillingStatus) {
-  if (status === 'PAID') {
-    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  if (value === 'PRO') {
+    return 'border-violet-500/30 bg-violet-500/10 text-violet-300';
   }
-  if (status === 'TRIAL' || status === 'MANUAL') {
+  if (value === 'ENTERPRISE') {
     return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   }
-  return 'border-red-500/30 bg-red-500/10 text-red-300';
+  if (value === 'OVERDUE' || value === 'SUSPENDED') {
+    return 'border-red-500/30 bg-red-500/10 text-red-300';
+  }
+  return 'border-white/10 bg-white/5 text-white/70';
 }
 
 export default function SuperAdminOverviewPage() {
-  const [companies, setCompanies] = useState<CompanyRow[]>(initialCompanies);
-  const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(
-    initialCompanies[0]?.id ?? null,
-  );
-
-  const filteredCompanies = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return companies;
-
-    return companies.filter((company) =>
-      [
-        company.name,
-        company.slug,
-        company.status,
-        company.billingStatus,
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(q),
-    );
-  }, [companies, search]);
-
-  const selectedCompany = useMemo(
-    () => companies.find((company) => company.id === selectedId) ?? null,
-    [companies, selectedId],
-  );
-
-  const stats = useMemo(() => {
-    return {
-      companies: companies.length,
-      active: companies.filter((company) => company.status === 'ACTIVE').length,
-      trial: companies.filter((company) => company.status === 'TRIAL').length,
-      suspended: companies.filter((company) => company.status === 'SUSPENDED').length,
-      revenue: companies.reduce((sum, company) => sum + company.monthlyRevenue, 0),
-      drivers: companies.reduce((sum, company) => sum + company.drivers, 0),
-    };
-  }, [companies]);
-
-  function updateCompanyStatus(id: string, status: CompanyStatus) {
-    setCompanies((prev) =>
-      prev.map((company) =>
-        company.id === id ? { ...company, status } : company,
-      ),
-    );
-  }
-
-  function updateBillingStatus(id: string, billingStatus: BillingStatus) {
-    setCompanies((prev) =>
-      prev.map((company) =>
-        company.id === id ? { ...company, billingStatus } : company,
-      ),
-    );
-  }
-
   return (
-    <main className="min-h-screen bg-[#05070c] px-4 py-6 text-white md:px-6">
+    <main className="min-h-screen px-4 py-6 text-white md:px-6">
       <div className="mx-auto max-w-[1850px]">
         <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">
-              Platform Control
+              Platform Overview
             </div>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">
-              Super Admin Overview
+            <h1 className="mt-2 text-4xl font-bold tracking-tight">
+              Super Admin Dashboard
             </h1>
-            <p className="mt-2 text-sm text-white/55">
-              Company activity, billing state, usage totals and tenant controls.
+            <p className="mt-2 text-white/55">
+              Revenue, growth, billing health, support load and platform activity in one view.
             </p>
           </div>
 
           <div className="flex flex-wrap gap-3">
             <Link
-              href="/super-admin/companies"
+              href="/super-admin/companies/create"
               className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
             >
-              Open Companies
+              Create Company
             </Link>
             <Link
-              href="/super-admin/companies/new"
+              href="/super-admin/analytics"
               className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
             >
-              Add Company
+              Open Analytics
             </Link>
           </div>
         </div>
 
-        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <StatCard label="Companies" value={stats.companies} />
-          <StatCard label="Active" value={stats.active} />
-          <StatCard label="Trial" value={stats.trial} />
-          <StatCard label="Suspended" value={stats.suspended} />
-          <StatCard label="Drivers" value={stats.drivers} />
-          <StatCard label="Revenue" value={formatCurrency(stats.revenue)} />
+        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+          {stats.map((stat) => (
+            <div key={stat.label} className="rounded-3xl border border-white/10 bg-white/5 p-5">
+              <p className="text-sm text-white/60">{stat.label}</p>
+              <p className="mt-3 text-3xl font-bold text-white">{stat.value}</p>
+              <p className="mt-2 text-xs text-white/45">{stat.hint}</p>
+            </div>
+          ))}
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-            <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <h2 className="text-2xl font-bold">Companies</h2>
-                <p className="mt-1 text-sm text-white/60">
-                  Review tenant usage, live status and billing posture.
-                </p>
+        <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+          <section className="space-y-6">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl font-bold">Recent Platform Activity</h2>
+                  <p className="mt-1 text-sm text-white/60">
+                    The latest commercial and operational events.
+                  </p>
+                </div>
+
+                <Link
+                  href="/super-admin/audit"
+                  className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+                >
+                  Open Audit
+                </Link>
               </div>
 
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search companies..."
-                className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50 lg:w-[300px]"
-              />
+              <div className="space-y-3">
+                {activity.map((item) => (
+                  <div
+                    key={item.title}
+                    className={`rounded-2xl border p-4 ${toneClass(item.tone as any)}`}
+                  >
+                    <div className="text-sm font-semibold">{item.title}</div>
+                    <div className="mt-2 text-xs opacity-80">{item.meta}</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
-            {filteredCompanies.length === 0 ? (
-              <div className="rounded-2xl bg-[#0b1728] p-6 text-white/60">
-                No companies found.
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl font-bold">Top Company Snapshot</h2>
+                  <p className="mt-1 text-sm text-white/60">
+                    Quick commercial view across key accounts.
+                  </p>
+                </div>
+
+                <Link
+                  href="/super-admin/companies"
+                  className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+                >
+                  View All
+                </Link>
               </div>
-            ) : (
+
               <div className="space-y-4">
-                {filteredCompanies.map((company) => {
-                  const isSelected = selectedId === company.id;
-
-                  return (
-                    <div
-                      key={company.id}
-                      onClick={() => setSelectedId(company.id)}
-                      className={`cursor-pointer rounded-2xl border p-5 transition ${
-                        isSelected
-                          ? 'border-cyan-500/50 bg-[#0c1b2c]'
-                          : 'border-white/10 bg-[#0b1728]'
-                      }`}
-                    >
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-xl font-bold">{company.name}</h3>
-
-                            <span
-                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${companyStatusClass(
-                                company.status,
-                              )}`}
-                            >
-                              {company.status}
-                            </span>
-
-                            <span
-                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${billingStatusClass(
-                                company.billingStatus,
-                              )}`}
-                            >
-                              {company.billingStatus}
-                            </span>
-                          </div>
-
-                          <p className="mt-2 text-sm text-white/60">
-                            {company.slug}
-                          </p>
-
-                          <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/45">
-                            <span>Users: {company.users}</span>
-                            <span>Drivers: {company.drivers}</span>
-                            <span>Vehicles: {company.vehicles}</span>
-                            <span>Bookings Today: {company.bookingsToday}</span>
-                            <span>Revenue: {formatCurrency(company.monthlyRevenue)}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                          <Link
-                            href={`/super-admin/companies/${company.id}/edit`}
-                            className="rounded-xl bg-cyan-600 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-500"
-                          >
-                            Edit
-                          </Link>
-                          <Link
-                            href={`/super-admin/companies/${company.id}`}
-                            className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10"
-                          >
-                            Open
-                          </Link>
+                {companies.map((company) => (
+                  <div
+                    key={company.name}
+                    className="rounded-2xl border border-white/10 bg-[#0b1728] p-5"
+                  >
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-lg font-bold">{company.name}</h3>
+                          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClass(company.plan)}`}>
+                            {company.plan}
+                          </span>
+                          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClass(company.status)}`}>
+                            {company.status}
+                          </span>
+                          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeClass(company.billing)}`}>
+                            {company.billing}
+                          </span>
                         </div>
                       </div>
+
+                      <div className="text-sm font-semibold text-white">
+                        {company.revenue}/month
+                      </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
           </section>
 
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-            <h2 className="text-2xl font-bold">Company Focus</h2>
-            <p className="mt-1 text-sm text-white/60">
-              Selected tenant summary and quick admin actions.
-            </p>
+          <section className="space-y-6">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+              <h2 className="text-2xl font-bold">Quick Access</h2>
+              <p className="mt-1 text-sm text-white/60">
+                Jump into the main operating areas.
+              </p>
 
-            {!selectedCompany ? (
-              <div className="mt-5 rounded-2xl bg-[#0b1728] p-6 text-white/60">
-                No company selected.
+              <div className="mt-5 grid gap-4">
+                {quickLinks.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="rounded-2xl border border-white/10 bg-[#0b1728] p-5 transition hover:bg-[#101d32]"
+                  >
+                    <div className="text-lg font-semibold text-white">{item.title}</div>
+                    <div className="mt-2 text-sm text-white/60">{item.text}</div>
+                  </Link>
+                ))}
               </div>
-            ) : (
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+              <h2 className="text-2xl font-bold">Today’s Focus</h2>
+
               <div className="mt-5 space-y-4">
-                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-xl font-bold text-white">
-                      {selectedCompany.name}
-                    </h3>
-                    <span
-                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${companyStatusClass(
-                        selectedCompany.status,
-                      )}`}
-                    >
-                      {selectedCompany.status}
-                    </span>
-                  </div>
-
-                  <p className="mt-2 text-sm text-white/60">{selectedCompany.slug}</p>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
-                  <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
-                    Usage
-                  </h4>
-                  <DetailRow label="Users" value={String(selectedCompany.users)} />
-                  <DetailRow label="Drivers" value={String(selectedCompany.drivers)} />
-                  <DetailRow label="Vehicles" value={String(selectedCompany.vehicles)} />
-                  <DetailRow
-                    label="Bookings Today"
-                    value={String(selectedCompany.bookingsToday)}
-                  />
-                  <DetailRow
-                    label="Monthly Revenue"
-                    value={formatCurrency(selectedCompany.monthlyRevenue)}
-                  />
-                  <DetailRow
-                    label="Created"
-                    value={formatDate(selectedCompany.createdAt)}
-                  />
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
-                  <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
-                    Quick Actions
-                  </h4>
-
-                  <div className="space-y-2">
-                    <button
-                      onClick={() =>
-                        updateCompanyStatus(selectedCompany.id, 'ACTIVE')
-                      }
-                      className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
-                    >
-                      Mark Active
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        updateCompanyStatus(selectedCompany.id, 'TRIAL')
-                      }
-                      className="w-full rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500"
-                    >
-                      Mark Trial
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        updateCompanyStatus(selectedCompany.id, 'SUSPENDED')
-                      }
-                      className="w-full rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
-                    >
-                      Suspend Company
-                    </button>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
-                  <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
-                    Billing
-                  </h4>
-
-                  <div className="space-y-2">
-                    <button
-                      onClick={() =>
-                        updateBillingStatus(selectedCompany.id, 'PAID')
-                      }
-                      className="w-full rounded-xl border border-white/10 px-4 py-2 text-sm text-white hover:bg-white/10"
-                    >
-                      Mark Paid
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        updateBillingStatus(selectedCompany.id, 'TRIAL')
-                      }
-                      className="w-full rounded-xl border border-white/10 px-4 py-2 text-sm text-white hover:bg-white/10"
-                    >
-                      Mark Trial
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        updateBillingStatus(selectedCompany.id, 'OVERDUE')
-                      }
-                      className="w-full rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-200 hover:bg-red-500/20"
-                    >
-                      Mark Overdue
-                    </button>
-                  </div>
-                </div>
+                <FocusRow label="Billing accounts needing review" value="2" />
+                <FocusRow label="Trial companies close to conversion" value="3" />
+                <FocusRow label="Open support tickets" value="4" />
+                <FocusRow label="Pending payouts" value="2" />
+                <FocusRow label="Feature flags in beta rollout" value="3" />
               </div>
-            )}
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
+              <h2 className="text-2xl font-bold">Recommended Actions</h2>
+
+              <div className="mt-5 space-y-3">
+                <ActionButton href="/super-admin/billing" label="Review overdue billing" />
+                <ActionButton href="/super-admin/leads" label="Follow up trial leads" />
+                <ActionButton href="/super-admin/support" label="Clear support queue" />
+                <ActionButton href="/super-admin/platform" label="Check degraded services" />
+              </div>
+            </div>
           </section>
         </div>
       </div>
@@ -430,22 +279,7 @@ export default function SuperAdminOverviewPage() {
   );
 }
 
-function StatCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-      <p className="text-sm text-white/60">{label}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
-    </div>
-  );
-}
-
-function DetailRow({
+function FocusRow({
   label,
   value,
 }: {
@@ -453,11 +287,26 @@ function DetailRow({
   value: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-white/5 py-2 last:border-b-0">
-      <span className="text-sm text-white/50">{label}</span>
-      <span className="max-w-[60%] text-right text-sm text-white/85">
-        {value}
-      </span>
+    <div className="flex items-center justify-between border-b border-white/5 pb-4 last:border-b-0 last:pb-0">
+      <div className="text-sm text-white/60">{label}</div>
+      <div className="text-lg font-bold text-white">{value}</div>
     </div>
+  );
+}
+
+function ActionButton({
+  href,
+  label,
+}: {
+  href: string;
+  label: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="block rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#101d32]"
+    >
+      {label}
+    </Link>
   );
 }
