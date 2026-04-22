@@ -6,29 +6,64 @@ datasource db {
   provider = "postgresql"
 }
 
-model Company {
-  id                  String        @id @default(uuid())
-  name                String
-  code                String?       @unique
-  slug                String?       @unique
-  status              String        @default("ACTIVE")
-  contactName         String?
-  contactEmail        String?
-  contactPhone        String?
-  timezone            String        @default("Europe/London")
-  currency            String        @default("GBP")
-  driverLimit         Int           @default(25)
-  vehicleLimit        Int           @default(25)
-  dispatcherSeatLimit Int           @default(3)
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+enum CompanyStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
 
-  bookings            Booking[]
-  drivers             Driver[]
-  shifts              DriverShift[]
-  routePrices         RoutePrice[]
-  users               User[]
-  vehicles            Vehicle[]
+enum BillingPlan {
+  STARTER
+  GROWTH
+  PRO
+  ENTERPRISE
+}
+
+enum BillingStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+model Company {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name String
+  code String? @unique
+  slug String? @unique
+
+  status CompanyStatus @default(PENDING)
+
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+
+  timezone String? @default("Europe/London")
+  currency String? @default("GBP")
+
+  driverLimit         Int @default(10)
+  vehicleLimit        Int @default(10)
+  dispatcherSeatLimit Int @default(3)
+
+  billingPlan   BillingPlan   @default(STARTER)
+  billingStatus BillingStatus @default(TRIAL)
+
+  trialEndsAt          DateTime?
+  subscriptionStartsAt DateTime?
+  subscriptionEndsAt   DateTime?
+
+  bookings    Booking[]
+  drivers     Driver[]
+  shifts      DriverShift[]
+  routePrices RoutePrice[]
+  users       User[]
+  vehicles    Vehicle[]
+  settings    CompanySettings?
+  invoices    Invoice[]
+  payments    Payment[]
 }
 
 model User {
@@ -153,6 +188,10 @@ model Booking {
   pickupLng       Float?
   dropoffLat      Float?
   dropoffLng      Float?
+  customerName    String?
+  customerPhone   String?
+  passengerCount  Int?
+  notes           String?
   status          String
   pickupTime      DateTime
   pricingMode     String?
@@ -214,6 +253,89 @@ model DriverShift {
   @@index([companyId])
   @@index([startedAt])
   @@index([endedAt])
+}
+
+model CompanySettings {
+  id        String @id @default(uuid())
+  companyId String @unique
+
+  dispatchAutoRefreshSeconds       Int     @default(10)
+  driverTrackingIntervalSeconds    Int     @default(10)
+  autoDispatchEnabled              Boolean @default(true)
+  autoDispatchOfferTimeoutSeconds  Int     @default(20)
+  allowManualDispatchOverride      Boolean @default(true)
+  notifyDriversForNewJobs          Boolean @default(true)
+  notifyOperatorsForCancelledJobs  Boolean @default(true)
+  requireDriverPinLogin            Boolean @default(true)
+  allowDriverShiftStartWithoutDocs Boolean @default(false)
+  defaultTimezone                  String  @default("Europe/London")
+  defaultCurrency                  String  @default("GBP")
+  defaultCountry                   String  @default("United Kingdom")
+  bookingsRequireQuotedPrice       Boolean @default(false)
+  bookingsRequirePassengerCount    Boolean @default(true)
+  showCompletedJobsOnDispatch      Boolean @default(true)
+  completedJobsCompactMode         Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+model Invoice {
+  id            String   @id @default(uuid())
+  invoiceNumber String
+  accountName   String
+  status        String
+  issueDate     DateTime
+  dueDate       DateTime
+  tripCount     Int      @default(0)
+  subtotal      Float    @default(0)
+  vat           Float    @default(0)
+  total         Float    @default(0)
+  paidAmount    Float    @default(0)
+  balanceDue    Float    @default(0)
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  companyId     String
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@unique([companyId, invoiceNumber])
+  @@index([companyId])
+  @@index([status])
+  @@index([issueDate])
+  @@index([dueDate])
+}
+
+model Payment {
+  id                String   @id @default(uuid())
+  reference         String
+  accountName       String
+  method            String
+  status            String
+  amount            Float    @default(0)
+  paymentDate       DateTime
+  allocatedAmount   Float    @default(0)
+  unallocatedAmount Float    @default(0)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  companyId         String
+  invoiceId         String?
+
+  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, reference])
+  @@index([companyId])
+  @@index([invoiceId])
+  @@index([status])
+  @@index([paymentDate])
 }
 
 enum Role {

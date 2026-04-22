@@ -30,7 +30,10 @@ export class CompaniesController {
   }
 
   @Patch(':id/status')
-  updateStatus(@Param('id') id: string, @Body() body: { status: string }) {
+  updateStatus(
+    @Param('id') id: string,
+    @Body() body: { status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' },
+  ) {
     return this.companiesService.update(id, {
       status: body.status,
     });
@@ -45,9 +48,13 @@ export class CompaniesController {
   updateUserStatus(
     @Param('id') id: string,
     @Param('userId') userId: string,
-    @Body() body: { status: string },
+    @Body() body: { status: 'ACTIVE' | 'SUSPENDED' },
   ) {
-    return this.companiesService.updateCompanyUserStatus(id, userId, body.status);
+    return this.companiesService.updateCompanyUserStatus(
+      id,
+      userId,
+      body.status,
+    );
   }
 
   @Patch(':id/users/:userId/password')
@@ -56,6 +63,10 @@ export class CompaniesController {
     @Param('userId') userId: string,
     @Body() dto: ResetCompanyUserPasswordDto,
   ) {
-    return this.companiesService.resetCompanyUserPassword(id, userId, dto.password);
+    return this.companiesService.resetCompanyUserPassword(
+      id,
+      userId,
+      dto.password,
+    );
   }
 }

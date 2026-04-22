@@ -8,7 +8,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from '../common/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { BookingsService } from './bookings.service';
 import { AutoDispatchService } from '../dispatch/auto-dispatch.service';
 
@@ -22,19 +22,30 @@ type AuthRequest = {
 };
 
 type CreateBookingBody = {
-  pickup: string;
-  dropoff: string;
+  pickup?: string;
+  dropoff?: string;
+  pickupAddress?: string;
+  dropoffAddress?: string;
   pickupLat?: number | null;
   pickupLng?: number | null;
   dropoffLat?: number | null;
   dropoffLng?: number | null;
-  pickupTime: string;
+  pickupLatitude?: number | null;
+  pickupLongitude?: number | null;
+  dropoffLatitude?: number | null;
+  dropoffLongitude?: number | null;
+  pickupTime?: string;
+  pickupAt?: string;
   pricingMode?: string | null;
   quotedPrice?: number | null;
   calculatedFare?: number | null;
   distanceMiles?: number | null;
   durationMinutes?: number | null;
   autoDispatch?: boolean;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  passengerCount?: number | null;
+  notes?: string | null;
 };
 
 type AssignDriverBody = {
@@ -68,25 +79,26 @@ export class BookingsController {
   }
 
   @Post()
-  async create(
-    @Req() req: AuthRequest,
-    @Body() body: CreateBookingBody,
-  ) {
+  async create(@Req() req: AuthRequest, @Body() body: CreateBookingBody) {
     return this.bookingsService.create({
       companyId: req.user.companyId,
-      pickup: body.pickup,
-      dropoff: body.dropoff,
-      pickupLat: body.pickupLat ?? null,
-      pickupLng: body.pickupLng ?? null,
-      dropoffLat: body.dropoffLat ?? null,
-      dropoffLng: body.dropoffLng ?? null,
-      pickupTime: body.pickupTime,
+      pickup: body.pickupAddress ?? body.pickup ?? '',
+      dropoff: body.dropoffAddress ?? body.dropoff ?? '',
+      pickupLat: body.pickupLat ?? body.pickupLatitude ?? null,
+      pickupLng: body.pickupLng ?? body.pickupLongitude ?? null,
+      dropoffLat: body.dropoffLat ?? body.dropoffLatitude ?? null,
+      dropoffLng: body.dropoffLng ?? body.dropoffLongitude ?? null,
+      pickupTime: body.pickupAt ?? body.pickupTime ?? '',
       pricingMode: body.pricingMode ?? null,
       quotedPrice: body.quotedPrice ?? null,
       calculatedFare: body.calculatedFare ?? null,
       distanceMiles: body.distanceMiles ?? null,
       durationMinutes: body.durationMinutes ?? null,
       autoDispatch: body.autoDispatch ?? false,
+      customerName: body.customerName ?? null,
+      customerPhone: body.customerPhone ?? null,
+      passengerCount: body.passengerCount ?? null,
+      notes: body.notes ?? null,
     });
   }
 
@@ -128,10 +140,7 @@ export class BookingsController {
   }
 
   @Post(':id/auto-dispatch')
-  async autoDispatch(
-    @Req() req: AuthRequest,
-    @Param('id') bookingId: string,
-  ) {
+  async autoDispatch(@Req() req: AuthRequest, @Param('id') bookingId: string) {
     return this.autoDispatchService.startForBooking(
       bookingId,
       req.user.companyId,

@@ -25,7 +25,18 @@ export class CompaniesService {
         contactName: true,
         contactEmail: true,
         contactPhone: true,
+        timezone: true,
+        currency: true,
+        driverLimit: true,
+        vehicleLimit: true,
+        dispatcherSeatLimit: true,
+        billingPlan: true,
+        billingStatus: true,
+        trialEndsAt: true,
+        subscriptionStartsAt: true,
+        subscriptionEndsAt: true,
         createdAt: true,
+        updatedAt: true,
       },
     });
   }
@@ -42,7 +53,18 @@ export class CompaniesService {
         contactName: true,
         contactEmail: true,
         contactPhone: true,
+        timezone: true,
+        currency: true,
+        driverLimit: true,
+        vehicleLimit: true,
+        dispatcherSeatLimit: true,
+        billingPlan: true,
+        billingStatus: true,
+        trialEndsAt: true,
+        subscriptionStartsAt: true,
+        subscriptionEndsAt: true,
         createdAt: true,
+        updatedAt: true,
         users: {
           orderBy: { createdAt: 'desc' },
           select: {
@@ -99,10 +121,24 @@ export class CompaniesService {
           name: dto.name.trim(),
           code,
           slug,
-          status: dto.status || 'ACTIVE',
+          status: dto.status ?? 'PENDING',
           contactName: dto.contactName?.trim() || null,
           contactEmail: dto.contactEmail?.trim() || null,
           contactPhone: dto.contactPhone?.trim() || null,
+          timezone: dto.timezone ?? 'Europe/London',
+          currency: dto.currency ?? 'GBP',
+          driverLimit: dto.driverLimit ?? 10,
+          vehicleLimit: dto.vehicleLimit ?? 10,
+          dispatcherSeatLimit: dto.dispatcherSeatLimit ?? 3,
+          billingPlan: dto.billingPlan ?? 'STARTER',
+          billingStatus: dto.billingStatus ?? 'TRIAL',
+          trialEndsAt: dto.trialEndsAt ? new Date(dto.trialEndsAt) : null,
+          subscriptionStartsAt: dto.subscriptionStartsAt
+            ? new Date(dto.subscriptionStartsAt)
+            : null,
+          subscriptionEndsAt: dto.subscriptionEndsAt
+            ? new Date(dto.subscriptionEndsAt)
+            : null,
         },
         select: {
           id: true,
@@ -113,7 +149,18 @@ export class CompaniesService {
           contactName: true,
           contactEmail: true,
           contactPhone: true,
+          timezone: true,
+          currency: true,
+          driverLimit: true,
+          vehicleLimit: true,
+          dispatcherSeatLimit: true,
+          billingPlan: true,
+          billingStatus: true,
+          trialEndsAt: true,
+          subscriptionStartsAt: true,
+          subscriptionEndsAt: true,
           createdAt: true,
+          updatedAt: true,
         },
       });
 
@@ -161,10 +208,7 @@ export class CompaniesService {
 
     if (code) {
       const conflict = await this.prisma.company.findFirst({
-        where: {
-          code,
-          NOT: { id },
-        },
+        where: { code, NOT: { id } },
         select: { id: true },
       });
 
@@ -175,10 +219,7 @@ export class CompaniesService {
 
     if (slug) {
       const conflict = await this.prisma.company.findFirst({
-        where: {
-          slug,
-          NOT: { id },
-        },
+        where: { slug, NOT: { id } },
         select: { id: true },
       });
 
@@ -197,6 +238,31 @@ export class CompaniesService {
         contactName: dto.contactName,
         contactEmail: dto.contactEmail,
         contactPhone: dto.contactPhone,
+        timezone: dto.timezone,
+        currency: dto.currency,
+        driverLimit: dto.driverLimit,
+        vehicleLimit: dto.vehicleLimit,
+        dispatcherSeatLimit: dto.dispatcherSeatLimit,
+        billingPlan: dto.billingPlan,
+        billingStatus: dto.billingStatus,
+        trialEndsAt:
+          dto.trialEndsAt === undefined
+            ? undefined
+            : dto.trialEndsAt
+              ? new Date(dto.trialEndsAt)
+              : null,
+        subscriptionStartsAt:
+          dto.subscriptionStartsAt === undefined
+            ? undefined
+            : dto.subscriptionStartsAt
+              ? new Date(dto.subscriptionStartsAt)
+              : null,
+        subscriptionEndsAt:
+          dto.subscriptionEndsAt === undefined
+            ? undefined
+            : dto.subscriptionEndsAt
+              ? new Date(dto.subscriptionEndsAt)
+              : null,
       },
       select: {
         id: true,
@@ -207,7 +273,18 @@ export class CompaniesService {
         contactName: true,
         contactEmail: true,
         contactPhone: true,
+        timezone: true,
+        currency: true,
+        driverLimit: true,
+        vehicleLimit: true,
+        dispatcherSeatLimit: true,
+        billingPlan: true,
+        billingStatus: true,
+        trialEndsAt: true,
+        subscriptionStartsAt: true,
+        subscriptionEndsAt: true,
         createdAt: true,
+        updatedAt: true,
       },
     });
   }
@@ -234,7 +311,7 @@ export class CompaniesService {
       throw new BadRequestException('Password must be at least 8 characters');
     }
 
-    if (!['ADMIN', 'OPERATOR', 'DRIVER'].includes(role)) {
+    if (!['ADMIN', 'OPERATOR', 'DRIVER', 'SUPER_ADMIN'].includes(role)) {
       throw new BadRequestException('Invalid role');
     }
 
@@ -269,10 +346,7 @@ export class CompaniesService {
 
   async updateCompanyUserStatus(companyId: string, userId: string, status: string) {
     const user = await this.prisma.user.findFirst({
-      where: {
-        id: userId,
-        companyId,
-      },
+      where: { id: userId, companyId },
       select: { id: true },
     });
 
@@ -299,10 +373,7 @@ export class CompaniesService {
 
   async resetCompanyUserPassword(companyId: string, userId: string, password: string) {
     const user = await this.prisma.user.findFirst({
-      where: {
-        id: userId,
-        companyId,
-      },
+      where: { id: userId, companyId },
       select: { id: true },
     });
 
@@ -318,9 +389,7 @@ export class CompaniesService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        password: hashedPassword,
-      },
+      data: { password: hashedPassword },
     });
 
     return { success: true };

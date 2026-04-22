@@ -22,6 +22,10 @@ type CreateBookingInput = {
   distanceMiles?: number | null;
   durationMinutes?: number | null;
   autoDispatch?: boolean;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  passengerCount?: number | null;
+  notes?: string | null;
 };
 
 type AssignDriverInput = {
@@ -76,7 +80,7 @@ export class BookingsService {
   }
 
   async dispatchBoard(companyId: string) {
-    return this.prisma.booking.findMany({
+    const bookings = await this.prisma.booking.findMany({
       where: { companyId },
       include: {
         driver: true,
@@ -87,22 +91,64 @@ export class BookingsService {
       },
       orderBy: [{ pickupTime: 'asc' }, { createdAt: 'desc' }],
     });
+
+    const enriched = await Promise.all(
+      bookings.map(async (booking) => {
+        const suggestedDrivers =
+          await this.autoDispatchService.getSuggestedDriversForBooking(
+            booking.id,
+            booking.companyId,
+            3,
+          );
+
+        return {
+          ...booking,
+          suggestedDrivers,
+          pickupLatitude: booking.pickupLat ?? null,
+          pickupLongitude: booking.pickupLng ?? null,
+          dropoffLatitude: booking.dropoffLat ?? null,
+          dropoffLongitude: booking.dropoffLng ?? null,
+          pickupAddress: booking.pickup,
+          dropoffAddress: booking.dropoff,
+          pickupAt: booking.pickupTime,
+        };
+      }),
+    );
+
+    return enriched;
   }
 
   async create(input: CreateBookingInput) {
+    if (!input.pickup?.trim()) {
+      throw new BadRequestException('Pickup is required');
+    }
+
+    if (!input.dropoff?.trim()) {
+      throw new BadRequestException('Dropoff is required');
+    }
+
+    if (!input.pickupTime?.trim()) {
+      throw new BadRequestException('Pickup time is required');
+    }
+
+    const pickupTime = new Date(input.pickupTime);
+    if (Number.isNaN(pickupTime.getTime())) {
+      throw new BadRequestException('Pickup time is invalid');
+    }
+
     const reference = this.generateBookingReference();
 
     const booking = await this.prisma.booking.create({
       data: {
         companyId: input.companyId,
         reference,
-        pickup: input.pickup,
-        dropoff: input.dropoff,
+        pickup: input.pickup.trim(),
+        dropoff: input.dropoff.trim(),
         pickupLat: input.pickupLat ?? null,
         pickupLng: input.pickupLng ?? null,
         dropoffLat: input.dropoffLat ?? null,
         dropoffLng: input.dropoffLng ?? null,
-        pickupTime: new Date(input.pickupTime),
+        pickupTime,
         status: 'BOOKED',
         pricingMode: input.pricingMode ?? null,
         quotedPrice: input.quotedPrice ?? null,
@@ -121,6 +167,28 @@ export class BookingsService {
         pickupTime: booking.pickupTime,
       }),
     );
+
+    if (
+      input.customerName?.trim() ||
+      input.customerPhone?.trim() ||
+      input.passengerCount != null
+    ) {
+      await this.appendTimeline(
+        booking.id,
+        this.timelineMessage.customerCaptured({
+          customerName: input.customerName?.trim() || null,
+          customerPhone: input.customerPhone?.trim() || null,
+          passengerCount: input.passengerCount ?? null,
+        }),
+      );
+    }
+
+    if (input.notes?.trim()) {
+      await this.appendTimeline(
+        booking.id,
+        `BOOKING NOTES · ${input.notes.trim()}`,
+      );
+    }
 
     if (booking.quotedPrice != null) {
       await this.appendTimeline(
@@ -474,26 +542,11 @@ export class BookingsService {
     }
 
     const coreChecks = [
-      {
-        label: 'MOT',
-        expiry: vehicle.motExpiry,
-      },
-      {
-        label: 'Insurance',
-        expiry: vehicle.insuranceExpiry,
-      },
-      {
-        label: 'Inspection',
-        expiry: vehicle.inspectionExpiry,
-      },
-      {
-        label: 'Vehicle licence',
-        expiry: vehicle.vehicleLicenceExpiry,
-      },
-      {
-        label: 'Tax',
-        expiry: vehicle.taxExpiry,
-      },
+      { label: 'MOT', expiry: vehicle.motExpiry },
+      { label: 'Insurance', expiry: vehicle.insuranceExpiry },
+      { label: 'Inspection', expiry: vehicle.inspectionExpiry },
+      { label: 'Vehicle licence', expiry: vehicle.vehicleLicenceExpiry },
+      { label: 'Tax', expiry: vehicle.taxExpiry },
     ];
 
     for (const item of coreChecks) {
@@ -569,7 +622,11 @@ export class BookingsService {
       companyId,
     );
 
-    blockedReasons.push(...vehicleDispatch.blockedReasons.map((reason) => `Assigned vehicle: ${reason}`));
+    blockedReasons.push(
+      ...vehicleDispatch.blockedReasons.map(
+        (reason) => `Assigned vehicle: ${reason}`,
+      ),
+    );
 
     if (blockedReasons.length > 0) {
       throw new BadRequestException(
@@ -623,6 +680,17 @@ export class BookingsService {
       pickupTime: Date;
     }) =>
       `BOOKING CREATED · ${data.reference} · ${data.pickup} → ${data.dropoff} · ${new Date(data.pickupTime).toLocaleString('en-GB')}`,
+
+    customerCaptured: (data: {
+      customerName: string | null;
+      customerPhone: string | null;
+      passengerCount: number | null;
+    }) =>
+      `CUSTOMER CAPTURED${
+        data.customerName ? ` · ${data.customerName}` : ''
+      }${data.customerPhone ? ` · ${data.customerPhone}` : ''}${
+        data.passengerCount != null ? ` · ${data.passengerCount} passenger(s)` : ''
+      }`,
 
     pricingCaptured: (data: {
       pricingMode: string;

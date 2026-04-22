@@ -15,6 +15,10 @@ import { LocationsModule } from './locations/locations.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { DriverAppModule } from './driver-app/driver-app.module';
 
+import { SettingsModule } from './settings/settings.module';
+import { InvoicesModule } from './invoices/invoices.module';
+import { PaymentsModule } from './payments/payments.module';
+
 @Module({
   imports: [
     AuthModule,
@@ -28,6 +32,10 @@ import { DriverAppModule } from './driver-app/driver-app.module';
     LocationsModule,
     RealtimeModule,
     DriverAppModule,
+
+    SettingsModule,
+    InvoicesModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
