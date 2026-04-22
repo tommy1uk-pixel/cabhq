@@ -2,15 +2,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import AdminShell from '@/components/AdminShell';
-
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') ||
-  'http://localhost:3002';
+import { apiFetch } from '@/lib/api';
 
 type Driver = {
   id: string;
   fullName?: string;
   name?: string;
+  status?: string;
+};
+
+type Account = {
+  id: string;
+  name: string;
+  code?: string | null;
   status?: string;
 };
 
@@ -32,6 +36,8 @@ type Booking = {
   driverId?: string | null;
   driver?: Driver | null;
   createdAt?: string;
+  accountId?: string | null;
+  account?: Account | null;
 };
 
 type BookingTab = 'ALL' | 'LIVE' | 'SCHEDULED' | 'COMPLETED' | 'CANCELLED';
@@ -51,6 +57,11 @@ function getDropoffLabel(booking: Booking) {
 
 function getPickupTimeLabel(booking: Booking) {
   return booking.pickupAt || booking.pickupTime || '';
+}
+
+function getAccountLabel(booking: Booking) {
+  if (booking.account?.name) return booking.account.name;
+  return 'Non-account';
 }
 
 function formatDateTime(value?: string | null) {
@@ -99,6 +110,12 @@ function statusTone(status?: string) {
   return 'border-slate-500/30 bg-slate-500/10 text-slate-300';
 }
 
+function accountTone(hasAccount: boolean) {
+  return hasAccount
+    ? 'border-violet-500/30 bg-violet-500/10 text-violet-300'
+    : 'border-slate-500/30 bg-slate-500/10 text-slate-300';
+}
+
 function isCompleted(status?: string) {
   return ['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(
     (status || '').toUpperCase(),
@@ -119,58 +136,62 @@ function isScheduled(status?: string) {
 
 export default function BookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<BookingTab>('ALL');
   const [refreshing, setRefreshing] = useState(false);
-
-  const token =
-    typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const [accountFilter, setAccountFilter] = useState<'ALL' | 'ACCOUNT' | 'NON_ACCOUNT'>('ALL');
 
   const loadBookings = useCallback(async () => {
-    if (!token) return;
-
-    const response = await fetch(`${API_URL}/bookings`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      cache: 'no-store',
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to load bookings (${response.status})`);
-    }
-
-    const data = (await response.json()) as Booking[];
+    const data = await apiFetch<Booking[]>('/bookings');
     setBookings(Array.isArray(data) ? data : []);
-  }, [token]);
+  }, []);
+
+  const loadAccounts = useCallback(async () => {
+    const data = await apiFetch<Account[]>('/accounts').catch(() => []);
+    setAccounts(Array.isArray(data) ? data : []);
+  }, []);
 
   useEffect(() => {
-    if (!token) return;
+    let mounted = true;
 
-    const run = async () => {
+    async function run() {
       try {
         setLoading(true);
-        await loadBookings();
+
+        const [bookingsData, accountsData] = await Promise.all([
+          apiFetch<Booking[]>('/bookings').catch(() => []),
+          apiFetch<Account[]>('/accounts').catch(() => []),
+        ]);
+
+        if (!mounted) return;
+
+        setBookings(Array.isArray(bookingsData) ? bookingsData : []);
+        setAccounts(Array.isArray(accountsData) ? accountsData : []);
       } catch (error) {
         console.error(error);
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
-    };
+    }
 
     void run();
-  }, [token, loadBookings]);
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
-    if (!token) return;
-
     const interval = setInterval(() => {
       void loadBookings();
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [token, loadBookings]);
+  }, [loadBookings]);
 
   const filteredBookings = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -189,6 +210,12 @@ export default function BookingsPage() {
       items = items.filter((booking) => isCancelled(booking.status));
     }
 
+    if (accountFilter === 'ACCOUNT') {
+      items = items.filter((booking) => Boolean(booking.accountId || booking.account));
+    } else if (accountFilter === 'NON_ACCOUNT') {
+      items = items.filter((booking) => !booking.accountId && !booking.account);
+    }
+
     if (!q) return items;
 
     return items.filter((booking) => {
@@ -200,11 +227,12 @@ export default function BookingsPage() {
         getDropoffLabel(booking),
         getDriverName(booking.driver),
         booking.status,
+        booking.account?.name,
       ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q));
     });
-  }, [bookings, activeTab, search]);
+  }, [bookings, activeTab, search, accountFilter]);
 
   const counts = useMemo(() => {
     return {
@@ -215,13 +243,14 @@ export default function BookingsPage() {
         (b) => (b.status || '').toUpperCase() === 'COMPLETED',
       ).length,
       cancelled: bookings.filter((b) => isCancelled(b.status)).length,
+      accountLinked: bookings.filter((b) => Boolean(b.accountId || b.account)).length,
     };
   }, [bookings]);
 
   async function handleRefresh() {
     try {
       setRefreshing(true);
-      await loadBookings();
+      await Promise.all([loadBookings(), loadAccounts()]);
     } catch (error) {
       console.error(error);
     } finally {
@@ -233,6 +262,16 @@ export default function BookingsPage() {
     <AdminShell
       title="Bookings"
       subtitle="Search, review and manage all bookings across the business"
+      actions={
+        <div className="flex flex-wrap gap-3">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-white/70">
+            Accounts: <span className="font-semibold text-white">{accounts.length}</span>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm text-white/70">
+            Linked bookings: <span className="font-semibold text-white">{counts.accountLinked}</span>
+          </div>
+        </div>
+      }
     >
       <div className="space-y-6">
         <section className="overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_top_right,rgba(6,182,212,0.10),transparent_30%),linear-gradient(135deg,#081120_0%,#0c1527_55%,#07101c_100%)] p-6 md:p-8">
@@ -248,7 +287,7 @@ export default function BookingsPage() {
 
               <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
                 Search bookings, review statuses, track assignment state and
-                keep a clean overview of live, scheduled and completed work.
+                monitor which jobs are linked to invoice accounts.
               </p>
             </div>
 
@@ -263,12 +302,13 @@ export default function BookingsPage() {
           </div>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           <StatCard label="All Bookings" value={counts.all} hint="Every booking record" tone="slate" />
           <StatCard label="Live" value={counts.live} hint="Open and active jobs" tone="cyan" />
           <StatCard label="Scheduled" value={counts.scheduled} hint="Booked or offered" tone="amber" />
           <StatCard label="Completed" value={counts.completed} hint="Finished jobs" tone="emerald" />
           <StatCard label="Cancelled" value={counts.cancelled} hint="Cancelled or no-show" tone="red" />
+          <StatCard label="Account Linked" value={counts.accountLinked} hint="Ready for billing" tone="violet" />
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-6">
@@ -302,19 +342,32 @@ export default function BookingsPage() {
             </div>
 
             <div className="flex w-full flex-col gap-3 sm:flex-row xl:w-auto">
+              <select
+                value={accountFilter}
+                onChange={(e) =>
+                  setAccountFilter(e.target.value as 'ALL' | 'ACCOUNT' | 'NON_ACCOUNT')
+                }
+                className="rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none focus:border-cyan-500/50"
+              >
+                <option value="ALL">All booking types</option>
+                <option value="ACCOUNT">Account-linked only</option>
+                <option value="NON_ACCOUNT">Non-account only</option>
+              </select>
+
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by ref, customer, phone, route, driver..."
-                className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50 sm:w-[360px]"
+                placeholder="Search by ref, customer, phone, route, driver, account..."
+                className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50 sm:w-[420px]"
               />
             </div>
           </div>
 
-          <div className="hidden grid-cols-[150px_190px_1.8fr_150px_170px_120px] gap-3 border-b border-white/10 px-3 pb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 xl:grid">
+          <div className="hidden grid-cols-[150px_190px_1.8fr_170px_150px_170px_120px] gap-3 border-b border-white/10 px-3 pb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 xl:grid">
             <div>Reference</div>
             <div>Pickup Time</div>
             <div>Route</div>
+            <div>Account</div>
             <div>Status</div>
             <div>Driver</div>
             <div>Fare</div>
@@ -330,61 +383,75 @@ export default function BookingsPage() {
                 No bookings found.
               </div>
             ) : (
-              filteredBookings.map((booking) => (
-                <div
-                  key={booking.id}
-                  className="rounded-2xl border border-white/10 bg-[#0b1728] p-4 transition hover:border-white/15 hover:bg-[#0d1a2d]"
-                >
-                  <div className="grid gap-4 xl:grid-cols-[150px_190px_1.8fr_150px_170px_120px] xl:items-center">
-                    <div>
-                      <div className="text-sm font-bold text-white">
-                        {booking.reference}
+              filteredBookings.map((booking) => {
+                const hasAccount = Boolean(booking.accountId || booking.account);
+
+                return (
+                  <div
+                    key={booking.id}
+                    className="rounded-2xl border border-white/10 bg-[#0b1728] p-4 transition hover:border-white/15 hover:bg-[#0d1a2d]"
+                  >
+                    <div className="grid gap-4 xl:grid-cols-[150px_190px_1.8fr_170px_150px_170px_120px] xl:items-center">
+                      <div>
+                        <div className="text-sm font-bold text-white">
+                          {booking.reference}
+                        </div>
+                        <div className="mt-1 text-xs text-white/50">
+                          {booking.customerName || 'No customer name'}
+                        </div>
                       </div>
-                      <div className="mt-1 text-xs text-white/50">
-                        {booking.customerName || 'No customer name'}
+
+                      <div className="text-sm text-white/80">
+                        {formatDateTime(getPickupTimeLabel(booking))}
+                      </div>
+
+                      <div className="min-w-0">
+                        <div className="truncate text-sm text-white">
+                          {getPickupLabel(booking)}
+                        </div>
+                        <div className="truncate text-sm text-white/50">
+                          → {getDropoffLabel(booking)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span
+                          className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${accountTone(
+                            hasAccount,
+                          )}`}
+                        >
+                          {getAccountLabel(booking)}
+                        </span>
+                      </div>
+
+                      <div>
+                        <span
+                          className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(
+                            booking.status,
+                          )}`}
+                        >
+                          {(booking.status || 'UNKNOWN').replace(/_/g, ' ')}
+                        </span>
+                      </div>
+
+                      <div className="text-sm text-white/80">
+                        {getDriverName(booking.driver)}
+                      </div>
+
+                      <div className="text-sm font-semibold text-white">
+                        {formatPrice(booking.quotedPrice)}
                       </div>
                     </div>
 
-                    <div className="text-sm text-white/80">
-                      {formatDateTime(getPickupTimeLabel(booking))}
-                    </div>
-
-                    <div className="min-w-0">
-                      <div className="truncate text-sm text-white">
-                        {getPickupLabel(booking)}
-                      </div>
-                      <div className="truncate text-sm text-white/50">
-                        → {getDropoffLabel(booking)}
-                      </div>
-                    </div>
-
-                    <div>
-                      <span
-                        className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(
-                          booking.status,
-                        )}`}
-                      >
-                        {(booking.status || 'UNKNOWN').replace(/_/g, ' ')}
-                      </span>
-                    </div>
-
-                    <div className="text-sm text-white/80">
-                      {getDriverName(booking.driver)}
-                    </div>
-
-                    <div className="text-sm font-semibold text-white">
-                      {formatPrice(booking.quotedPrice)}
+                    <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 border-t border-white/5 pt-4 text-xs text-white/50">
+                      <span>Phone: {booking.customerPhone || '—'}</span>
+                      <span>Passengers: {booking.passengerCount ?? '—'}</span>
+                      <span>Created: {formatDateTime(booking.createdAt)}</span>
+                      {booking.notes ? <span>Notes: {booking.notes}</span> : null}
                     </div>
                   </div>
-
-                  <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 border-t border-white/5 pt-4 text-xs text-white/50">
-                    <span>Phone: {booking.customerPhone || '—'}</span>
-                    <span>Passengers: {booking.passengerCount ?? '—'}</span>
-                    <span>Created: {formatDateTime(booking.createdAt)}</span>
-                    {booking.notes ? <span>Notes: {booking.notes}</span> : null}
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </section>
@@ -402,7 +469,7 @@ function StatCard({
   label: string;
   value: number;
   hint: string;
-  tone: 'slate' | 'cyan' | 'amber' | 'emerald' | 'red';
+  tone: 'slate' | 'cyan' | 'amber' | 'emerald' | 'red' | 'violet';
 }) {
   const toneMap = {
     slate: 'from-slate-500/10 to-transparent border-white/10',
@@ -410,6 +477,7 @@ function StatCard({
     amber: 'from-amber-500/10 to-transparent border-amber-500/20',
     emerald: 'from-emerald-500/10 to-transparent border-emerald-500/20',
     red: 'from-red-500/10 to-transparent border-red-500/20',
+    violet: 'from-violet-500/10 to-transparent border-violet-500/20',
   };
 
   return (
