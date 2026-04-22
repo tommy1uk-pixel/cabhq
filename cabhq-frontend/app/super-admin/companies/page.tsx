@@ -2,6 +2,9 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
+import SuperAdminPageHeader from '@/components/super-admin/SuperAdminPageHeader';
+import SuperAdminPanel from '@/components/super-admin/SuperAdminPanel';
+import SuperAdminStatCard from '@/components/super-admin/SuperAdminStatCard';
 
 type Status = 'ACTIVE' | 'TRIAL' | 'SUSPENDED';
 type Plan = 'STARTER' | 'OPERATOR' | 'PRO' | 'ENTERPRISE';
@@ -67,24 +70,29 @@ function money(v: number) {
 }
 
 function badgeStatus(status: Status) {
-  if (status === 'ACTIVE')
+  if (status === 'ACTIVE') {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  }
 
-  if (status === 'TRIAL')
+  if (status === 'TRIAL') {
     return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
+  }
 
   return 'border-red-500/30 bg-red-500/10 text-red-300';
 }
 
 function badgePlan(plan: Plan) {
-  if (plan === 'STARTER')
+  if (plan === 'STARTER') {
     return 'border-white/10 bg-white/5 text-white/70';
+  }
 
-  if (plan === 'OPERATOR')
+  if (plan === 'OPERATOR') {
     return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
+  }
 
-  if (plan === 'PRO')
+  if (plan === 'PRO') {
     return 'border-violet-500/30 bg-violet-500/10 text-violet-300';
+  }
 
   return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
 }
@@ -99,13 +107,9 @@ export default function SuperAdminCompaniesPage() {
     if (!q) return companies;
 
     return companies.filter((c) =>
-      [
-        c.companyName,
-        c.owner,
-        c.email,
-        c.plan,
-        c.status,
-      ].some((v) => v.toLowerCase().includes(q)),
+      [c.companyName, c.owner, c.email, c.plan, c.status].some((v) =>
+        v.toLowerCase().includes(q),
+      ),
     );
   }, [search, companies]);
 
@@ -122,47 +126,38 @@ export default function SuperAdminCompaniesPage() {
   return (
     <main className="min-h-screen bg-[#05070c] px-4 py-6 text-white md:px-6">
       <div className="mx-auto max-w-[1800px]">
-
-        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">
-              Super Admin
-            </div>
-
-            <h1 className="mt-2 text-4xl font-bold tracking-tight">
-              Companies
-            </h1>
-
-            <p className="mt-2 text-white/55">
-              Manage tenants, subscriptions, billing and platform growth.
-            </p>
-          </div>
-
-          <Link
-            href="/super-admin/companies/new"
-            className="rounded-2xl bg-cyan-600 px-5 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
-          >
-            Create Company
-          </Link>
-        </div>
+        <SuperAdminPageHeader
+          title="Companies"
+          description="Manage tenants, subscriptions, billing and platform growth."
+          actions={
+            <Link
+              href="/super-admin/companies/new"
+              className="rounded-2xl bg-cyan-600 px-5 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
+            >
+              Create Company
+            </Link>
+          }
+        />
 
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <StatCard label="Companies" value={stats.total} />
-          <StatCard label="Active" value={stats.active} />
-          <StatCard label="Trial" value={stats.trial} />
-          <StatCard label="Suspended" value={stats.suspended} />
-          <StatCard label="MRR" value={money(stats.revenue)} />
+          <SuperAdminStatCard label="Companies" value={stats.total} />
+          <SuperAdminStatCard label="Active" value={stats.active} />
+          <SuperAdminStatCard label="Trial" value={stats.trial} />
+          <SuperAdminStatCard label="Suspended" value={stats.suspended} />
+          <SuperAdminStatCard label="MRR" value={money(stats.revenue)} />
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+        <SuperAdminPanel title="All Companies">
           <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <h2 className="text-2xl font-bold">All Companies</h2>
+            <div className="text-sm text-white/60">
+              Search, review and manage all company accounts.
+            </div>
 
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search company, owner, email..."
-              className="w-full xl:w-[340px] rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none focus:border-cyan-500/50"
+              className="w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none focus:border-cyan-500/50 xl:w-[340px]"
             />
           </div>
 
@@ -173,18 +168,25 @@ export default function SuperAdminCompaniesPage() {
                 className="rounded-2xl border border-white/10 bg-[#0b1728] p-5"
               >
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-xl font-bold text-white">
                         {company.companyName}
                       </h3>
 
-                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeStatus(company.status)}`}>
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeStatus(
+                          company.status,
+                        )}`}
+                      >
                         {company.status}
                       </span>
 
-                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgePlan(company.plan)}`}>
+                      <span
+                        className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgePlan(
+                          company.plan,
+                        )}`}
+                      >
                         {company.plan}
                       </span>
                     </div>
@@ -223,7 +225,6 @@ export default function SuperAdminCompaniesPage() {
                       Edit
                     </Link>
                   </div>
-
                 </div>
               </div>
             ))}
@@ -234,23 +235,8 @@ export default function SuperAdminCompaniesPage() {
               </div>
             ) : null}
           </div>
-        </section>
+        </SuperAdminPanel>
       </div>
     </main>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-      <p className="text-sm text-white/60">{label}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
-    </div>
   );
 }

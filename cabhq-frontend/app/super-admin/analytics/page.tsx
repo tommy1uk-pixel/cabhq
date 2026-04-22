@@ -2,6 +2,10 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
+import SuperAdminPageHeader from '@/components/super-admin/SuperAdminPageHeader';
+import SuperAdminPanel from '@/components/super-admin/SuperAdminPanel';
+import SuperAdminStatCard from '@/components/super-admin/SuperAdminStatCard';
+import SuperAdminDetailRow from '@/components/super-admin/SuperAdminDetailRow';
 
 type PlanType = 'STARTER' | 'OPERATOR' | 'PRO' | 'ENTERPRISE';
 type CompanyStatus = 'ACTIVE' | 'TRIAL' | 'SUSPENDED';
@@ -170,7 +174,9 @@ export default function SuperAdminAnalyticsPage() {
     const overdueBilling = companies.filter((c) => c.billingState === 'OVERDUE').length;
     const totalBookings = companies.reduce((sum, c) => sum + c.bookingsMonth, 0);
     const totalDrivers = companies.reduce((sum, c) => sum + c.drivers, 0);
-    const newThisMonth = companies.filter((c) => c.createdAt.startsWith('2026-03') || c.createdAt.startsWith('2026-04')).length;
+    const newThisMonth = companies.filter(
+      (c) => c.createdAt.startsWith('2026-03') || c.createdAt.startsWith('2026-04'),
+    ).length;
     const churnRisk = companies.filter(
       (c) => c.status === 'SUSPENDED' || c.billingState === 'OVERDUE',
     ).length;
@@ -197,57 +203,53 @@ export default function SuperAdminAnalyticsPage() {
   }, [companies]);
 
   const topRevenue = useMemo(() => {
-    return [...companies]
-      .sort((a, b) => b.monthlyRevenue - a.monthlyRevenue)
-      .slice(0, 5);
+    return [...companies].sort((a, b) => b.monthlyRevenue - a.monthlyRevenue).slice(0, 5);
   }, [companies]);
 
   return (
     <main className="min-h-screen bg-[#05070c] px-4 py-6 text-white md:px-6">
       <div className="mx-auto max-w-[1850px]">
-        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">
-              Super Admin
-            </div>
-            <h1 className="mt-2 text-4xl font-bold tracking-tight">
-              Analytics
-            </h1>
-            <p className="mt-2 text-white/55">
-              SaaS revenue, company growth, billing health and operator usage in one place.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/super-admin"
-              className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
-            >
-              Back to Overview
-            </Link>
-            <Link
-              href="/super-admin/companies"
-              className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
-            >
-              Open Companies
-            </Link>
-          </div>
-        </div>
+        <SuperAdminPageHeader
+          title="Analytics"
+          description="SaaS revenue, company growth, billing health and operator usage in one place."
+          actions={
+            <>
+              <Link
+                href="/super-admin"
+                className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
+              >
+                Back to Overview
+              </Link>
+              <Link
+                href="/super-admin/companies"
+                className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
+              >
+                Open Companies
+              </Link>
+            </>
+          }
+        />
 
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
-          <StatCard label="MRR" value={money(stats.mrr)} />
-          <StatCard label="Active Companies" value={stats.activeCompanies} />
-          <StatCard label="Trial Companies" value={stats.trialCompanies} />
-          <StatCard label="Overdue Billing" value={stats.overdueBilling} />
-          <StatCard label="Churn Risk" value={stats.churnRisk} />
-          <StatCard label="New This Month" value={stats.newThisMonth} />
-          <StatCard label="Bookings Month" value={stats.totalBookings.toLocaleString('en-GB')} />
-          <StatCard label="Drivers" value={stats.totalDrivers.toLocaleString('en-GB')} />
+          <SuperAdminStatCard label="MRR" value={money(stats.mrr)} />
+          <SuperAdminStatCard label="Active Companies" value={stats.activeCompanies} />
+          <SuperAdminStatCard label="Trial Companies" value={stats.trialCompanies} />
+          <SuperAdminStatCard label="Overdue Billing" value={stats.overdueBilling} />
+          <SuperAdminStatCard label="Churn Risk" value={stats.churnRisk} />
+          <SuperAdminStatCard label="New This Month" value={stats.newThisMonth} />
+          <SuperAdminStatCard
+            label="Bookings Month"
+            value={stats.totalBookings.toLocaleString('en-GB')}
+          />
+          <SuperAdminStatCard
+            label="Drivers"
+            value={stats.totalDrivers.toLocaleString('en-GB')}
+          />
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
           <section className="space-y-6">
-            <Panel title="Growth Trend">
+            <SuperAdminPanel title="Growth Trend">
               <div className="grid gap-4 md:grid-cols-4">
                 {trends.map((trend) => (
                   <div
@@ -265,9 +267,9 @@ export default function SuperAdminAnalyticsPage() {
                   </div>
                 ))}
               </div>
-            </Panel>
+            </SuperAdminPanel>
 
-            <Panel title="Top Companies by Revenue">
+            <SuperAdminPanel title="Top Companies by Revenue">
               <div className="space-y-4">
                 {topRevenue.map((company) => (
                   <div
@@ -278,10 +280,14 @@ export default function SuperAdminAnalyticsPage() {
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-xl font-bold">{company.companyName}</h3>
-                          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgePlan(company.plan)}`}>
+                          <span
+                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgePlan(company.plan)}`}
+                          >
                             {company.plan}
                           </span>
-                          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeStatus(company.status)}`}>
+                          <span
+                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${badgeStatus(company.status)}`}
+                          >
                             {company.status}
                           </span>
                         </div>
@@ -313,20 +319,24 @@ export default function SuperAdminAnalyticsPage() {
                   </div>
                 ))}
               </div>
-            </Panel>
+            </SuperAdminPanel>
           </section>
 
           <section className="space-y-6">
-            <Panel title="Plan Distribution">
+            <SuperAdminPanel title="Plan Distribution">
               <div className="grid gap-4 md:grid-cols-2">
                 <MiniMetricCard label="Starter" value={planBreakdown.starter} tone="neutral" />
                 <MiniMetricCard label="Operator" value={planBreakdown.operator} tone="cyan" />
                 <MiniMetricCard label="Pro" value={planBreakdown.pro} tone="violet" />
-                <MiniMetricCard label="Enterprise" value={planBreakdown.enterprise} tone="amber" />
+                <MiniMetricCard
+                  label="Enterprise"
+                  value={planBreakdown.enterprise}
+                  tone="amber"
+                />
               </div>
-            </Panel>
+            </SuperAdminPanel>
 
-            <Panel title="Billing Health">
+            <SuperAdminPanel title="Billing Health">
               <div className="space-y-4">
                 {companies.map((company) => (
                   <div
@@ -337,12 +347,15 @@ export default function SuperAdminAnalyticsPage() {
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="font-semibold text-white">{company.companyName}</div>
-                          <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${badgeBilling(company.billingState)}`}>
+                          <span
+                            className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${badgeBilling(company.billingState)}`}
+                          >
                             {company.billingState}
                           </span>
                         </div>
                         <div className="mt-2 text-xs text-white/50">
-                          Revenue: {money(company.monthlyRevenue)} · Bookings: {company.bookingsMonth.toLocaleString('en-GB')}
+                          Revenue: {money(company.monthlyRevenue)} · Bookings:{' '}
+                          {company.bookingsMonth.toLocaleString('en-GB')}
                         </div>
                       </div>
 
@@ -356,51 +369,33 @@ export default function SuperAdminAnalyticsPage() {
                   </div>
                 ))}
               </div>
-            </Panel>
+            </SuperAdminPanel>
 
-            <Panel title="Platform Summary">
+            <SuperAdminPanel title="Platform Summary">
               <div className="space-y-3">
-                <DetailRow label="Total Monthly Revenue" value={money(stats.mrr)} />
-                <DetailRow label="Total Monthly Bookings" value={stats.totalBookings.toLocaleString('en-GB')} />
-                <DetailRow label="Total Drivers" value={stats.totalDrivers.toLocaleString('en-GB')} />
-                <DetailRow label="Trial Conversion Opportunity" value={String(stats.trialCompanies)} />
-                <DetailRow label="Accounts Needing Billing Action" value={String(stats.overdueBilling)} />
+                <SuperAdminDetailRow label="Total Monthly Revenue" value={money(stats.mrr)} />
+                <SuperAdminDetailRow
+                  label="Total Monthly Bookings"
+                  value={stats.totalBookings.toLocaleString('en-GB')}
+                />
+                <SuperAdminDetailRow
+                  label="Total Drivers"
+                  value={stats.totalDrivers.toLocaleString('en-GB')}
+                />
+                <SuperAdminDetailRow
+                  label="Trial Conversion Opportunity"
+                  value={String(stats.trialCompanies)}
+                />
+                <SuperAdminDetailRow
+                  label="Accounts Needing Billing Action"
+                  value={String(stats.overdueBilling)}
+                />
               </div>
-            </Panel>
+            </SuperAdminPanel>
           </section>
         </div>
       </div>
     </main>
-  );
-}
-
-function Panel({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-      <h2 className="mb-4 text-2xl font-bold">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-      <p className="text-sm text-white/60">{label}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
-    </div>
   );
 }
 
@@ -426,21 +421,6 @@ function MiniMetricCard({
     <div className={`rounded-2xl border p-5 ${toneClass}`}>
       <div className="text-sm text-white/55">{label}</div>
       <div className="mt-3 text-3xl font-bold text-white">{value}</div>
-    </div>
-  );
-}
-
-function DetailRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-white/5 py-2 last:border-b-0">
-      <span className="text-sm text-white/50">{label}</span>
-      <span className="text-right text-sm text-white/85">{value}</span>
     </div>
   );
 }

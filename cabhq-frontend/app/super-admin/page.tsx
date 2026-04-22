@@ -1,6 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import SuperAdminPageHeader from '@/components/super-admin/SuperAdminPageHeader';
+import SuperAdminPanel from '@/components/super-admin/SuperAdminPanel';
+import SuperAdminStatCard from '@/components/super-admin/SuperAdminStatCard';
 
 const stats = [
   { label: 'Total Companies', value: '15', hint: 'All active, trial and suspended tenants' },
@@ -109,56 +112,46 @@ export default function SuperAdminOverviewPage() {
   return (
     <main className="min-h-screen px-4 py-6 text-white md:px-6">
       <div className="mx-auto max-w-[1850px]">
-        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">
-              Platform Overview
-            </div>
-            <h1 className="mt-2 text-4xl font-bold tracking-tight">
-              Super Admin Dashboard
-            </h1>
-            <p className="mt-2 text-white/55">
-              Revenue, growth, billing health, support load and platform activity in one view.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/super-admin/companies/create"
-              className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
-            >
-              Create Company
-            </Link>
-            <Link
-              href="/super-admin/analytics"
-              className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
-            >
-              Open Analytics
-            </Link>
-          </div>
-        </div>
+        <SuperAdminPageHeader
+          eyebrow="Platform Overview"
+          title="Super Admin Dashboard"
+          description="Revenue, growth, billing health, support load and platform activity in one view."
+          actions={
+            <>
+              <Link
+                href="/super-admin/companies/create"
+                className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
+              >
+                Create Company
+              </Link>
+              <Link
+                href="/super-admin/analytics"
+                className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
+              >
+                Open Analytics
+              </Link>
+            </>
+          }
+        />
 
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
           {stats.map((stat) => (
-            <div key={stat.label} className="rounded-3xl border border-white/10 bg-white/5 p-5">
-              <p className="text-sm text-white/60">{stat.label}</p>
-              <p className="mt-3 text-3xl font-bold text-white">{stat.value}</p>
-              <p className="mt-2 text-xs text-white/45">{stat.hint}</p>
-            </div>
+            <SuperAdminStatCard
+              key={stat.label}
+              label={stat.label}
+              value={stat.value}
+              hint={stat.hint}
+            />
           ))}
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
           <section className="space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-2xl font-bold">Recent Platform Activity</h2>
-                  <p className="mt-1 text-sm text-white/60">
-                    The latest commercial and operational events.
-                  </p>
-                </div>
-
+            <SuperAdminPanel
+              title="Recent Platform Activity"
+              description="The latest commercial and operational events."
+            >
+              <div className="mb-4 flex justify-end">
                 <Link
                   href="/super-admin/audit"
                   className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
@@ -171,24 +164,20 @@ export default function SuperAdminOverviewPage() {
                 {activity.map((item) => (
                   <div
                     key={item.title}
-                    className={`rounded-2xl border p-4 ${toneClass(item.tone as any)}`}
+                    className={`rounded-2xl border p-4 ${toneClass(item.tone as 'info' | 'warning' | 'danger' | 'neutral')}`}
                   >
                     <div className="text-sm font-semibold">{item.title}</div>
                     <div className="mt-2 text-xs opacity-80">{item.meta}</div>
                   </div>
                 ))}
               </div>
-            </div>
+            </SuperAdminPanel>
 
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-2xl font-bold">Top Company Snapshot</h2>
-                  <p className="mt-1 text-sm text-white/60">
-                    Quick commercial view across key accounts.
-                  </p>
-                </div>
-
+            <SuperAdminPanel
+              title="Top Company Snapshot"
+              description="Quick commercial view across key accounts."
+            >
+              <div className="mb-4 flex justify-end">
                 <Link
                   href="/super-admin/companies"
                   className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
@@ -226,17 +215,15 @@ export default function SuperAdminOverviewPage() {
                   </div>
                 ))}
               </div>
-            </div>
+            </SuperAdminPanel>
           </section>
 
           <section className="space-y-6">
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-              <h2 className="text-2xl font-bold">Quick Access</h2>
-              <p className="mt-1 text-sm text-white/60">
-                Jump into the main operating areas.
-              </p>
-
-              <div className="mt-5 grid gap-4">
+            <SuperAdminPanel
+              title="Quick Access"
+              description="Jump into the main operating areas."
+            >
+              <div className="grid gap-4">
                 {quickLinks.map((item) => (
                   <Link
                     key={item.href}
@@ -248,30 +235,26 @@ export default function SuperAdminOverviewPage() {
                   </Link>
                 ))}
               </div>
-            </div>
+            </SuperAdminPanel>
 
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-              <h2 className="text-2xl font-bold">Today’s Focus</h2>
-
-              <div className="mt-5 space-y-4">
+            <SuperAdminPanel title="Today’s Focus">
+              <div className="space-y-4">
                 <FocusRow label="Billing accounts needing review" value="2" />
                 <FocusRow label="Trial companies close to conversion" value="3" />
                 <FocusRow label="Open support tickets" value="4" />
                 <FocusRow label="Pending payouts" value="2" />
                 <FocusRow label="Feature flags in beta rollout" value="3" />
               </div>
-            </div>
+            </SuperAdminPanel>
 
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-6">
-              <h2 className="text-2xl font-bold">Recommended Actions</h2>
-
-              <div className="mt-5 space-y-3">
+            <SuperAdminPanel title="Recommended Actions">
+              <div className="space-y-3">
                 <ActionButton href="/super-admin/billing" label="Review overdue billing" />
                 <ActionButton href="/super-admin/leads" label="Follow up trial leads" />
                 <ActionButton href="/super-admin/support" label="Clear support queue" />
                 <ActionButton href="/super-admin/platform" label="Check degraded services" />
               </div>
-            </div>
+            </SuperAdminPanel>
           </section>
         </div>
       </div>
