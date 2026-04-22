@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AdminShell from '@/components/AdminShell';
+import { apiFetch } from '@/lib/api';
 
 type PaymentMethod =
   | 'BANK_TRANSFER'
@@ -24,7 +25,7 @@ type Payment = {
   paymentDate: string;
   allocatedAmount: number;
   unallocatedAmount: number;
-  notes?: string;
+  notes?: string | null;
 };
 
 type PaymentFormState = {
@@ -39,48 +40,6 @@ type PaymentFormState = {
 };
 
 const today = new Date().toISOString().slice(0, 10);
-
-const initialPayments: Payment[] = [
-  {
-    id: '1',
-    reference: 'PAY-2025-001',
-    accountName: 'Northside Medical Centre',
-    invoiceNumber: 'INV-2025-001',
-    method: 'BANK_TRANSFER',
-    status: 'CLEARED',
-    amount: 2160,
-    paymentDate: '2025-04-12',
-    allocatedAmount: 2160,
-    unallocatedAmount: 0,
-    notes: 'Monthly invoice settled in full',
-  },
-  {
-    id: '2',
-    reference: 'PAY-2025-002',
-    accountName: 'Greenfield School Transport',
-    invoiceNumber: 'INV-2025-002',
-    method: 'BANK_TRANSFER',
-    status: 'CLEARED',
-    amount: 2000,
-    paymentDate: '2025-04-16',
-    allocatedAmount: 2000,
-    unallocatedAmount: 0,
-    notes: 'Part payment received',
-  },
-  {
-    id: '3',
-    reference: 'PAY-2025-003',
-    accountName: 'City Stay Hotel',
-    invoiceNumber: null,
-    method: 'CARD',
-    status: 'PENDING',
-    amount: 500,
-    paymentDate: '2025-04-18',
-    allocatedAmount: 0,
-    unallocatedAmount: 500,
-    notes: 'Awaiting manual allocation',
-  },
-];
 
 const initialForm: PaymentFormState = {
   accountName: '',
@@ -130,14 +89,56 @@ function methodClasses(method: PaymentMethod) {
   return map[method];
 }
 
+function toDateInput(value?: string | null) {
+  if (!value) return today;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return today;
+  return date.toISOString().slice(0, 10);
+}
+
 export default function PaymentsPage() {
-  const [payments, setPayments] = useState<Payment[]>(initialPayments);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
-  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(
-    initialPayments[0]?.id ?? null,
-  );
+  const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
   const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [form, setForm] = useState<PaymentFormState>(initialForm);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadPayments() {
+      try {
+        setLoading(true);
+        setError('');
+
+        const data = await apiFetch<Payment[]>('/payments');
+        if (!mounted) return;
+
+        const next = Array.isArray(data) ? data : [];
+        setPayments(next);
+        setSelectedPaymentId((current) => current ?? next[0]?.id ?? null);
+      } catch (err) {
+        console.error(err);
+        if (mounted) {
+          setError(err instanceof Error ? err.message : 'Failed to load payments');
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadPayments();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const filteredPayments = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -201,53 +202,74 @@ export default function PaymentsPage() {
     setEditingPaymentId(null);
   }
 
-  function generatePaymentReference() {
-    const next = payments.length + 1;
-    return `PAY-2025-${String(next).padStart(3, '0')}`;
+  function setNotice(message: string) {
+    setSuccess(message);
+    setTimeout(() => setSuccess(''), 2500);
   }
 
-  function submitPayment(e: React.FormEvent) {
+  async function submitPayment(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setSaving(true);
+    setError('');
+    setSuccess('');
 
-    const amount = Number(form.amount || 0);
-    const allocatedAmount = Number(form.allocatedAmount || 0);
-    const safeAllocated = Math.min(Math.max(allocatedAmount, 0), amount);
-    const unallocatedAmount = Math.max(amount - safeAllocated, 0);
+    try {
+      const amount = Number(form.amount || 0);
+      const allocatedAmount = Number(form.allocatedAmount || 0);
+      const safeAllocated = Math.min(Math.max(allocatedAmount, 0), amount);
 
-    const existing = editingPaymentId
-      ? payments.find((payment) => payment.id === editingPaymentId)
-      : null;
-
-    const payload: Payment = {
-      id: editingPaymentId ?? crypto.randomUUID(),
-      reference: existing?.reference ?? generatePaymentReference(),
-      accountName: form.accountName.trim(),
-      invoiceNumber: form.invoiceNumber.trim() || null,
-      method: form.method,
-      status: form.status,
-      amount,
-      paymentDate: form.paymentDate,
-      allocatedAmount: safeAllocated,
-      unallocatedAmount,
-      notes: form.notes.trim(),
-    };
-
-    if (!payload.accountName || payload.amount <= 0) return;
-
-    setPayments((prev) => {
-      const exists = prev.some((payment) => payment.id === payload.id);
-
-      if (exists) {
-        return prev.map((payment) =>
-          payment.id === payload.id ? payload : payment,
-        );
+      if (!form.accountName.trim()) {
+        throw new Error('Account name is required');
       }
 
-      return [payload, ...prev];
-    });
+      if (amount <= 0) {
+        throw new Error('Amount must be greater than zero');
+      }
 
-    setSelectedPaymentId(payload.id);
-    resetForm();
+      const payload = {
+        accountName: form.accountName.trim(),
+        invoiceNumber: form.invoiceNumber.trim() || null,
+        method: form.method,
+        status: form.status,
+        amount,
+        paymentDate: form.paymentDate,
+        allocatedAmount: safeAllocated,
+        notes: form.notes.trim(),
+      };
+
+      let savedPayment: Payment;
+
+      if (editingPaymentId) {
+        savedPayment = await apiFetch<Payment>(`/payments/${editingPaymentId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
+
+        setPayments((prev) =>
+          prev.map((payment) =>
+            payment.id === editingPaymentId ? savedPayment : payment,
+          ),
+        );
+
+        setNotice('Payment updated');
+      } else {
+        savedPayment = await apiFetch<Payment>('/payments', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+
+        setPayments((prev) => [savedPayment, ...prev]);
+        setNotice('Payment recorded');
+      }
+
+      setSelectedPaymentId(savedPayment.id);
+      resetForm();
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to save payment');
+    } finally {
+      setSaving(false);
+    }
   }
 
   function startEdit(payment: Payment) {
@@ -259,7 +281,7 @@ export default function PaymentsPage() {
       method: payment.method,
       status: payment.status,
       amount: String(payment.amount),
-      paymentDate: payment.paymentDate,
+      paymentDate: toDateInput(payment.paymentDate),
       allocatedAmount: String(payment.allocatedAmount),
       notes: payment.notes ?? '',
     });
@@ -267,29 +289,65 @@ export default function PaymentsPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function deletePayment(paymentId: string) {
+  async function deletePayment(paymentId: string) {
     const confirmed = window.confirm('Delete this payment?');
     if (!confirmed) return;
 
-    const remaining = payments.filter((payment) => payment.id !== paymentId);
-    setPayments(remaining);
+    setError('');
+    setSuccess('');
 
-    if (selectedPaymentId === paymentId) {
-      setSelectedPaymentId(remaining[0]?.id ?? null);
-    }
+    try {
+      await apiFetch(`/payments/${paymentId}`, {
+        method: 'DELETE',
+      });
 
-    if (editingPaymentId === paymentId) {
-      resetForm();
+      const remaining = payments.filter((payment) => payment.id !== paymentId);
+      setPayments(remaining);
+
+      if (selectedPaymentId === paymentId) {
+        setSelectedPaymentId(remaining[0]?.id ?? null);
+      }
+
+      if (editingPaymentId === paymentId) {
+        resetForm();
+      }
+
+      setNotice('Payment deleted');
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to delete payment');
     }
   }
 
-  function updatePaymentStatus(paymentId: string, status: PaymentStatus) {
-    setPayments((prev) =>
-      prev.map((payment) =>
-        payment.id === paymentId ? { ...payment, status } : payment,
-      ),
-    );
+  async function updatePaymentStatus(paymentId: string, status: PaymentStatus) {
+    setError('');
+    setSuccess('');
+
+    try {
+      const updatedPayment = await apiFetch<Payment>(`/payments/${paymentId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+
+      setPayments((prev) =>
+        prev.map((payment) =>
+          payment.id === paymentId ? updatedPayment : payment,
+        ),
+      );
+
+      setNotice(`Payment marked ${prettifyEnum(status).toLowerCase()}`);
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to update payment status');
+    }
   }
+
+  const liveAmount = Number(form.amount || 0);
+  const liveAllocated = Math.min(
+    Math.max(Number(form.allocatedAmount || 0), 0),
+    liveAmount,
+  );
+  const liveUnallocated = Math.max(liveAmount - liveAllocated, 0);
 
   return (
     <AdminShell
@@ -320,6 +378,18 @@ export default function PaymentsPage() {
             hint="Still not assigned"
           />
         </section>
+
+        {(error || success) && (
+          <div
+            className={`rounded-2xl border px-4 py-3 text-sm ${
+              error
+                ? 'border-red-500/30 bg-red-500/10 text-red-200'
+                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+            }`}
+          >
+            {error || success}
+          </div>
+        )}
 
         <div className="grid gap-6 xl:grid-cols-[430px_1fr]">
           <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
@@ -455,34 +525,20 @@ export default function PaymentsPage() {
                 />
               </div>
 
-              {Number(form.amount || 0) > 0 ? (
+              {liveAmount > 0 ? (
                 <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
                   <div className="grid gap-3 md:grid-cols-3">
                     <QuickValue
                       label="Total"
-                      value={formatCurrency(Number(form.amount || 0))}
+                      value={formatCurrency(liveAmount)}
                     />
                     <QuickValue
                       label="Allocated"
-                      value={formatCurrency(
-                        Math.min(
-                          Math.max(Number(form.allocatedAmount || 0), 0),
-                          Number(form.amount || 0),
-                        ),
-                      )}
+                      value={formatCurrency(liveAllocated)}
                     />
                     <QuickValue
                       label="Unallocated"
-                      value={formatCurrency(
-                        Math.max(
-                          Number(form.amount || 0) -
-                            Math.min(
-                              Math.max(Number(form.allocatedAmount || 0), 0),
-                              Number(form.amount || 0),
-                            ),
-                          0,
-                        ),
-                      )}
+                      value={formatCurrency(liveUnallocated)}
                     />
                   </div>
                 </div>
@@ -503,9 +559,16 @@ export default function PaymentsPage() {
 
               <button
                 type="submit"
-                className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500"
+                disabled={saving}
+                className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {editingPaymentId ? 'Save Payment Changes' : 'Record Payment'}
+                {saving
+                  ? editingPaymentId
+                    ? 'Saving Payment...'
+                    : 'Recording Payment...'
+                  : editingPaymentId
+                    ? 'Save Payment Changes'
+                    : 'Record Payment'}
               </button>
             </form>
           </section>
@@ -527,7 +590,11 @@ export default function PaymentsPage() {
               />
             </div>
 
-            {filteredPayments.length === 0 ? (
+            {loading ? (
+              <div className="rounded-2xl bg-[#0b1728] p-6 text-white/60">
+                Loading payments...
+              </div>
+            ) : filteredPayments.length === 0 ? (
               <div className="rounded-2xl bg-[#0b1728] p-6 text-white/60">
                 No payments found.
               </div>
@@ -583,7 +650,7 @@ export default function PaymentsPage() {
 
                           <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/50">
                             <span>Invoice: {payment.invoiceNumber || 'Unallocated'}</span>
-                            <span>Date: {payment.paymentDate}</span>
+                            <span>Date: {toDateInput(payment.paymentDate)}</span>
                             <span>Amount: {formatCurrency(payment.amount)}</span>
                           </div>
                         </button>
@@ -637,7 +704,7 @@ export default function PaymentsPage() {
                               label="Method"
                               value={prettifyEnum(payment.method)}
                             />
-                            <DetailRow label="Payment Date" value={payment.paymentDate} />
+                            <DetailRow label="Payment Date" value={toDateInput(payment.paymentDate)} />
                           </div>
 
                           <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
