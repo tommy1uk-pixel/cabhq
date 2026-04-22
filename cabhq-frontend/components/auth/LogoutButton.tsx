@@ -1,17 +1,17 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-
 export default function LogoutButton() {
-  const router = useRouter();
-
   function handleLogout() {
     localStorage.removeItem('cabhq_token');
     localStorage.removeItem('cabhq_user');
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     localStorage.removeItem('driverToken');
     localStorage.removeItem('driver');
 
-    window.location.href = '/login';
+    sessionStorage.clear();
+
+    window.location.replace('/login');
   }
 
   return (
