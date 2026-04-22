@@ -1,9 +1,24 @@
 import { Company } from './types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') ||
+  'http://localhost:3002';
+
+function getToken() {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('cabhq_token');
+}
 
 export async function fetchCompanies(): Promise<Company[]> {
+  const token = getToken();
+
   const res = await fetch(`${API_BASE}/companies`, {
+    method: 'GET',
+    headers: token
+      ? {
+          Authorization: `Bearer ${token}`,
+        }
+      : {},
     cache: 'no-store',
   });
 
@@ -17,7 +32,15 @@ export async function fetchCompanies(): Promise<Company[]> {
 }
 
 export async function fetchCompany(id: string): Promise<Company> {
+  const token = getToken();
+
   const res = await fetch(`${API_BASE}/companies/${id}`, {
+    method: 'GET',
+    headers: token
+      ? {
+          Authorization: `Bearer ${token}`,
+        }
+      : {},
     cache: 'no-store',
   });
 

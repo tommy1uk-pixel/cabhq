@@ -1,21 +1,58 @@
+'use client';
+
 import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchCompanies } from '@/lib/super-admin/api';
 import CompaniesTable from '@/components/super-admin/CompaniesTable';
 import LogoutButton from '@/components/auth/LogoutButton';
+import type { Company } from '@/lib/super-admin/types';
 
-export default async function SuperAdminCompaniesPage() {
-  const companies = await fetchCompanies();
+export default function SuperAdminCompaniesPage() {
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function load() {
+      try {
+        setLoading(true);
+        setError('');
+
+        const data = await fetchCompanies();
+
+        if (!mounted) return;
+        setCompanies(Array.isArray(data) ? data : []);
+      } catch (err) {
+        console.error(err);
+        if (!mounted) return;
+        setError(err instanceof Error ? err.message : 'Failed to load companies');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    void load();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const totalCompanies = companies.length;
-  const activeCompanies = companies.filter(
-    (company) => company.status === 'ACTIVE',
-  ).length;
-  const pendingCompanies = companies.filter(
-    (company) => company.status === 'PENDING',
-  ).length;
-  const suspendedCompanies = companies.filter(
-    (company) => company.status === 'SUSPENDED',
-  ).length;
+  const activeCompanies = useMemo(
+    () => companies.filter((company) => company.status === 'ACTIVE').length,
+    [companies],
+  );
+  const pendingCompanies = useMemo(
+    () => companies.filter((company) => company.status === 'PENDING').length,
+    [companies],
+  );
+  const suspendedCompanies = useMemo(
+    () => companies.filter((company) => company.status === 'SUSPENDED').length,
+    [companies],
+  );
 
   return (
     <div className="space-y-8">
@@ -95,7 +132,17 @@ export default async function SuperAdminCompaniesPage() {
           </div>
         </div>
 
-        <CompaniesTable companies={companies} />
+        {loading ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 text-slate-400">
+            Loading companies...
+          </div>
+        ) : error ? (
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-6 text-red-200">
+            {error}
+          </div>
+        ) : (
+          <CompaniesTable companies={companies} />
+        )}
       </section>
     </div>
   );
