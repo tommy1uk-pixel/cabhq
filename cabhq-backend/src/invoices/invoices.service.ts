@@ -10,6 +10,30 @@ export class InvoicesService {
   async list(companyId: string) {
     return this.prisma.invoice.findMany({
       where: { companyId },
+      include: {
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            email: true,
+            contactName: true,
+            paymentTerms: true,
+            status: true,
+          },
+        },
+        payments: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+            amount: true,
+            allocatedAmount: true,
+            paymentDate: true,
+          },
+          orderBy: { paymentDate: 'desc' },
+        },
+      },
       orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }],
     });
   }
@@ -18,6 +42,33 @@ export class InvoicesService {
     const subtotal = Number(dto.subtotal || 0);
     const vat = Number(dto.vat || 0);
     const total = subtotal + vat;
+
+    let accountId: string | null = null;
+    let accountName = dto.accountName?.trim() || '';
+
+    if ((dto as any).accountId) {
+      const account = await this.prisma.account.findFirst({
+        where: {
+          id: (dto as any).accountId,
+          companyId,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      if (!account) {
+        throw new NotFoundException('Account not found');
+      }
+
+      accountId = account.id;
+      accountName = account.name;
+    }
+
+    if (!accountName) {
+      throw new NotFoundException('Account name is required');
+    }
 
     const count = await this.prisma.invoice.count({
       where: { companyId },
@@ -29,8 +80,9 @@ export class InvoicesService {
     return this.prisma.invoice.create({
       data: {
         companyId,
+        accountId,
         invoiceNumber,
-        accountName: dto.accountName.trim(),
+        accountName,
         status: 'DRAFT',
         issueDate: new Date(dto.issueDate),
         dueDate: new Date(dto.dueDate),
@@ -42,6 +94,30 @@ export class InvoicesService {
         balanceDue: total,
         notes: dto.notes?.trim() || null,
       },
+      include: {
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            email: true,
+            contactName: true,
+            paymentTerms: true,
+            status: true,
+          },
+        },
+        payments: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+            amount: true,
+            allocatedAmount: true,
+            paymentDate: true,
+          },
+          orderBy: { paymentDate: 'desc' },
+        },
+      },
     });
   }
 
@@ -50,6 +126,9 @@ export class InvoicesService {
       where: {
         id: invoiceId,
         companyId,
+      },
+      include: {
+        account: true,
       },
     });
 
@@ -63,10 +142,43 @@ export class InvoicesService {
     const total = subtotal + vat;
     const balanceDue = Math.max(total - existing.paidAmount, 0);
 
+    let accountId = existing.accountId;
+    let accountName = existing.accountName;
+
+    if ((dto as any).accountId !== undefined) {
+      if ((dto as any).accountId) {
+        const account = await this.prisma.account.findFirst({
+          where: {
+            id: (dto as any).accountId,
+            companyId,
+          },
+          select: {
+            id: true,
+            name: true,
+          },
+        });
+
+        if (!account) {
+          throw new NotFoundException('Account not found');
+        }
+
+        accountId = account.id;
+        accountName = account.name;
+      } else {
+        accountId = null;
+        if (dto.accountName?.trim()) {
+          accountName = dto.accountName.trim();
+        }
+      }
+    } else if (dto.accountName?.trim()) {
+      accountName = dto.accountName.trim();
+    }
+
     return this.prisma.invoice.update({
       where: { id: existing.id },
       data: {
-        accountName: dto.accountName?.trim() ?? existing.accountName,
+        accountId,
+        accountName,
         issueDate: dto.issueDate ? new Date(dto.issueDate) : existing.issueDate,
         dueDate: dto.dueDate ? new Date(dto.dueDate) : existing.dueDate,
         tripCount:
@@ -77,6 +189,30 @@ export class InvoicesService {
         balanceDue,
         notes:
           dto.notes !== undefined ? dto.notes?.trim() || null : existing.notes,
+      },
+      include: {
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            email: true,
+            contactName: true,
+            paymentTerms: true,
+            status: true,
+          },
+        },
+        payments: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+            amount: true,
+            allocatedAmount: true,
+            paymentDate: true,
+          },
+          orderBy: { paymentDate: 'desc' },
+        },
       },
     });
   }
@@ -101,6 +237,30 @@ export class InvoicesService {
           paidAmount: existing.total,
           balanceDue: 0,
         },
+        include: {
+          account: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              email: true,
+              contactName: true,
+              paymentTerms: true,
+              status: true,
+            },
+          },
+          payments: {
+            select: {
+              id: true,
+              reference: true,
+              status: true,
+              amount: true,
+              allocatedAmount: true,
+              paymentDate: true,
+            },
+            orderBy: { paymentDate: 'desc' },
+          },
+        },
       });
     }
 
@@ -109,6 +269,30 @@ export class InvoicesService {
       data: {
         status,
         balanceDue: Math.max(existing.total - existing.paidAmount, 0),
+      },
+      include: {
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            email: true,
+            contactName: true,
+            paymentTerms: true,
+            status: true,
+          },
+        },
+        payments: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+            amount: true,
+            allocatedAmount: true,
+            paymentDate: true,
+          },
+          orderBy: { paymentDate: 'desc' },
+        },
       },
     });
   }

@@ -11,7 +11,26 @@ export class PaymentsService {
     const payments = await this.prisma.payment.findMany({
       where: { companyId },
       include: {
-        invoice: true,
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            status: true,
+            total: true,
+            balanceDue: true,
+          },
+        },
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            email: true,
+            contactName: true,
+            paymentTerms: true,
+            status: true,
+          },
+        },
       },
       orderBy: [{ paymentDate: 'desc' }, { createdAt: 'desc' }],
     });
@@ -19,6 +38,7 @@ export class PaymentsService {
     return payments.map((payment) => ({
       id: payment.id,
       reference: payment.reference,
+      accountId: payment.accountId,
       accountName: payment.accountName,
       invoiceNumber: payment.invoice?.invoiceNumber ?? null,
       method: payment.method,
@@ -28,11 +48,31 @@ export class PaymentsService {
       allocatedAmount: payment.allocatedAmount,
       unallocatedAmount: payment.unallocatedAmount,
       notes: payment.notes,
+      account: payment.account
+        ? {
+            id: payment.account.id,
+            name: payment.account.name,
+            code: payment.account.code,
+            email: payment.account.email,
+            contactName: payment.account.contactName,
+            paymentTerms: payment.account.paymentTerms,
+            status: payment.account.status,
+          }
+        : null,
+      invoice: payment.invoice
+        ? {
+            id: payment.invoice.id,
+            invoiceNumber: payment.invoice.invoiceNumber,
+            status: payment.invoice.status,
+            total: payment.invoice.total,
+            balanceDue: payment.invoice.balanceDue,
+          }
+        : null,
     }));
   }
 
   async create(companyId: string, dto: CreatePaymentDto) {
-    const invoice = dto.invoiceNumber
+    let invoice = dto.invoiceNumber
       ? await this.prisma.invoice.findFirst({
           where: {
             companyId,
@@ -40,6 +80,49 @@ export class PaymentsService {
           },
         })
       : null;
+
+    let accountId: string | null = null;
+    let accountName = dto.accountName?.trim() || '';
+
+    if ((dto as any).accountId) {
+      const account = await this.prisma.account.findFirst({
+        where: {
+          id: (dto as any).accountId,
+          companyId,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      if (!account) {
+        throw new NotFoundException('Account not found');
+      }
+
+      accountId = account.id;
+      accountName = account.name;
+    } else if (invoice?.accountId) {
+      const invoiceAccount = await this.prisma.account.findFirst({
+        where: {
+          id: invoice.accountId,
+          companyId,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      if (invoiceAccount) {
+        accountId = invoiceAccount.id;
+        accountName = invoiceAccount.name;
+      }
+    }
+
+    if (!accountName) {
+      throw new NotFoundException('Account name is required');
+    }
 
     const count = await this.prisma.payment.count({
       where: { companyId },
@@ -59,7 +142,8 @@ export class PaymentsService {
       data: {
         companyId,
         reference,
-        accountName: dto.accountName.trim(),
+        accountId,
+        accountName,
         invoiceId: invoice?.id ?? null,
         method: dto.method,
         status: dto.status,
@@ -70,7 +154,26 @@ export class PaymentsService {
         notes: dto.notes?.trim() || null,
       },
       include: {
-        invoice: true,
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            status: true,
+            total: true,
+            balanceDue: true,
+          },
+        },
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            email: true,
+            contactName: true,
+            paymentTerms: true,
+            status: true,
+          },
+        },
       },
     });
 
@@ -81,6 +184,7 @@ export class PaymentsService {
     return {
       id: payment.id,
       reference: payment.reference,
+      accountId: payment.accountId,
       accountName: payment.accountName,
       invoiceNumber: payment.invoice?.invoiceNumber ?? null,
       method: payment.method,
@@ -90,6 +194,26 @@ export class PaymentsService {
       allocatedAmount: payment.allocatedAmount,
       unallocatedAmount: payment.unallocatedAmount,
       notes: payment.notes,
+      account: payment.account
+        ? {
+            id: payment.account.id,
+            name: payment.account.name,
+            code: payment.account.code,
+            email: payment.account.email,
+            contactName: payment.account.contactName,
+            paymentTerms: payment.account.paymentTerms,
+            status: payment.account.status,
+          }
+        : null,
+      invoice: payment.invoice
+        ? {
+            id: payment.invoice.id,
+            invoiceNumber: payment.invoice.invoiceNumber,
+            status: payment.invoice.status,
+            total: payment.invoice.total,
+            balanceDue: payment.invoice.balanceDue,
+          }
+        : null,
     };
   }
 
@@ -101,6 +225,7 @@ export class PaymentsService {
       },
       include: {
         invoice: true,
+        account: true,
       },
     });
 
@@ -120,6 +245,54 @@ export class PaymentsService {
           : null
         : existing.invoice;
 
+    let accountId = existing.accountId;
+    let accountName = existing.accountName;
+
+    if ((dto as any).accountId !== undefined) {
+      if ((dto as any).accountId) {
+        const account = await this.prisma.account.findFirst({
+          where: {
+            id: (dto as any).accountId,
+            companyId,
+          },
+          select: {
+            id: true,
+            name: true,
+          },
+        });
+
+        if (!account) {
+          throw new NotFoundException('Account not found');
+        }
+
+        accountId = account.id;
+        accountName = account.name;
+      } else {
+        accountId = null;
+        if (dto.accountName?.trim()) {
+          accountName = dto.accountName.trim();
+        }
+      }
+    } else if (dto.accountName?.trim()) {
+      accountName = dto.accountName.trim();
+    } else if (nextInvoice?.accountId) {
+      const invoiceAccount = await this.prisma.account.findFirst({
+        where: {
+          id: nextInvoice.accountId,
+          companyId,
+        },
+        select: {
+          id: true,
+          name: true,
+        },
+      });
+
+      if (invoiceAccount) {
+        accountId = invoiceAccount.id;
+        accountName = invoiceAccount.name;
+      }
+    }
+
     const amount = dto.amount != null ? Number(dto.amount) : existing.amount;
     const allocatedAmount = Math.min(
       Math.max(
@@ -135,7 +308,8 @@ export class PaymentsService {
     const updated = await this.prisma.payment.update({
       where: { id: existing.id },
       data: {
-        accountName: dto.accountName?.trim() ?? existing.accountName,
+        accountId,
+        accountName,
         invoiceId:
           dto.invoiceNumber !== undefined
             ? nextInvoice?.id ?? null
@@ -152,7 +326,26 @@ export class PaymentsService {
           dto.notes !== undefined ? dto.notes?.trim() || null : existing.notes,
       },
       include: {
-        invoice: true,
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            status: true,
+            total: true,
+            balanceDue: true,
+          },
+        },
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            email: true,
+            contactName: true,
+            paymentTerms: true,
+            status: true,
+          },
+        },
       },
     });
 
@@ -167,6 +360,7 @@ export class PaymentsService {
     return {
       id: updated.id,
       reference: updated.reference,
+      accountId: updated.accountId,
       accountName: updated.accountName,
       invoiceNumber: updated.invoice?.invoiceNumber ?? null,
       method: updated.method,
@@ -176,6 +370,26 @@ export class PaymentsService {
       allocatedAmount: updated.allocatedAmount,
       unallocatedAmount: updated.unallocatedAmount,
       notes: updated.notes,
+      account: updated.account
+        ? {
+            id: updated.account.id,
+            name: updated.account.name,
+            code: updated.account.code,
+            email: updated.account.email,
+            contactName: updated.account.contactName,
+            paymentTerms: updated.account.paymentTerms,
+            status: updated.account.status,
+          }
+        : null,
+      invoice: updated.invoice
+        ? {
+            id: updated.invoice.id,
+            invoiceNumber: updated.invoice.invoiceNumber,
+            status: updated.invoice.status,
+            total: updated.invoice.total,
+            balanceDue: updated.invoice.balanceDue,
+          }
+        : null,
     };
   }
 
@@ -194,13 +408,68 @@ export class PaymentsService {
     const updated = await this.prisma.payment.update({
       where: { id: existing.id },
       data: { status },
+      include: {
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            status: true,
+            total: true,
+            balanceDue: true,
+          },
+        },
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            email: true,
+            contactName: true,
+            paymentTerms: true,
+            status: true,
+          },
+        },
+      },
     });
 
     if (updated.invoiceId) {
       await this.syncInvoiceTotals(updated.invoiceId);
     }
 
-    return updated;
+    return {
+      id: updated.id,
+      reference: updated.reference,
+      accountId: updated.accountId,
+      accountName: updated.accountName,
+      invoiceNumber: updated.invoice?.invoiceNumber ?? null,
+      method: updated.method,
+      status: updated.status,
+      amount: updated.amount,
+      paymentDate: updated.paymentDate,
+      allocatedAmount: updated.allocatedAmount,
+      unallocatedAmount: updated.unallocatedAmount,
+      notes: updated.notes,
+      account: updated.account
+        ? {
+            id: updated.account.id,
+            name: updated.account.name,
+            code: updated.account.code,
+            email: updated.account.email,
+            contactName: updated.account.contactName,
+            paymentTerms: updated.account.paymentTerms,
+            status: updated.account.status,
+          }
+        : null,
+      invoice: updated.invoice
+        ? {
+            id: updated.invoice.id,
+            invoiceNumber: updated.invoice.invoiceNumber,
+            status: updated.invoice.status,
+            total: updated.invoice.total,
+            balanceDue: updated.invoice.balanceDue,
+          }
+        : null,
+    };
   }
 
   async remove(companyId: string, paymentId: string) {
