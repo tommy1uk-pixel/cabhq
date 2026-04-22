@@ -1,9 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002';
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') ||
+  'http://localhost:3002';
 
 type LoginResponse = {
   token: string;
@@ -16,14 +17,12 @@ type LoginResponse = {
 };
 
 export default function LoginForm() {
-  const router = useRouter();
-
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  async function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
     setError('');
@@ -33,7 +32,7 @@ export default function LoginForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email,
+          email: email.trim(),
           password,
         }),
       });
@@ -52,16 +51,17 @@ export default function LoginForm() {
       localStorage.setItem('cabhq_token', payload.token);
       localStorage.setItem('cabhq_user', JSON.stringify(payload.user));
       localStorage.setItem('token', payload.token);
+      localStorage.setItem('user', JSON.stringify(payload.user));
+
+      document.cookie = `cabhq_token=${payload.token}; path=/; SameSite=Lax`;
 
       if (payload.user.role === 'SUPER_ADMIN') {
-        router.push('/super-admin');
+        window.location.href = '/super-admin';
       } else if (payload.user.role === 'DRIVER') {
-        router.push('/driver');
+        window.location.href = '/driver';
       } else {
-        router.push('/dashboard');
+        window.location.href = '/dashboard';
       }
-
-      router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -98,6 +98,7 @@ export default function LoginForm() {
             className="w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400/40"
             placeholder="you@company.com"
             autoComplete="email"
+            required
           />
         </label>
 
@@ -110,6 +111,7 @@ export default function LoginForm() {
             className="w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-cyan-400/40"
             placeholder="••••••••"
             autoComplete="current-password"
+            required
           />
         </label>
       </div>

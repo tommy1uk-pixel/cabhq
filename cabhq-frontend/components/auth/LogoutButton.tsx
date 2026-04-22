@@ -1,37 +1,19 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-
 export default function LogoutButton() {
-  const router = useRouter();
-
   function handleLogout() {
-    // localStorage
     localStorage.removeItem('cabhq_token');
     localStorage.removeItem('cabhq_user');
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('driverToken');
     localStorage.removeItem('driver');
-
-    // session
     sessionStorage.clear();
 
-    // cookies (important)
     document.cookie =
-      'token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
-    document.cookie =
-      'cabhq_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
-    document.cookie =
-      'authToken=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+      'cabhq_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; SameSite=Lax';
 
-    // hard redirect
-    router.replace('/login');
-    router.refresh();
-
-    setTimeout(() => {
-      window.location.href = '/login';
-    }, 100);
+    window.location.href = '/login';
   }
 
   return (
