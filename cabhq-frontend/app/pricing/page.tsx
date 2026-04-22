@@ -1,352 +1,272 @@
+'use client';
+
 import Link from 'next/link';
 
-const plans = [
+type Plan = {
+  name: string;
+  price: string;
+  subtitle: string;
+  badge?: string;
+  accent: string;
+  button: string;
+  buttonText: string;
+  features: string[];
+};
+
+const plans: Plan[] = [
   {
     name: 'STARTER',
     price: '£49',
+    subtitle: 'Best for new operators moving away from paper diaries.',
     badge: 'Best for new operators',
-    description:
-      'For small private hire firms moving away from paper diaries, WhatsApp and manual admin.',
-    highlight: 'Low-risk entry point',
-    border: 'border-emerald-500/30',
-    badgeStyle: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
-    buttonStyle: 'bg-white text-black hover:bg-slate-200',
+    accent: 'border-cyan-500/20',
+    button: 'bg-white text-black hover:bg-slate-200',
+    buttonText: 'Choose Starter',
     features: [
       '1–5 vehicles',
       'Manual dispatch board',
       'Create bookings',
       'Future bookings',
-      'Basic booking history',
       'Manual job assignment',
-      'Unlimited driver logins',
       'Add/manage drivers',
       'Add/manage vehicles',
-      'Basic driver profiles',
-      'Basic vehicle records',
       '1 admin login',
-      'Company settings',
       'Email support',
     ],
   },
   {
     name: 'OPERATOR',
     price: '£89',
+    subtitle: 'For active firms that need faster dispatch and live visibility.',
     badge: 'MOST POPULAR',
-    description:
-      'For active firms that need faster dispatch, live visibility and less wasted admin time.',
-    highlight: 'The daily painkiller tier',
-    border: 'border-sky-500/40 ring-1 ring-sky-500/30',
-    badgeStyle: 'border-sky-500/30 bg-sky-500/10 text-sky-300',
-    buttonStyle: 'bg-sky-500 text-black hover:bg-sky-400',
-    featured: true,
+    accent: 'border-cyan-500/40',
+    button: 'bg-cyan-500 text-black hover:bg-cyan-400',
+    buttonText: 'Choose Operator',
     features: [
       'Everything in Starter',
       'Auto dispatch v1',
       'Closest driver suggestions',
-      'Driver availability filtering',
-      'Faster assignment flow',
-      'Live driver tracking map',
-      'Real-time status board',
-      'Today’s activity overview',
+      'Live driver map',
+      'Realtime status board',
       'Up to 5 admin users',
       'Role-based staff access',
       'Priority support',
-      'Improved vehicle management',
       'Driver performance basics',
-      'Job completion metrics',
     ],
   },
   {
     name: 'PRO',
     price: '£149',
+    subtitle: 'For established fleets needing compliance + reporting.',
     badge: 'For established fleets',
-    description:
-      'For operators needing compliance, advanced dispatch logic and serious control over performance.',
-    highlight: 'Compliance + reporting + control',
-    border: 'border-violet-500/30',
-    badgeStyle: 'border-violet-500/30 bg-violet-500/10 text-violet-300',
-    buttonStyle: 'bg-violet-500 text-white hover:bg-violet-400',
+    accent: 'border-violet-500/30',
+    button: 'bg-violet-500 text-white hover:bg-violet-400',
+    buttonText: 'Choose Pro',
     features: [
       'Everything in Operator',
-      'Driver licence expiry alerts',
-      'DBS expiry tracking',
-      'Badge expiry reminders',
-      'Vehicle insurance alerts',
-      'MOT expiry reminders',
-      'Plate / council expiry reminders',
-      'Preferred driver rules',
-      'Zone / area logic',
+      'Licence expiry alerts',
+      'DBS tracking',
+      'Badge reminders',
+      'MOT reminders',
+      'Zone logic',
       'Smart dispatch rules',
-      'Priority booking logic',
-      'Driver performance reports',
-      'Booking trends',
-      'Revenue / job summaries',
+      'Revenue reports',
       'Unlimited admin users',
-      'Priority onboarding / migration help',
     ],
   },
   {
     name: 'ENTERPRISE',
     price: '£249+',
+    subtitle: 'For larger groups, networks and multi-site operators.',
     badge: 'For larger groups',
-    description:
-      'For multi-site operators, networks and specialist transport firms needing bespoke rollout and support.',
-    highlight: 'Priced on business impact',
-    border: 'border-amber-500/30',
-    badgeStyle: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
-    buttonStyle: 'bg-amber-400 text-black hover:bg-amber-300',
+    accent: 'border-amber-500/30',
+    button: 'bg-amber-400 text-black hover:bg-amber-300',
+    buttonText: 'Contact Sales',
     features: [
       'Everything in Pro',
       'Multiple companies / depots',
       'Central owner controls',
-      'Group reporting',
       'API access',
       'Custom workflows',
-      'Bespoke setup',
       'Dedicated account support',
       'Staff training',
-      'Priority roadmap requests',
-      'White-label options later',
+      'White-label options',
     ],
   },
 ];
 
-const addOns = [
-  {
-    title: 'Passenger Booking App',
-    price: '£49–£99/month',
-  },
-  {
-    title: 'Website Booking Widget',
-    price: '£29/month',
-  },
-  {
-    title: 'SMS Credits',
-    price: 'Usage based',
-  },
-  {
-    title: 'Data Migration',
-    price: 'One-time fee',
-  },
-  {
-    title: 'Extra Training',
-    price: 'One-time fee',
-  },
-];
-
-const compareRows = [
-  ['Vehicles', '1–5', '5–20', '20+', 'Unlimited'],
-  ['Admin users', '1', 'Up to 5', 'Unlimited', 'Unlimited'],
-  ['Manual dispatch', '✓', '✓', '✓', '✓'],
-  ['Auto dispatch', '—', '✓', '✓', '✓'],
-  ['Live driver tracking', '—', '✓', '✓', '✓'],
-  ['Compliance alerts', '—', '—', '✓', '✓'],
-  ['Advanced dispatch rules', '—', '—', '✓', '✓'],
-  ['Group / multi-site control', '—', '—', '—', '✓'],
-  ['API access', '—', '—', '—', '✓'],
-];
-
-export default function Pricing() {
+export default function PricingPage() {
   return (
-    <section
-      id="pricing"
-      className="relative overflow-hidden bg-slate-950 py-24 text-white sm:py-28"
-    >
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(56,189,248,0.08),transparent_30%),radial-gradient(circle_at_bottom,rgba(16,185,129,0.08),transparent_25%)]" />
-
-      <div className="relative mx-auto max-w-7xl px-6">
-        <div className="mx-auto max-w-4xl text-center">
-          <div className="inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-5 py-2 text-sm font-semibold text-emerald-300">
-            Founding Operator Offer • First 20 companies get Operator for £49/month for 12 months
+    <main className="min-h-screen bg-[#03060d] text-white">
+      <div className="mx-auto max-w-[1600px] px-6 py-16">
+        {/* HERO */}
+        <section className="text-center">
+          <div className="text-[11px] uppercase tracking-[0.25em] text-cyan-300">
+            CabHQ Pricing
           </div>
 
-          <h2 className="mt-8 text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl">
-            Simple pricing that fits
-            <span className="block text-sky-400">real operators</span>
-          </h2>
+          <h1 className="mt-5 text-5xl font-bold tracking-tight md:text-6xl">
+            Built for UK Taxi &
+            <span className="text-cyan-400"> Private Hire Operators</span>
+          </h1>
 
-          <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-slate-400">
-            Start with the tools you need today. Upgrade when your operation needs
-            more speed, visibility, compliance and control.
+          <p className="mx-auto mt-6 max-w-3xl text-lg leading-8 text-white/65">
+            Replace paper diaries, outdated dispatch systems and expensive legacy
+            platforms. Launch faster, grow cleaner and scale with CabHQ.
           </p>
-        </div>
 
-        <div className="mt-16 grid gap-6 xl:grid-cols-4">
-          {plans.map((plan) => (
-            <article
-              key={plan.name}
-              className={`relative flex h-full flex-col rounded-3xl border bg-slate-900/80 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] backdrop-blur ${plan.border}`}
+          <div className="mt-8 flex flex-wrap justify-center gap-4">
+            <Link
+              href="/signup"
+              className="rounded-2xl bg-cyan-500 px-6 py-4 font-semibold text-black hover:bg-cyan-400"
             >
-              {plan.featured ? (
-                <div className="absolute -top-3 right-6 rounded-full bg-sky-500 px-4 py-1 text-xs font-bold uppercase tracking-wide text-black">
-                  Most Popular
+              Start Free Trial
+            </Link>
+
+            <Link
+              href="/contact"
+              className="rounded-2xl border border-white/10 px-6 py-4 font-semibold hover:bg-white/10"
+            >
+              Book Demo
+            </Link>
+          </div>
+        </section>
+
+        {/* PRICING */}
+        <section className="mt-16 grid gap-6 xl:grid-cols-4">
+          {plans.map((plan) => (
+            <div
+              key={plan.name}
+              className={`rounded-3xl border bg-[#07111f] p-7 ${plan.accent}`}
+            >
+              {plan.badge ? (
+                <div className="mb-5 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/80">
+                  {plan.badge}
                 </div>
               ) : null}
 
-              <div
-                className={`inline-flex w-fit rounded-full border px-4 py-1.5 text-sm font-semibold ${plan.badgeStyle}`}
-              >
-                {plan.badge}
+              <h2 className="text-3xl font-bold">{plan.name}</h2>
+
+              <div className="mt-4 flex items-end gap-2">
+                <span className="text-5xl font-bold">{plan.price}</span>
+                <span className="pb-1 text-white/60">/month</span>
               </div>
 
-              <h3 className="mt-6 text-3xl font-semibold tracking-tight">
-                {plan.name}
-              </h3>
-
-              <div className="mt-5 flex items-end gap-2">
-                <span className="text-5xl font-semibold">{plan.price}</span>
-                <span className="pb-2 text-base text-slate-400">/month</span>
-              </div>
-
-              <p className="mt-5 min-h-[88px] text-base leading-7 text-slate-400">
-                {plan.description}
+              <p className="mt-5 min-h-[72px] text-sm leading-7 text-white/65">
+                {plan.subtitle}
               </p>
 
-              <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3 text-sm font-medium text-slate-300">
-                {plan.highlight}
-              </div>
-
-              <ul className="mt-8 space-y-4 text-base text-slate-200">
-                {plan.features.map((feature) => (
-                  <li key={feature} className="flex gap-3">
-                    <span className="mt-2 h-2.5 w-2.5 shrink-0 rounded-full bg-white" />
-                    <span>{feature}</span>
-                  </li>
+              <div className="mt-6 space-y-3">
+                {plan.features.map((item) => (
+                  <div key={item} className="flex gap-3 text-sm text-white/85">
+                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-white" />
+                    <span>{item}</span>
+                  </div>
                 ))}
-              </ul>
-
-              <div className="mt-10">
-                <Link
-                  href="/super-admin/companies/new"
-                  className={`inline-flex w-full items-center justify-center rounded-2xl px-5 py-4 text-base font-semibold transition ${plan.buttonStyle}`}
-                >
-                  Choose {plan.name}
-                </Link>
               </div>
-            </article>
+
+              <button
+                className={`mt-8 w-full rounded-2xl px-4 py-4 font-semibold transition ${plan.button}`}
+              >
+                {plan.buttonText}
+              </button>
+            </div>
           ))}
-        </div>
+        </section>
 
-        <div className="mt-20 overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/80 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
-          <div className="border-b border-slate-800 px-8 py-6">
-            <h3 className="text-2xl font-semibold tracking-tight">
-              Compare plans quickly
-            </h3>
-            <p className="mt-2 text-base text-slate-400">
-              The right plan depends on fleet size, compliance needs and how much
-              dispatch efficiency you want to unlock.
-            </p>
-          </div>
+        {/* COMPARISON */}
+        <section className="mt-20 rounded-3xl border border-white/10 bg-[#07111f] p-8">
+          <h3 className="text-3xl font-bold">Plan Comparison</h3>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left">
-              <thead className="bg-slate-950/70">
-                <tr>
-                  <th className="px-6 py-5 text-sm font-semibold uppercase tracking-wide text-slate-400">
-                    Features
-                  </th>
-                  <th className="px-6 py-5 text-sm font-semibold uppercase tracking-wide text-emerald-300">
-                    Starter
-                  </th>
-                  <th className="px-6 py-5 text-sm font-semibold uppercase tracking-wide text-sky-300">
-                    Operator
-                  </th>
-                  <th className="px-6 py-5 text-sm font-semibold uppercase tracking-wide text-violet-300">
-                    Pro
-                  </th>
-                  <th className="px-6 py-5 text-sm font-semibold uppercase tracking-wide text-amber-300">
-                    Enterprise
-                  </th>
+          <div className="mt-8 overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left">
+              <thead>
+                <tr className="border-b border-white/10 text-sm text-white/50">
+                  <th className="pb-4">Feature</th>
+                  <th className="pb-4">Starter</th>
+                  <th className="pb-4">Operator</th>
+                  <th className="pb-4">Pro</th>
+                  <th className="pb-4">Enterprise</th>
                 </tr>
               </thead>
 
-              <tbody>
-                {compareRows.map((row, index) => (
-                  <tr
-                    key={row[0]}
-                    className={
-                      index % 2 === 0
-                        ? 'border-t border-slate-800'
-                        : 'border-t border-slate-800 bg-slate-950/30'
-                    }
-                  >
-                    <td className="px-6 py-5 text-sm font-medium text-slate-300">
-                      {row[0]}
-                    </td>
-                    <td className="px-6 py-5 text-sm text-white">{row[1]}</td>
-                    <td className="px-6 py-5 text-sm text-white">{row[2]}</td>
-                    <td className="px-6 py-5 text-sm text-white">{row[3]}</td>
-                    <td className="px-6 py-5 text-sm text-white">{row[4]}</td>
+              <tbody className="text-sm">
+                {[
+                  ['Manual Dispatch', '✓', '✓', '✓', '✓'],
+                  ['Auto Dispatch', '-', '✓', '✓', '✓'],
+                  ['Live Driver Map', '-', '✓', '✓', '✓'],
+                  ['Compliance Alerts', '-', '-', '✓', '✓'],
+                  ['Reporting Suite', '-', '-', '✓', '✓'],
+                  ['Multi Company', '-', '-', '-', '✓'],
+                  ['API Access', '-', '-', '-', '✓'],
+                ].map((row) => (
+                  <tr key={row[0]} className="border-b border-white/5">
+                    {row.map((cell, i) => (
+                      <td key={i} className="py-4 text-white/80">
+                        {cell}
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
 
-        <div className="mt-20 rounded-3xl border border-slate-800 bg-slate-900/80 p-8 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <h3 className="text-3xl font-semibold tracking-tight">
-                Optional add-ons
-              </h3>
-              <p className="mt-3 max-w-2xl text-base leading-7 text-slate-400">
-                Add revenue-generating products and onboarding services as the
-                business grows.
-              </p>
-            </div>
-
-            <Link
-              href="/login"
-              className="inline-flex items-center justify-center rounded-2xl border border-slate-700 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+        {/* FAQ */}
+        <section className="mt-20 grid gap-6 md:grid-cols-2">
+          {[
+            [
+              'Can I cancel anytime?',
+              'Yes. All monthly plans can be changed or cancelled.',
+            ],
+            [
+              'Can you migrate from iCabbi?',
+              'Yes. We can help move your operation over smoothly.',
+            ],
+            [
+              'Is training included?',
+              'Enterprise includes dedicated onboarding and staff training.',
+            ],
+            [
+              'Do you support multiple depots?',
+              'Yes. Enterprise plans are built for multi-site operators.',
+            ],
+          ].map(([q, a]) => (
+            <div
+              key={q}
+              className="rounded-3xl border border-white/10 bg-[#07111f] p-6"
             >
-              Talk to us about add-ons
-            </Link>
-          </div>
+              <h4 className="text-xl font-bold">{q}</h4>
+              <p className="mt-3 text-white/65">{a}</p>
+            </div>
+          ))}
+        </section>
 
-          <div className="mt-8 grid gap-5 md:grid-cols-2 xl:grid-cols-5">
-            {addOns.map((addon) => (
-              <div
-                key={addon.title}
-                className="rounded-2xl border border-slate-800 bg-slate-950/70 p-6"
-              >
-                <div className="text-lg font-semibold">{addon.title}</div>
-                <div className="mt-3 text-base text-slate-400">
-                  {addon.price}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-20 rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-900 to-slate-950 p-10 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
-          <h3 className="text-4xl font-semibold tracking-tight">
-            Start with the right plan, not the biggest one
-          </h3>
-
-          <p className="mx-auto mt-4 max-w-3xl text-lg leading-8 text-slate-400">
-            Starter helps small firms modernise. Operator removes daily dispatch
-            pain. Pro adds compliance and control. Enterprise is for groups, depots
-            and bespoke operations.
+        {/* CTA */}
+        <section className="mt-20 rounded-3xl border border-cyan-500/20 bg-cyan-500/10 p-10 text-center">
+          <h3 className="text-4xl font-bold">Ready to modernise your operation?</h3>
+          <p className="mx-auto mt-4 max-w-2xl text-white/70">
+            Join operators replacing outdated dispatch software with CabHQ.
           </p>
 
           <div className="mt-8 flex flex-wrap justify-center gap-4">
             <Link
-              href="/super-admin/companies/new"
-              className="rounded-2xl bg-white px-6 py-4 text-base font-semibold text-black"
+              href="/signup"
+              className="rounded-2xl bg-cyan-500 px-6 py-4 font-semibold text-black hover:bg-cyan-400"
             >
-              Start setup
+              Start Free Trial
             </Link>
 
             <Link
-              href="/login"
-              className="rounded-2xl border border-slate-700 px-6 py-4 text-base font-semibold text-white hover:bg-slate-800"
+              href="/contact"
+              className="rounded-2xl border border-white/10 px-6 py-4 font-semibold hover:bg-white/10"
             >
-              Book demo
+              Speak to Sales
             </Link>
           </div>
-        </div>
+        </section>
       </div>
-    </section>
+    </main>
   );
 }
