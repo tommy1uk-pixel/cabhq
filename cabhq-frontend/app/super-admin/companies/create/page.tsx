@@ -3,28 +3,37 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
-type PlanType = 'STARTER' | 'OPERATOR' | 'PRO' | 'ENTERPRISE';
-type StatusType = 'ACTIVE' | 'TRIAL' | 'SUSPENDED';
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') || 'http://localhost:3002';
+
+type PlanType = 'STARTER' | 'GROWTH' | 'PRO' | 'ENTERPRISE';
+type StatusType = 'PENDING' | 'ACTIVE' | 'SUSPENDED';
+type BillingStatusType = 'ACTIVE' | 'TRIAL' | 'PAST_DUE' | 'CANCELLED';
 
 type FormState = {
   companyName: string;
-  tradingName: string;
+  code: string;
+  slug: string;
   contactName: string;
   email: string;
   phone: string;
-  address: string;
 
   plan: PlanType;
   status: StatusType;
+  billingStatus: BillingStatusType;
   trialDays: string;
   billingStart: string;
+  billingEnd: string;
 
   timezone: string;
   currency: string;
-  region: string;
-  dispatchMode: string;
+
+  driverLimit: string;
+  vehicleLimit: string;
+  dispatcherSeatLimit: string;
 
   createAdminUser: boolean;
+  adminPassword: string;
   createSampleDrivers: boolean;
   createSampleVehicles: boolean;
   createDefaultRates: boolean;
@@ -32,23 +41,28 @@ type FormState = {
 
 const initialForm: FormState = {
   companyName: '',
-  tradingName: '',
+  code: '',
+  slug: '',
   contactName: '',
   email: '',
   phone: '',
-  address: '',
 
-  plan: 'OPERATOR',
-  status: 'TRIAL',
+  plan: 'GROWTH',
+  status: 'PENDING',
+  billingStatus: 'TRIAL',
   trialDays: '14',
   billingStart: '',
+  billingEnd: '',
 
   timezone: 'Europe/London',
   currency: 'GBP',
-  region: 'United Kingdom',
-  dispatchMode: 'AUTO',
+
+  driverLimit: '10',
+  vehicleLimit: '10',
+  dispatcherSeatLimit: '3',
 
   createAdminUser: true,
+  adminPassword: '',
   createSampleDrivers: true,
   createSampleVehicles: true,
   createDefaultRates: true,
@@ -56,16 +70,23 @@ const initialForm: FormState = {
 
 const planMeta: Record<PlanType, { label: string; price: string }> = {
   STARTER: { label: 'Starter', price: '£49/mo' },
-  OPERATOR: { label: 'Operator', price: '£89/mo' },
+  GROWTH: { label: 'Growth', price: '£89/mo' },
   PRO: { label: 'Pro', price: '£149/mo' },
   ENTERPRISE: { label: 'Enterprise', price: '£249+/mo' },
 };
+
+function addDaysToToday(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
 
 export default function CreateCompanyPage() {
   const [form, setForm] = useState<FormState>(initialForm);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [createdId, setCreatedId] = useState('');
+  const [createdName, setCreatedName] = useState('');
   const [error, setError] = useState('');
 
   const summary = useMemo(() => {
@@ -90,6 +111,15 @@ export default function CreateCompanyPage() {
     if (!form.companyName.trim()) return 'Company name is required';
     if (!form.contactName.trim()) return 'Contact name is required';
     if (!form.email.trim()) return 'Email is required';
+
+    if (form.createAdminUser && !form.adminPassword.trim()) {
+      return 'Admin password is required when creating an admin user';
+    }
+
+    if (form.createAdminUser && form.adminPassword.trim().length < 8) {
+      return 'Admin password must be at least 8 characters';
+    }
+
     return '';
   }
 
@@ -105,17 +135,53 @@ export default function CreateCompanyPage() {
       setSaving(true);
       setError('');
 
-      // Replace with real backend call
-      // const res = await fetch('/api/super-admin/companies', {...})
+      const trialEndsAt =
+        form.billingStatus === 'TRIAL'
+          ? addDaysToToday(Number(form.trialDays || '14'))
+          : null;
 
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const payload = {
+        name: form.companyName.trim(),
+        code: form.code.trim() || null,
+        slug: form.slug.trim() || null,
+        status: form.status,
+        contactName: form.contactName.trim() || null,
+        contactEmail: form.email.trim() || null,
+        contactPhone: form.phone.trim() || null,
+        timezone: form.timezone,
+        currency: form.currency,
+        driverLimit: Number(form.driverLimit || '10'),
+        vehicleLimit: Number(form.vehicleLimit || '10'),
+        dispatcherSeatLimit: Number(form.dispatcherSeatLimit || '3'),
+        billingPlan: form.plan,
+        billingStatus: form.billingStatus,
+        trialEndsAt,
+        subscriptionStartsAt: form.billingStart || null,
+        subscriptionEndsAt: form.billingEnd || null,
+        adminEmail: form.createAdminUser ? form.email.trim() : null,
+        adminPassword: form.createAdminUser ? form.adminPassword.trim() : null,
+      };
 
-      const fakeId = `cmp_${Math.random().toString(36).slice(2, 10)}`;
+      const res = await fetch(`${API_URL}/companies`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
 
-      setCreatedId(fakeId);
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw new Error(bodyText || `Failed to create company (${res.status})`);
+      }
+
+      const created = await res.json();
+
+      setCreatedId(created.id);
+      setCreatedName(created.name || form.companyName);
       setSuccess(true);
     } catch (err) {
-      setError('Failed to create company');
+      setError(err instanceof Error ? err.message : 'Failed to create company');
     } finally {
       setSaving(false);
     }
@@ -131,7 +197,7 @@ export default function CreateCompanyPage() {
             </div>
 
             <h1 className="text-4xl font-bold tracking-tight">
-              {form.companyName}
+              {createdName}
             </h1>
 
             <p className="mt-4 text-white/60">
@@ -147,10 +213,10 @@ export default function CreateCompanyPage() {
               </Link>
 
               <Link
-                href="/dashboard"
+                href={`/super-admin/companies/${createdId}`}
                 className="rounded-2xl border border-white/10 px-6 py-4 font-semibold hover:bg-white/10"
               >
-                Open Dashboard
+                Open Company
               </Link>
             </div>
           </div>
@@ -172,7 +238,7 @@ export default function CreateCompanyPage() {
           </h1>
 
           <p className="mt-3 text-white/60">
-            Create a new taxi operator account with billing plan and starter data.
+            Create a new taxi operator account with billing plan and starter setup.
           </p>
         </div>
 
@@ -191,22 +257,29 @@ export default function CreateCompanyPage() {
                     input={
                       <input
                         value={form.companyName}
-                        onChange={(e) =>
-                          setField('companyName', e.target.value)
-                        }
+                        onChange={(e) => setField('companyName', e.target.value)}
                         className={inputClassName}
                       />
                     }
                   />
 
                   <Field
-                    label="Trading Name"
+                    label="Company Code"
                     input={
                       <input
-                        value={form.tradingName}
-                        onChange={(e) =>
-                          setField('tradingName', e.target.value)
-                        }
+                        value={form.code}
+                        onChange={(e) => setField('code', e.target.value.toUpperCase())}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+
+                  <Field
+                    label="Slug"
+                    input={
+                      <input
+                        value={form.slug}
+                        onChange={(e) => setField('slug', e.target.value)}
                         className={inputClassName}
                       />
                     }
@@ -217,9 +290,7 @@ export default function CreateCompanyPage() {
                     input={
                       <input
                         value={form.contactName}
-                        onChange={(e) =>
-                          setField('contactName', e.target.value)
-                        }
+                        onChange={(e) => setField('contactName', e.target.value)}
                         className={inputClassName}
                       />
                     }
@@ -247,22 +318,6 @@ export default function CreateCompanyPage() {
                     }
                   />
                 </div>
-
-                <div className="mt-4">
-                  <Field
-                    label="Address"
-                    input={
-                      <textarea
-                        rows={4}
-                        value={form.address}
-                        onChange={(e) =>
-                          setField('address', e.target.value)
-                        }
-                        className={`${inputClassName} resize-none`}
-                      />
-                    }
-                  />
-                </div>
               </div>
 
               <div>
@@ -277,13 +332,11 @@ export default function CreateCompanyPage() {
                     input={
                       <select
                         value={form.plan}
-                        onChange={(e) =>
-                          setField('plan', e.target.value as PlanType)
-                        }
+                        onChange={(e) => setField('plan', e.target.value as PlanType)}
                         className={inputClassName}
                       >
                         <option value="STARTER">Starter</option>
-                        <option value="OPERATOR">Operator</option>
+                        <option value="GROWTH">Growth</option>
                         <option value="PRO">Pro</option>
                         <option value="ENTERPRISE">Enterprise</option>
                       </select>
@@ -291,18 +344,34 @@ export default function CreateCompanyPage() {
                   />
 
                   <Field
-                    label="Status"
+                    label="Company Status"
                     input={
                       <select
                         value={form.status}
+                        onChange={(e) => setField('status', e.target.value as StatusType)}
+                        className={inputClassName}
+                      >
+                        <option value="PENDING">Pending</option>
+                        <option value="ACTIVE">Active</option>
+                        <option value="SUSPENDED">Suspended</option>
+                      </select>
+                    }
+                  />
+
+                  <Field
+                    label="Billing Status"
+                    input={
+                      <select
+                        value={form.billingStatus}
                         onChange={(e) =>
-                          setField('status', e.target.value as StatusType)
+                          setField('billingStatus', e.target.value as BillingStatusType)
                         }
                         className={inputClassName}
                       >
                         <option value="TRIAL">Trial</option>
                         <option value="ACTIVE">Active</option>
-                        <option value="SUSPENDED">Suspended</option>
+                        <option value="PAST_DUE">Past Due</option>
+                        <option value="CANCELLED">Cancelled</option>
                       </select>
                     }
                   />
@@ -312,9 +381,7 @@ export default function CreateCompanyPage() {
                     input={
                       <input
                         value={form.trialDays}
-                        onChange={(e) =>
-                          setField('trialDays', e.target.value)
-                        }
+                        onChange={(e) => setField('trialDays', e.target.value)}
                         className={inputClassName}
                       />
                     }
@@ -326,9 +393,19 @@ export default function CreateCompanyPage() {
                       <input
                         type="date"
                         value={form.billingStart}
-                        onChange={(e) =>
-                          setField('billingStart', e.target.value)
-                        }
+                        onChange={(e) => setField('billingStart', e.target.value)}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+
+                  <Field
+                    label="Billing End"
+                    input={
+                      <input
+                        type="date"
+                        value={form.billingEnd}
+                        onChange={(e) => setField('billingEnd', e.target.value)}
                         className={inputClassName}
                       />
                     }
@@ -339,7 +416,7 @@ export default function CreateCompanyPage() {
               <div>
                 <SectionTitle
                   title="System Defaults"
-                  text="Operational defaults for new company."
+                  text="Operational limits and defaults for new company."
                 />
 
                 <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -348,12 +425,10 @@ export default function CreateCompanyPage() {
                     input={
                       <select
                         value={form.timezone}
-                        onChange={(e) =>
-                          setField('timezone', e.target.value)
-                        }
+                        onChange={(e) => setField('timezone', e.target.value)}
                         className={inputClassName}
                       >
-                        <option>Europe/London</option>
+                        <option value="Europe/London">Europe/London</option>
                       </select>
                     }
                   />
@@ -363,42 +438,52 @@ export default function CreateCompanyPage() {
                     input={
                       <select
                         value={form.currency}
-                        onChange={(e) =>
-                          setField('currency', e.target.value)
-                        }
+                        onChange={(e) => setField('currency', e.target.value)}
                         className={inputClassName}
                       >
-                        <option>GBP</option>
+                        <option value="GBP">GBP</option>
                       </select>
                     }
                   />
 
                   <Field
-                    label="Region"
+                    label="Driver Limit"
                     input={
                       <input
-                        value={form.region}
-                        onChange={(e) =>
-                          setField('region', e.target.value)
-                        }
+                        type="number"
+                        min="0"
+                        value={form.driverLimit}
+                        onChange={(e) => setField('driverLimit', e.target.value)}
                         className={inputClassName}
                       />
                     }
                   />
 
                   <Field
-                    label="Dispatch Mode"
+                    label="Vehicle Limit"
                     input={
-                      <select
-                        value={form.dispatchMode}
+                      <input
+                        type="number"
+                        min="0"
+                        value={form.vehicleLimit}
+                        onChange={(e) => setField('vehicleLimit', e.target.value)}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+
+                  <Field
+                    label="Dispatcher Seat Limit"
+                    input={
+                      <input
+                        type="number"
+                        min="0"
+                        value={form.dispatcherSeatLimit}
                         onChange={(e) =>
-                          setField('dispatchMode', e.target.value)
+                          setField('dispatcherSeatLimit', e.target.value)
                         }
                         className={inputClassName}
-                      >
-                        <option value="AUTO">Auto</option>
-                        <option value="MANUAL">Manual</option>
-                      </select>
+                      />
                     }
                   />
                 </div>
@@ -416,6 +501,21 @@ export default function CreateCompanyPage() {
                     checked={form.createAdminUser}
                     onChange={(v) => setField('createAdminUser', v)}
                   />
+
+                  {form.createAdminUser ? (
+                    <Field
+                      label="Admin Password"
+                      input={
+                        <input
+                          type="password"
+                          value={form.adminPassword}
+                          onChange={(e) => setField('adminPassword', e.target.value)}
+                          className={inputClassName}
+                        />
+                      }
+                    />
+                  ) : null}
+
                   <Toggle
                     label="Create sample drivers"
                     checked={form.createSampleDrivers}
@@ -457,7 +557,8 @@ export default function CreateCompanyPage() {
               <div className="mt-5 space-y-3">
                 <SummaryRow label="Plan" value={summary.plan.label} />
                 <SummaryRow label="Price" value={summary.plan.price} />
-                <SummaryRow label="Status" value={form.status} />
+                <SummaryRow label="Company Status" value={form.status} />
+                <SummaryRow label="Billing Status" value={form.billingStatus} />
                 <SummaryRow label="Trial Days" value={form.trialDays} />
                 <SummaryRow label="Starter Items" value={String(summary.modules)} />
               </div>
@@ -473,6 +574,15 @@ export default function CreateCompanyPage() {
                 <p>• Trial creation</p>
                 <p>• Manual support provisioning</p>
               </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/10 bg-[#07111f] p-6">
+              <Link
+                href="/super-admin/companies"
+                className="block rounded-2xl border border-white/10 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-white/10"
+              >
+                Back to Companies
+              </Link>
             </div>
           </aside>
         </div>

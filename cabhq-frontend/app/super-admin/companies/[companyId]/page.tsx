@@ -1,21 +1,65 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
+import SuperAdminPageHeader from '@/components/super-admin/SuperAdminPageHeader';
+import SuperAdminPanel from '@/components/super-admin/SuperAdminPanel';
+import SuperAdminStatCard from '@/components/super-admin/SuperAdminStatCard';
+import SuperAdminDetailRow from '@/components/super-admin/SuperAdminDetailRow';
 
-type CompanyStatus = 'ACTIVE' | 'TRIAL' | 'SUSPENDED';
-type PlanType = 'STARTER' | 'OPERATOR' | 'PRO' | 'ENTERPRISE';
-type PaymentStatus = 'PAID' | 'DUE' | 'OVERDUE';
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') || 'http://localhost:3002';
+
+type CompanyStatus = 'ACTIVE' | 'TRIAL' | 'SUSPENDED' | 'PENDING';
+type PlanType = 'STARTER' | 'GROWTH' | 'PRO' | 'ENTERPRISE' | string;
+type PaymentStatus = 'ACTIVE' | 'TRIAL' | 'PAST_DUE' | 'CANCELLED' | string;
 type UsageHealth = 'GOOD' | 'HIGH' | 'LIMITED';
+type UserRole = 'ADMIN' | 'OPERATOR' | 'DRIVER' | 'SUPER_ADMIN';
+type UserStatus = 'ACTIVE' | 'SUSPENDED';
+
+type ApiCompanyUser = {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  createdAt: string;
+};
+
+type ApiCompany = {
+  id: string;
+  name: string;
+  code: string;
+  slug: string;
+  status: string;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  timezone: string;
+  currency: string;
+  driverLimit: number;
+  vehicleLimit: number;
+  dispatcherSeatLimit: number;
+  billingPlan: string;
+  billingStatus: string;
+  trialEndsAt: string | null;
+  subscriptionStartsAt: string | null;
+  subscriptionEndsAt: string | null;
+  internalNotes?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  users?: ApiCompanyUser[];
+};
 
 type CompanyDetail = {
   id: string;
   companyName: string;
+  code: string;
   slug: string;
   status: CompanyStatus;
   plan: PlanType;
   createdAt: string;
-  renewalDate: string;
+  renewalDate: string | null;
   paymentStatus: PaymentStatus;
   monthlyRevenue: number;
   unpaidInvoices: number;
@@ -32,37 +76,20 @@ type CompanyDetail = {
   ownerEmail: string;
   ownerPhone: string;
   salesRep: string;
-  lastContactAt: string;
+  lastContactAt: string | null;
   internalNotes: string;
+  timezone: string;
+  currency: string;
+  dispatcherSeatLimit: number;
+  trialEndsAt: string | null;
+  subscriptionStartsAt: string | null;
+  users: ApiCompanyUser[];
 };
 
-const initialCompany: CompanyDetail = {
-  id: 'cmp_alpha_001',
-  companyName: 'Alpha Cars',
-  slug: 'alpha-cars',
-  status: 'ACTIVE',
-  plan: 'OPERATOR',
-  createdAt: '2025-11-02T09:20:00',
-  renewalDate: '2026-05-01T00:00:00',
-  paymentStatus: 'PAID',
-  monthlyRevenue: 18420,
-  unpaidInvoices: 0,
-  drivers: 34,
-  vehicles: 28,
-  activeUsers: 8,
-  bookingsMonth: 3184,
-  apiCalls: 128440,
-  smsUsed: 842,
-  emailsSent: 2190,
-  storageGb: 3.7,
-  usageHealth: 'GOOD',
-  ownerName: 'Tommy Brown',
-  ownerEmail: 'ops@alphacars.co.uk',
-  ownerPhone: '0207 555 1000',
-  salesRep: 'Megan Ross',
-  lastContactAt: '2026-04-21T11:20:00',
-  internalNotes:
-    'Strong operator. Good dispatch adoption. Upsell target for Pro compliance + reporting.',
+type NewUserForm = {
+  email: string;
+  password: string;
+  role: UserRole;
 };
 
 function formatCurrency(value: number) {
@@ -96,23 +123,39 @@ function formatDateTime(value?: string | null) {
   });
 }
 
+function toDateInput(value?: string | null) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+function addDaysToToday(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function statusClass(status: CompanyStatus) {
   if (status === 'ACTIVE') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   if (status === 'TRIAL') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
+  if (status === 'PENDING') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   return 'border-red-500/30 bg-red-500/10 text-red-300';
 }
 
 function planClass(plan: PlanType) {
   if (plan === 'STARTER') return 'border-white/10 bg-white/5 text-white/75';
-  if (plan === 'OPERATOR') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
+  if (plan === 'GROWTH') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
   if (plan === 'PRO') return 'border-violet-500/30 bg-violet-500/10 text-violet-300';
-  return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+  if (plan === 'ENTERPRISE') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+  return 'border-white/10 bg-white/5 text-white/70';
 }
 
 function paymentClass(status: PaymentStatus) {
-  if (status === 'PAID') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
-  if (status === 'DUE') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
-  return 'border-red-500/30 bg-red-500/10 text-red-300';
+  if (status === 'ACTIVE') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  if (status === 'TRIAL') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
+  if (status === 'PAST_DUE') return 'border-red-500/30 bg-red-500/10 text-red-300';
+  return 'border-white/10 bg-white/5 text-white/70';
 }
 
 function usageClass(health: UsageHealth) {
@@ -121,130 +164,636 @@ function usageClass(health: UsageHealth) {
   return 'border-red-500/30 bg-red-500/10 text-red-300';
 }
 
+function userStatusClass(status: string) {
+  return status === 'ACTIVE'
+    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+    : 'border-red-500/30 bg-red-500/10 text-red-300';
+}
+
+function userRoleClass(role: string) {
+  if (role === 'ADMIN') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
+  if (role === 'OPERATOR') return 'border-violet-500/30 bg-violet-500/10 text-violet-300';
+  if (role === 'DRIVER') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+  return 'border-white/10 bg-white/5 text-white/70';
+}
+
+function deriveUsageHealth(apiCompany: ApiCompany): UsageHealth {
+  const capacityTotal =
+    (apiCompany.driverLimit ?? 0) +
+    (apiCompany.vehicleLimit ?? 0) +
+    (apiCompany.dispatcherSeatLimit ?? 0);
+
+  if (capacityTotal >= 100) return 'HIGH';
+  if (capacityTotal >= 40) return 'GOOD';
+  return 'LIMITED';
+}
+
+function mapCompany(apiCompany: ApiCompany): CompanyDetail {
+  const status =
+    apiCompany.billingStatus === 'TRIAL'
+      ? 'TRIAL'
+      : ((apiCompany.status?.toUpperCase?.() as CompanyStatus) || 'PENDING');
+
+  return {
+    id: apiCompany.id,
+    companyName: apiCompany.name || 'Untitled Company',
+    code: apiCompany.code,
+    slug: apiCompany.slug,
+    status,
+    plan: apiCompany.billingPlan || 'STARTER',
+    createdAt: apiCompany.createdAt,
+    renewalDate: apiCompany.subscriptionEndsAt,
+    paymentStatus: apiCompany.billingStatus || 'TRIAL',
+    monthlyRevenue: 0,
+    unpaidInvoices: 0,
+    drivers: apiCompany.driverLimit ?? 0,
+    vehicles: apiCompany.vehicleLimit ?? 0,
+    activeUsers: apiCompany.users?.filter((u) => u.status === 'ACTIVE').length ?? 0,
+    bookingsMonth: 0,
+    apiCalls: 0,
+    smsUsed: 0,
+    emailsSent: 0,
+    storageGb: 0,
+    usageHealth: deriveUsageHealth(apiCompany),
+    ownerName: apiCompany.contactName?.trim() || 'No contact assigned',
+    ownerEmail: apiCompany.contactEmail?.trim() || 'No email',
+    ownerPhone: apiCompany.contactPhone?.trim() || 'No phone',
+    salesRep: 'Unassigned',
+    lastContactAt: apiCompany.updatedAt,
+    internalNotes: apiCompany.internalNotes || '',
+    timezone: apiCompany.timezone,
+    currency: apiCompany.currency,
+    dispatcherSeatLimit: apiCompany.dispatcherSeatLimit ?? 0,
+    trialEndsAt: apiCompany.trialEndsAt,
+    subscriptionStartsAt: apiCompany.subscriptionStartsAt,
+    users: apiCompany.users ?? [],
+  };
+}
+
 export default function SuperAdminCompanyDetailPage() {
-  const [company, setCompany] = useState<CompanyDetail>(initialCompany);
-  const [notes, setNotes] = useState(initialCompany.internalNotes);
+  const params = useParams();
+  const companyId = Array.isArray(params.companyId) ? params.companyId[0] : params.companyId;
+
+  const [company, setCompany] = useState<CompanyDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState('');
+  const [notes, setNotes] = useState('');
   const [saved, setSaved] = useState(false);
 
+  const [newUser, setNewUser] = useState<NewUserForm>({
+    email: '',
+    password: '',
+    role: 'ADMIN',
+  });
+  const [userActionError, setUserActionError] = useState('');
+  const [userActionSuccess, setUserActionSuccess] = useState('');
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [statusUpdatingUserId, setStatusUpdatingUserId] = useState<string | null>(null);
+  const [passwordResetUserId, setPasswordResetUserId] = useState<string | null>(null);
+
+  const [quickActionError, setQuickActionError] = useState('');
+  const [quickActionSuccess, setQuickActionSuccess] = useState('');
+  const [quickActionLoading, setQuickActionLoading] = useState<string | null>(null);
+
+  async function loadCompany() {
+    if (!companyId) return;
+
+    const res = await fetch(`${API_URL}/companies/${companyId}`, {
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to load company (${res.status})`);
+    }
+
+    const data = (await res.json()) as ApiCompany;
+    const mapped = mapCompany(data);
+    setCompany(mapped);
+    setNotes(mapped.internalNotes);
+  }
+
+  useEffect(() => {
+    if (!companyId) return;
+
+    let active = true;
+
+    async function run() {
+      try {
+        setLoading(true);
+        setPageError('');
+        const res = await fetch(`${API_URL}/companies/${companyId}`, {
+          cache: 'no-store',
+        });
+
+        if (!res.ok) {
+          throw new Error(`Failed to load company (${res.status})`);
+        }
+
+        const data = (await res.json()) as ApiCompany;
+        if (!active) return;
+
+        const mapped = mapCompany(data);
+        setCompany(mapped);
+        setNotes(mapped.internalNotes);
+      } catch (err) {
+        if (!active) return;
+        setPageError(err instanceof Error ? err.message : 'Failed to load company');
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    void run();
+
+    return () => {
+      active = false;
+    };
+  }, [companyId]);
+
   const billingTotal = useMemo(() => {
+    if (!company) return 0;
+
     return company.plan === 'STARTER'
       ? 49
-      : company.plan === 'OPERATOR'
+      : company.plan === 'GROWTH'
       ? 89
       : company.plan === 'PRO'
       ? 149
       : 249;
-  }, [company.plan]);
+  }, [company]);
 
-  function setStatus(status: CompanyStatus) {
-    setCompany((prev) => ({ ...prev, status }));
+  async function saveNotes() {
+    if (!companyId) return;
+
+    try {
+      setSaved(false);
+      setQuickActionError('');
+      setQuickActionSuccess('');
+      setQuickActionLoading('save-notes');
+
+      const res = await fetch(`${API_URL}/companies/${companyId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          internalNotes: notes,
+        }),
+      });
+
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw new Error(bodyText || `Failed to save notes (${res.status})`);
+      }
+
+      await loadCompany();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1200);
+    } catch (err) {
+      setQuickActionError(err instanceof Error ? err.message : 'Failed to save notes');
+    } finally {
+      setQuickActionLoading(null);
+    }
   }
 
-  function setPlan(plan: PlanType) {
-    setCompany((prev) => ({ ...prev, plan }));
+  async function createCompanyUser() {
+    if (!companyId) return;
+
+    if (!newUser.email.trim()) {
+      setUserActionError('User email is required');
+      return;
+    }
+
+    if (!newUser.password.trim() || newUser.password.trim().length < 8) {
+      setUserActionError('Password must be at least 8 characters');
+      return;
+    }
+
+    try {
+      setCreatingUser(true);
+      setUserActionError('');
+      setUserActionSuccess('');
+
+      const res = await fetch(`${API_URL}/companies/${companyId}/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: newUser.email.trim(),
+          password: newUser.password.trim(),
+          role: newUser.role,
+        }),
+      });
+
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw new Error(bodyText || `Failed to create user (${res.status})`);
+      }
+
+      await loadCompany();
+
+      setNewUser({
+        email: '',
+        password: '',
+        role: 'ADMIN',
+      });
+      setUserActionSuccess('User created');
+      setTimeout(() => setUserActionSuccess(''), 1500);
+    } catch (err) {
+      setUserActionError(err instanceof Error ? err.message : 'Failed to create user');
+    } finally {
+      setCreatingUser(false);
+    }
   }
 
-  function setPaymentStatus(paymentStatus: PaymentStatus) {
-    setCompany((prev) => ({ ...prev, paymentStatus }));
+  async function updateUserStatus(userId: string, status: UserStatus) {
+    if (!companyId) return;
+
+    try {
+      setStatusUpdatingUserId(userId);
+      setUserActionError('');
+      setUserActionSuccess('');
+
+      const res = await fetch(`${API_URL}/companies/${companyId}/users/${userId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw new Error(bodyText || `Failed to update user status (${res.status})`);
+      }
+
+      await loadCompany();
+      setUserActionSuccess(`User marked ${status.toLowerCase()}`);
+      setTimeout(() => setUserActionSuccess(''), 1500);
+    } catch (err) {
+      setUserActionError(
+        err instanceof Error ? err.message : 'Failed to update user status',
+      );
+    } finally {
+      setStatusUpdatingUserId(null);
+    }
   }
 
-  function extendTrial() {
-    setCompany((prev) => ({ ...prev, status: 'TRIAL' }));
+  async function resetUserPassword(userId: string, email: string) {
+    if (!companyId) return;
+
+    const password = window.prompt(`Enter a new password for ${email}`);
+    if (!password) return;
+
+    try {
+      setPasswordResetUserId(userId);
+      setUserActionError('');
+      setUserActionSuccess('');
+
+      const res = await fetch(`${API_URL}/companies/${companyId}/users/${userId}/password`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw new Error(bodyText || `Failed to reset password (${res.status})`);
+      }
+
+      setUserActionSuccess('Password reset');
+      setTimeout(() => setUserActionSuccess(''), 1500);
+    } catch (err) {
+      setUserActionError(
+        err instanceof Error ? err.message : 'Failed to reset password',
+      );
+    } finally {
+      setPasswordResetUserId(null);
+    }
   }
 
-  function saveNotes() {
-    setCompany((prev) => ({ ...prev, internalNotes: notes }));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1200);
+  async function patchCompanyStatus(nextStatus: 'ACTIVE' | 'SUSPENDED' | 'PENDING') {
+    if (!companyId) return;
+
+    try {
+      setQuickActionLoading(`status-${nextStatus}`);
+      setQuickActionError('');
+      setQuickActionSuccess('');
+
+      const res = await fetch(`${API_URL}/companies/${companyId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw new Error(bodyText || `Failed to update company status (${res.status})`);
+      }
+
+      await loadCompany();
+      setQuickActionSuccess(`Company marked ${nextStatus.toLowerCase()}`);
+      setTimeout(() => setQuickActionSuccess(''), 1500);
+    } catch (err) {
+      setQuickActionError(
+        err instanceof Error ? err.message : 'Failed to update company status',
+      );
+    } finally {
+      setQuickActionLoading(null);
+    }
+  }
+
+  async function extendTrial() {
+    if (!companyId) return;
+
+    const currentDate = toDateInput(company?.trialEndsAt);
+    const trialInput = window.prompt(
+      'Enter new trial end date (YYYY-MM-DD)',
+      currentDate || addDaysToToday(14),
+    );
+
+    if (!trialInput) return;
+
+    try {
+      setQuickActionLoading('extend-trial');
+      setQuickActionError('');
+      setQuickActionSuccess('');
+
+      const res = await fetch(`${API_URL}/companies/${companyId}/extend-trial`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trialEndsAt: trialInput }),
+      });
+
+      if (!res.ok) {
+        const bodyText = await res.text();
+        throw new Error(bodyText || `Failed to extend trial (${res.status})`);
+      }
+
+      await loadCompany();
+      setQuickActionSuccess('Trial extended');
+      setTimeout(() => setQuickActionSuccess(''), 1500);
+    } catch (err) {
+      setQuickActionError(err instanceof Error ? err.message : 'Failed to extend trial');
+    } finally {
+      setQuickActionLoading(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-[#05070c] px-4 py-6 text-white md:px-6">
+        <div className="mx-auto max-w-[1850px] rounded-2xl border border-white/10 bg-[#0b1728] p-6 text-white/55">
+          Loading company...
+        </div>
+      </main>
+    );
+  }
+
+  if (pageError || !company) {
+    return (
+      <main className="min-h-screen bg-[#05070c] px-4 py-6 text-white md:px-6">
+        <div className="mx-auto max-w-[1850px] rounded-2xl border border-red-500/20 bg-red-500/10 p-6 text-red-200">
+          {pageError || 'Company not found'}
+        </div>
+      </main>
+    );
   }
 
   return (
     <main className="min-h-screen bg-[#05070c] px-4 py-6 text-white md:px-6">
       <div className="mx-auto max-w-[1850px]">
-        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">
-              Company Detail
-            </div>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">
-              {company.companyName}
-            </h1>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(company.status)}`}>
-                {company.status}
-              </span>
-              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${planClass(company.plan)}`}>
-                {company.plan}
-              </span>
-              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${paymentClass(company.paymentStatus)}`}>
-                {company.paymentStatus}
-              </span>
-            </div>
-            <p className="mt-3 text-sm text-white/55">
-              Company ID: {company.id} · Created {formatDate(company.createdAt)}
-            </p>
-          </div>
+        <SuperAdminPageHeader
+          eyebrow="Company Detail"
+          title={company.companyName}
+          description={`Company ID: ${company.id} · Created ${formatDate(company.createdAt)}`}
+          actions={
+            <>
+              <Link
+                href="/super-admin/companies"
+                className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
+              >
+                Back to Companies
+              </Link>
+              <Link
+                href={`/super-admin/companies/${company.id}/edit`}
+                className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
+              >
+                Edit Company
+              </Link>
+              <Link
+                href={`/super-admin/companies/${company.id}/billing`}
+                className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20"
+              >
+                Open Billing
+              </Link>
+            </>
+          }
+        />
 
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/super-admin/companies"
-              className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
-            >
-              Back to Companies
-            </Link>
-            <Link
-              href={`/super-admin/companies/${company.id}/edit`}
-              className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
-            >
-              Edit Company
-            </Link>
-            <Link
-              href={`/super-admin/companies/${company.id}/billing`}
-              className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20"
-            >
-              Open Billing
-            </Link>
-          </div>
+        <div className="mb-6 flex flex-wrap gap-2">
+          <span
+            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(company.status)}`}
+          >
+            {company.status}
+          </span>
+          <span
+            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${planClass(company.plan)}`}
+          >
+            {company.plan}
+          </span>
+          <span
+            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${paymentClass(company.paymentStatus)}`}
+          >
+            {company.paymentStatus}
+          </span>
         </div>
 
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <StatCard label="Drivers" value={company.drivers} />
-          <StatCard label="Vehicles" value={company.vehicles} />
-          <StatCard label="Bookings Month" value={company.bookingsMonth} />
-          <StatCard label="Revenue Month" value={formatCurrency(company.monthlyRevenue)} />
-          <StatCard label="Unpaid Invoices" value={company.unpaidInvoices} />
-          <StatCard label="Active Users" value={company.activeUsers} />
+          <SuperAdminStatCard label="Drivers" value={company.drivers} />
+          <SuperAdminStatCard label="Vehicles" value={company.vehicles} />
+          <SuperAdminStatCard label="Bookings Month" value={company.bookingsMonth} />
+          <SuperAdminStatCard label="Revenue Month" value={formatCurrency(company.monthlyRevenue)} />
+          <SuperAdminStatCard label="Unpaid Invoices" value={company.unpaidInvoices} />
+          <SuperAdminStatCard label="Active Users" value={company.activeUsers} />
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
           <section className="space-y-6">
-            <Panel title="Company & Billing">
-              <DetailRow label="Company Name" value={company.companyName} />
-              <DetailRow label="Slug" value={company.slug} />
-              <DetailRow label="Owner" value={company.ownerName} />
-              <DetailRow label="Owner Email" value={company.ownerEmail} />
-              <DetailRow label="Owner Phone" value={company.ownerPhone} />
-              <DetailRow label="Current Plan" value={company.plan} />
-              <DetailRow label="Plan Amount" value={formatCurrency(billingTotal)} />
-              <DetailRow label="Renewal Date" value={formatDate(company.renewalDate)} />
-              <DetailRow label="Payment Status" value={company.paymentStatus} />
-            </Panel>
+            <SuperAdminPanel title="Company & Billing">
+              <div className="space-y-3">
+                <SuperAdminDetailRow label="Company Name" value={company.companyName} />
+                <SuperAdminDetailRow label="Code" value={company.code} />
+                <SuperAdminDetailRow label="Slug" value={company.slug} />
+                <SuperAdminDetailRow label="Owner" value={company.ownerName} />
+                <SuperAdminDetailRow label="Owner Email" value={company.ownerEmail} />
+                <SuperAdminDetailRow label="Owner Phone" value={company.ownerPhone} />
+                <SuperAdminDetailRow label="Current Plan" value={company.plan} />
+                <SuperAdminDetailRow label="Plan Amount" value={formatCurrency(billingTotal)} />
+                <SuperAdminDetailRow label="Billing Status" value={company.paymentStatus} />
+                <SuperAdminDetailRow label="Trial Ends" value={formatDate(company.trialEndsAt)} />
+                <SuperAdminDetailRow
+                  label="Subscription Starts"
+                  value={formatDate(company.subscriptionStartsAt)}
+                />
+                <SuperAdminDetailRow label="Renewal Date" value={formatDate(company.renewalDate)} />
+                <SuperAdminDetailRow label="Timezone" value={company.timezone} />
+                <SuperAdminDetailRow label="Currency" value={company.currency} />
+              </div>
+            </SuperAdminPanel>
 
-            <Panel title="Usage">
+            <SuperAdminPanel title="User Management">
+              <div className="space-y-6">
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <div className="mb-4 text-lg font-semibold text-white">Create User</div>
+
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <input
+                      value={newUser.email}
+                      onChange={(e) =>
+                        setNewUser((prev) => ({ ...prev, email: e.target.value }))
+                      }
+                      placeholder="user@company.com"
+                      className={inputClassName}
+                    />
+
+                    <select
+                      value={newUser.role}
+                      onChange={(e) =>
+                        setNewUser((prev) => ({
+                          ...prev,
+                          role: e.target.value as UserRole,
+                        }))
+                      }
+                      className={inputClassName}
+                    >
+                      <option value="ADMIN">ADMIN</option>
+                      <option value="OPERATOR">OPERATOR</option>
+                      <option value="DRIVER">DRIVER</option>
+                      <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+                    </select>
+
+                    <input
+                      type="password"
+                      value={newUser.password}
+                      onChange={(e) =>
+                        setNewUser((prev) => ({ ...prev, password: e.target.value }))
+                      }
+                      placeholder="Temporary password"
+                      className={inputClassName}
+                    />
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <button
+                      onClick={createCompanyUser}
+                      disabled={creatingUser}
+                      className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-50"
+                    >
+                      {creatingUser ? 'Creating...' : 'Create User'}
+                    </button>
+
+                    {userActionSuccess ? (
+                      <span className="text-sm text-emerald-300">{userActionSuccess}</span>
+                    ) : null}
+
+                    {userActionError ? (
+                      <span className="text-sm text-red-300">{userActionError}</span>
+                    ) : null}
+                  </div>
+                </div>
+
+                {company.users.length === 0 ? (
+                  <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4 text-sm text-white/55">
+                    No users found.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {company.users.map((user) => (
+                      <div
+                        key={user.id}
+                        className="rounded-2xl border border-white/10 bg-[#0b1728] p-4"
+                      >
+                        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="font-semibold text-white">{user.email}</div>
+                              <span
+                                className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${userRoleClass(
+                                  user.role,
+                                )}`}
+                              >
+                                {user.role}
+                              </span>
+                              <span
+                                className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${userStatusClass(
+                                  user.status,
+                                )}`}
+                              >
+                                {user.status}
+                              </span>
+                            </div>
+
+                            <div className="mt-2 text-xs text-white/45">
+                              Created {formatDateTime(user.createdAt)}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-2">
+                            {user.status === 'ACTIVE' ? (
+                              <button
+                                onClick={() => updateUserStatus(user.id, 'SUSPENDED')}
+                                disabled={statusUpdatingUserId === user.id}
+                                className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+                              >
+                                {statusUpdatingUserId === user.id ? 'Updating...' : 'Suspend'}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => updateUserStatus(user.id, 'ACTIVE')}
+                                disabled={statusUpdatingUserId === user.id}
+                                className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+                              >
+                                {statusUpdatingUserId === user.id ? 'Updating...' : 'Activate'}
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => resetUserPassword(user.id, user.email)}
+                              disabled={passwordResetUserId === user.id}
+                              className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-50"
+                            >
+                              {passwordResetUserId === user.id ? 'Resetting...' : 'Reset Password'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </SuperAdminPanel>
+
+            <SuperAdminPanel title="Usage">
               <div className="mb-4">
-                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${usageClass(company.usageHealth)}`}>
+                <span
+                  className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${usageClass(company.usageHealth)}`}
+                >
                   {company.usageHealth} USAGE HEALTH
                 </span>
               </div>
-              <DetailRow label="API Calls" value={company.apiCalls.toLocaleString('en-GB')} />
-              <DetailRow label="SMS Used" value={company.smsUsed.toLocaleString('en-GB')} />
-              <DetailRow label="Emails Sent" value={company.emailsSent.toLocaleString('en-GB')} />
-              <DetailRow label="Storage" value={`${company.storageGb.toFixed(1)} GB`} />
-              <DetailRow label="Last Contact" value={formatDateTime(company.lastContactAt)} />
-              <DetailRow label="Sales Rep" value={company.salesRep} />
-            </Panel>
+              <div className="space-y-3">
+                <SuperAdminDetailRow label="Driver Limit" value={company.drivers.toLocaleString('en-GB')} />
+                <SuperAdminDetailRow label="Vehicle Limit" value={company.vehicles.toLocaleString('en-GB')} />
+                <SuperAdminDetailRow
+                  label="Dispatcher Seats"
+                  value={company.dispatcherSeatLimit.toLocaleString('en-GB')}
+                />
+                <SuperAdminDetailRow label="API Calls" value={company.apiCalls.toLocaleString('en-GB')} />
+                <SuperAdminDetailRow label="SMS Used" value={company.smsUsed.toLocaleString('en-GB')} />
+                <SuperAdminDetailRow label="Emails Sent" value={company.emailsSent.toLocaleString('en-GB')} />
+                <SuperAdminDetailRow label="Storage" value={`${company.storageGb.toFixed(1)} GB`} />
+                <SuperAdminDetailRow label="Last Contact" value={formatDateTime(company.lastContactAt)} />
+                <SuperAdminDetailRow label="Sales Rep" value={company.salesRep} />
+              </div>
+            </SuperAdminPanel>
 
-            <Panel title="Internal CRM Notes">
+            <SuperAdminPanel title="Internal CRM Notes">
               <textarea
                 rows={8}
                 value={notes}
@@ -254,89 +803,71 @@ export default function SuperAdminCompanyDetailPage() {
               <div className="mt-4 flex items-center gap-3">
                 <button
                   onClick={saveNotes}
-                  className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
+                  disabled={quickActionLoading === 'save-notes'}
+                  className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-50"
                 >
-                  Save Notes
+                  {quickActionLoading === 'save-notes' ? 'Saving...' : 'Save Notes'}
                 </button>
                 {saved ? <span className="text-sm text-emerald-300">Saved</span> : null}
               </div>
-            </Panel>
+            </SuperAdminPanel>
           </section>
 
           <section className="space-y-6">
-            <Panel title="Quick Actions">
+            <SuperAdminPanel title="Quick Actions">
               <div className="grid gap-3">
                 <button className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500">
                   Login as Company Admin
                 </button>
-                <button className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10">
+
+                <Link
+                  href="/dashboard"
+                  className="rounded-2xl border border-white/10 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-white/10"
+                >
                   Open Company Dashboard
-                </button>
-                <button className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10">
-                  Reset Owner Password
-                </button>
+                </Link>
+
                 <button
                   onClick={extendTrial}
-                  className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20"
+                  disabled={quickActionLoading === 'extend-trial'}
+                  className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
                 >
-                  Extend Trial
+                  {quickActionLoading === 'extend-trial' ? 'Updating...' : 'Extend Trial'}
                 </button>
-                <button className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-200 hover:bg-amber-500/20">
-                  Add Credits
-                </button>
+
                 <button
-                  onClick={() => setStatus('SUSPENDED')}
-                  className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200 hover:bg-red-500/20"
+                  onClick={() => patchCompanyStatus('ACTIVE')}
+                  disabled={quickActionLoading === 'status-ACTIVE'}
+                  className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
                 >
-                  Disable Company
+                  {quickActionLoading === 'status-ACTIVE' ? 'Updating...' : 'Mark Active'}
                 </button>
-              </div>
-            </Panel>
 
-            <Panel title="Subscription Controls">
-              <div className="grid gap-3">
-                <button onClick={() => setPlan('STARTER')} className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10">
-                  Move to Starter
+                <button
+                  onClick={() => patchCompanyStatus('PENDING')}
+                  disabled={quickActionLoading === 'status-PENDING'}
+                  className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+                >
+                  {quickActionLoading === 'status-PENDING' ? 'Updating...' : 'Mark Pending'}
                 </button>
-                <button onClick={() => setPlan('OPERATOR')} className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10">
-                  Move to Operator
-                </button>
-                <button onClick={() => setPlan('PRO')} className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10">
-                  Move to Pro
-                </button>
-                <button onClick={() => setPlan('ENTERPRISE')} className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10">
-                  Move to Enterprise
-                </button>
-              </div>
-            </Panel>
 
-            <Panel title="Status Controls">
-              <div className="grid gap-3">
-                <button onClick={() => setStatus('ACTIVE')} className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500">
-                  Mark Active
-                </button>
-                <button onClick={() => setStatus('TRIAL')} className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500">
-                  Mark Trial
-                </button>
-                <button onClick={() => setStatus('SUSPENDED')} className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-500">
-                  Suspend Company
+                <button
+                  onClick={() => patchCompanyStatus('SUSPENDED')}
+                  disabled={quickActionLoading === 'status-SUSPENDED'}
+                  className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  {quickActionLoading === 'status-SUSPENDED' ? 'Updating...' : 'Disable Company'}
                 </button>
               </div>
-            </Panel>
 
-            <Panel title="Payment Controls">
-              <div className="grid gap-3">
-                <button onClick={() => setPaymentStatus('PAID')} className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500">
-                  Mark Paid
-                </button>
-                <button onClick={() => setPaymentStatus('DUE')} className="rounded-2xl bg-amber-600 px-4 py-3 text-sm font-semibold text-white hover:bg-amber-500">
-                  Mark Due
-                </button>
-                <button onClick={() => setPaymentStatus('OVERDUE')} className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-500">
-                  Mark Overdue
-                </button>
-              </div>
-            </Panel>
+              {quickActionSuccess ? (
+                <div className="mt-4 text-sm text-emerald-300">{quickActionSuccess}</div>
+              ) : null}
+
+              {quickActionError ? (
+                <div className="mt-4 text-sm text-red-300">{quickActionError}</div>
+              ) : null}
+            </SuperAdminPanel>
           </section>
         </div>
       </div>
@@ -344,47 +875,5 @@ export default function SuperAdminCompanyDetailPage() {
   );
 }
 
-function Panel({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-      <h2 className="mb-4 text-2xl font-bold">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string | number;
-}) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-      <p className="text-sm text-white/60">{label}</p>
-      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
-    </div>
-  );
-}
-
-function DetailRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-white/5 py-2 last:border-b-0">
-      <span className="text-sm text-white/50">{label}</span>
-      <span className="max-w-[60%] text-right text-sm text-white/85">{value}</span>
-    </div>
-  );
-}
+const inputClassName =
+  'w-full rounded-2xl border border-white/10 bg-[#07111f] px-4 py-3 text-white outline-none focus:border-cyan-500/50';
