@@ -4,34 +4,23 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { getStoredUser } from '@/lib/auth';
 import { apiFetch } from '@/lib/api';
+import {
+  type BookingLite,
+  type DriverRecordLite,
+  type VehicleRecordLite,
+  getDashboardStats,
+  isCompleted,
+  isLive,
+  isScheduled,
+} from '@/lib/ops-reporting';
 
-type Booking = {
-  id: string;
-  reference: string;
-  status: string;
-  pickupTime?: string;
-  pickupAt?: string;
-  quotedPrice?: number | null;
+type Booking = BookingLite & {
   customerName?: string | null;
-  driver?: {
-    id: string;
-    name?: string;
-    fullName?: string;
-  } | null;
 };
 
-type Driver = {
-  id: string;
-  name?: string;
-  fullName?: string;
-  status?: string;
-};
+type Driver = DriverRecordLite;
 
-type Vehicle = {
-  id: string;
-  reg: string;
-  status: string;
-};
+type Vehicle = VehicleRecordLite;
 
 const quickLinks = [
   {
@@ -59,47 +48,6 @@ const quickLinks = [
     tone: 'amber',
   },
 ];
-
-function getPickupTime(booking: Booking) {
-  return booking.pickupAt || booking.pickupTime || null;
-}
-
-function isToday(value?: string | null) {
-  if (!value) return false;
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return false;
-
-  const now = new Date();
-
-  return (
-    date.getDate() === now.getDate() &&
-    date.getMonth() === now.getMonth() &&
-    date.getFullYear() === now.getFullYear()
-  );
-}
-
-function isPending(status?: string) {
-  return ['BOOKED', 'OFFERED'].includes((status || '').toUpperCase());
-}
-
-function isCompleted(status?: string) {
-  return (status || '').toUpperCase() === 'COMPLETED';
-}
-
-function isCancelled(status?: string) {
-  return ['CANCELLED', 'NO_SHOW'].includes((status || '').toUpperCase());
-}
-
-function isLive(status?: string) {
-  return ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB', 'ALLOCATED'].includes(
-    (status || '').toUpperCase(),
-  );
-}
-
-function driverState(status?: string) {
-  return (status || '').toUpperCase();
-}
 
 export default function DashboardPage() {
   const user = getStoredUser();
@@ -150,79 +98,10 @@ export default function DashboardPage() {
     };
   }, []);
 
-  const stats = useMemo(() => {
-    const todaysBookings = bookings.filter((booking) =>
-      isToday(getPickupTime(booking)),
-    );
-
-    const jobsToday = todaysBookings.length;
-    const pendingJobs = todaysBookings.filter((booking) =>
-      isPending(booking.status),
-    ).length;
-    const completedJobs = todaysBookings.filter((booking) =>
-      isCompleted(booking.status),
-    ).length;
-    const cancelledJobs = todaysBookings.filter((booking) =>
-      isCancelled(booking.status),
-    ).length;
-
-    const estimatedRevenue = todaysBookings.reduce((sum, booking) => {
-      if (!isCompleted(booking.status)) return sum;
-      return sum + (booking.quotedPrice ?? 0);
-    }, 0);
-
-    const driversOnline = drivers.filter((driver) =>
-      ['AVAILABLE', 'ONLINE', 'ON_DUTY', 'BUSY'].includes(
-        driverState(driver.status),
-      ),
-    ).length;
-
-    const driversBusy = drivers.filter(
-      (driver) => driverState(driver.status) === 'BUSY',
-    ).length;
-
-    const driversAvailable = drivers.filter((driver) =>
-      ['AVAILABLE', 'ONLINE', 'ON_DUTY'].includes(driverState(driver.status)),
-    ).length;
-
-    const driversOffDuty = Math.max(
-      drivers.length - driversOnline,
-      0,
-    );
-
-    const vehiclesActive = vehicles.filter(
-      (vehicle) => (vehicle.status || '').toUpperCase() === 'ACTIVE',
-    ).length;
-
-    const liveJobs = todaysBookings.filter((booking) =>
-      isLive(booking.status),
-    );
-
-    const recentCompleted = [...todaysBookings]
-      .filter((booking) => isCompleted(booking.status))
-      .slice(0, 1).length;
-
-    return {
-      jobsToday,
-      pendingJobs,
-      completedJobs,
-      cancelledJobs,
-      estimatedRevenue,
-      driversOnline,
-      driversBusy,
-      driversAvailable,
-      driversOffDuty,
-      vehiclesActive,
-      liveJobs: liveJobs.length,
-      preBooked: todaysBookings.filter((booking) => isPending(booking.status))
-        .length,
-      asap: todaysBookings.filter((booking) => isLive(booking.status)).length,
-      airport: bookings.filter((booking) =>
-        String(booking.reference || '').toUpperCase().includes('AIR'),
-      ).length,
-      recentCompleted,
-    };
-  }, [bookings, drivers, vehicles]);
+  const stats = useMemo(
+    () => getDashboardStats(bookings, drivers, vehicles),
+    [bookings, drivers, vehicles],
+  );
 
   const liveActivities = useMemo(() => {
     const items: Array<{
@@ -231,7 +110,7 @@ export default function DashboardPage() {
       status: 'Pending' | 'Live' | 'Complete' | 'Alert';
     }> = [];
 
-    const pending = bookings.find((booking) => isPending(booking.status));
+    const pending = bookings.find((booking) => isScheduled(booking.status));
     if (pending) {
       items.push({
         title: `Booking ${pending.reference} waiting for assignment`,
@@ -490,11 +369,11 @@ export default function DashboardPage() {
           items={[
             {
               label: 'Pre-booked',
-              value: loading ? '—' : String(stats.preBooked),
+              value: loading ? '—' : String(stats.pendingJobs),
             },
             {
               label: 'Live',
-              value: loading ? '—' : String(stats.asap),
+              value: loading ? '—' : String(stats.liveJobs),
             },
             {
               label: 'Completed',
@@ -513,11 +392,11 @@ export default function DashboardPage() {
             },
             {
               label: 'Total Drivers',
-              value: loading ? '—' : String(drivers.length),
+              value: loading ? '—' : String(stats.totalDrivers),
             },
             {
               label: 'Total Vehicles',
-              value: loading ? '—' : String(vehicles.length),
+              value: loading ? '—' : String(stats.totalVehicles),
             },
           ]}
         />
