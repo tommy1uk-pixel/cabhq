@@ -1,87 +1,212 @@
 'use client';
 
-import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useMemo, useState } from 'react';
 
-type InvoiceStatus = 'PAID' | 'DUE' | 'OVERDUE' | 'DRAFT';
-type PlanType = 'STARTER' | 'GROWTH' | 'PRO' | 'ENTERPRISE';
+type PlanType = 'STARTER' | 'OPERATOR' | 'PRO' | 'ENTERPRISE';
+type BillingStatus = 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'SUSPENDED';
+type InvoiceStatus = 'PAID' | 'DUE' | 'OVERDUE' | 'PENDING';
 
-type BillingCompany = {
+type CompanyBillingRow = {
   id: string;
   companyName: string;
+  slug: string;
   plan: PlanType;
-  billingEmail: string;
   monthlyPrice: number;
   usageCharges: number;
   invoiceTotal: number;
+  billingStatus: BillingStatus;
   invoiceStatus: InvoiceStatus;
+  billingEmail: string;
   nextBillingDate: string;
   lastPaymentDate?: string | null;
   paymentMethod?: string | null;
-  activeUsers: number;
-  activeDrivers: number;
+  users: number;
+  drivers: number;
+  vehicles: number;
+  notes?: string | null;
 };
 
-const initialCompanies: BillingCompany[] = [
+const PLAN_META: Record<
+  PlanType,
+  {
+    label: string;
+    priceLabel: string;
+    monthlyPrice: number;
+    badge: string;
+    badgeClass: string;
+    cardClass: string;
+    buttonClass: string;
+    features: string[];
+  }
+> = {
+  STARTER: {
+    label: 'Starter',
+    priceLabel: '£49/month',
+    monthlyPrice: 49,
+    badge: 'Best for new operators',
+    badgeClass:
+      'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
+    cardClass: 'border-cyan-500/20 bg-[#071427]',
+    buttonClass: 'bg-white text-black hover:bg-slate-200',
+    features: [
+      '1–5 vehicles',
+      'Manual dispatch board',
+      'Create bookings',
+      'Future bookings',
+      'Manual job assignment',
+      'Add/manage drivers',
+      'Add/manage vehicles',
+      '1 admin login',
+      'Company settings',
+      'Email support',
+    ],
+  },
+  OPERATOR: {
+    label: 'Operator',
+    priceLabel: '£89/month',
+    monthlyPrice: 89,
+    badge: 'Most popular',
+    badgeClass: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-300',
+    cardClass: 'border-cyan-500/30 bg-[#081a31]',
+    buttonClass: 'bg-cyan-500 text-black hover:bg-cyan-400',
+    features: [
+      'Everything in Starter',
+      'Auto dispatch v1',
+      'Closest driver suggestions',
+      'Driver availability filtering',
+      'Live driver tracking map',
+      'Real-time status board',
+      'Up to 5 admin users',
+      'Role-based staff access',
+      'Priority support',
+      'Driver performance basics',
+    ],
+  },
+  PRO: {
+    label: 'Pro',
+    priceLabel: '£149/month',
+    monthlyPrice: 149,
+    badge: 'For established fleets',
+    badgeClass: 'border-violet-500/25 bg-violet-500/10 text-violet-300',
+    cardClass: 'border-violet-500/30 bg-[#101328]',
+    buttonClass: 'bg-violet-500 text-white hover:bg-violet-400',
+    features: [
+      'Everything in Operator',
+      'Driver licence expiry alerts',
+      'DBS expiry tracking',
+      'Badge expiry reminders',
+      'Vehicle insurance alerts',
+      'MOT expiry reminders',
+      'Zone / area logic',
+      'Smart dispatch rules',
+      'Priority booking logic',
+      'Driver performance reports',
+      'Booking trends',
+      'Revenue / job summaries',
+      'Unlimited admin users',
+    ],
+  },
+  ENTERPRISE: {
+    label: 'Enterprise',
+    priceLabel: '£249+/month',
+    monthlyPrice: 249,
+    badge: 'For larger groups',
+    badgeClass: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
+    cardClass: 'border-amber-500/30 bg-[#17120a]',
+    buttonClass: 'bg-amber-400 text-black hover:bg-amber-300',
+    features: [
+      'Everything in Pro',
+      'Multiple companies / depots',
+      'Central owner controls',
+      'Group reporting',
+      'API access',
+      'Custom workflows',
+      'Bespoke setup',
+      'Dedicated account support',
+      'Staff training',
+      'Priority roadmap requests',
+      'White-label options later',
+    ],
+  },
+};
+
+const initialCompanies: CompanyBillingRow[] = [
   {
     id: '1',
     companyName: 'Alpha Cars',
-    plan: 'PRO',
-    billingEmail: 'billing@alphacars.co.uk',
-    monthlyPrice: 299,
-    usageCharges: 84,
-    invoiceTotal: 383,
+    slug: 'alpha-cars',
+    plan: 'OPERATOR',
+    monthlyPrice: 89,
+    usageCharges: 24,
+    invoiceTotal: 113,
+    billingStatus: 'ACTIVE',
     invoiceStatus: 'PAID',
+    billingEmail: 'billing@alphacars.co.uk',
     nextBillingDate: '2026-05-01T00:00:00',
     lastPaymentDate: '2026-04-01T09:14:00',
     paymentMethod: 'Visa ending 4242',
-    activeUsers: 8,
-    activeDrivers: 34,
+    users: 4,
+    drivers: 18,
+    vehicles: 14,
+    notes: 'Growing operator using live dispatch and map tools.',
   },
   {
     id: '2',
     companyName: 'CityLine Transport',
+    slug: 'cityline-transport',
     plan: 'STARTER',
+    monthlyPrice: 49,
+    usageCharges: 0,
+    invoiceTotal: 49,
+    billingStatus: 'TRIAL',
+    invoiceStatus: 'PENDING',
     billingEmail: 'finance@cityline.co.uk',
-    monthlyPrice: 99,
-    usageCharges: 18,
-    invoiceTotal: 117,
-    invoiceStatus: 'DUE',
     nextBillingDate: '2026-04-28T00:00:00',
-    lastPaymentDate: '2026-03-28T10:08:00',
-    paymentMethod: 'Mastercard ending 1881',
-    activeUsers: 3,
-    activeDrivers: 11,
+    lastPaymentDate: null,
+    paymentMethod: 'Awaiting card setup',
+    users: 1,
+    drivers: 5,
+    vehicles: 4,
+    notes: 'New operator moving off paper diary workflow.',
   },
   {
     id: '3',
     companyName: 'Metro Executive',
-    plan: 'ENTERPRISE',
-    billingEmail: 'accounts@metroexec.co.uk',
-    monthlyPrice: 699,
-    usageCharges: 145,
-    invoiceTotal: 844,
+    slug: 'metro-executive',
+    plan: 'PRO',
+    monthlyPrice: 149,
+    usageCharges: 38,
+    invoiceTotal: 187,
+    billingStatus: 'ACTIVE',
     invoiceStatus: 'PAID',
+    billingEmail: 'accounts@metroexec.co.uk',
     nextBillingDate: '2026-05-04T00:00:00',
     lastPaymentDate: '2026-04-04T08:22:00',
     paymentMethod: 'Direct Debit',
-    activeUsers: 14,
-    activeDrivers: 61,
+    users: 9,
+    drivers: 41,
+    vehicles: 28,
+    notes: 'Compliance-heavy fleet with reporting requirements.',
   },
   {
     id: '4',
     companyName: 'Rapid Cab Group',
-    plan: 'GROWTH',
-    billingEmail: 'ops@rapidcabgroup.co.uk',
-    monthlyPrice: 199,
-    usageCharges: 52,
-    invoiceTotal: 251,
+    slug: 'rapid-cab-group',
+    plan: 'ENTERPRISE',
+    monthlyPrice: 349,
+    usageCharges: 91,
+    invoiceTotal: 440,
+    billingStatus: 'PAST_DUE',
     invoiceStatus: 'OVERDUE',
+    billingEmail: 'ops@rapidcabgroup.co.uk',
     nextBillingDate: '2026-04-18T00:00:00',
     lastPaymentDate: '2026-03-18T11:41:00',
     paymentMethod: 'Visa ending 9021',
-    activeUsers: 5,
-    activeDrivers: 19,
+    users: 16,
+    drivers: 73,
+    vehicles: 52,
+    notes: 'Multi-site group account with central oversight.',
   },
 ];
 
@@ -104,11 +229,24 @@ function formatDate(value?: string | null) {
   });
 }
 
-function statusClass(status: InvoiceStatus) {
+function billingStatusClass(status: BillingStatus) {
+  if (status === 'ACTIVE') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  }
+  if (status === 'TRIAL') {
+    return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
+  }
+  if (status === 'PAST_DUE') {
+    return 'border-red-500/30 bg-red-500/10 text-red-300';
+  }
+  return 'border-slate-500/30 bg-slate-500/10 text-slate-300';
+}
+
+function invoiceStatusClass(status: InvoiceStatus) {
   if (status === 'PAID') {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   }
-  if (status === 'DUE') {
+  if (status === 'DUE' || status === 'PENDING') {
     return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   }
   if (status === 'OVERDUE') {
@@ -117,21 +255,8 @@ function statusClass(status: InvoiceStatus) {
   return 'border-slate-500/30 bg-slate-500/10 text-slate-300';
 }
 
-function planClass(plan: PlanType) {
-  if (plan === 'ENTERPRISE') {
-    return 'border-fuchsia-500/30 bg-fuchsia-500/10 text-fuchsia-300';
-  }
-  if (plan === 'PRO') {
-    return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
-  }
-  if (plan === 'GROWTH') {
-    return 'border-sky-500/30 bg-sky-500/10 text-sky-300';
-  }
-  return 'border-white/10 bg-white/5 text-white/70';
-}
-
 export default function SuperAdminBillingPage() {
-  const [companies, setCompanies] = useState<BillingCompany[]>(initialCompanies);
+  const [companies, setCompanies] = useState<CompanyBillingRow[]>(initialCompanies);
   const [selectedId, setSelectedId] = useState<string | null>(
     initialCompanies[0]?.id ?? null,
   );
@@ -144,10 +269,11 @@ export default function SuperAdminBillingPage() {
     return companies.filter((company) =>
       [
         company.companyName,
+        company.slug,
         company.billingEmail,
         company.plan,
+        company.billingStatus,
         company.invoiceStatus,
-        company.paymentMethod || '',
       ]
         .join(' ')
         .toLowerCase()
@@ -162,20 +288,45 @@ export default function SuperAdminBillingPage() {
 
   const stats = useMemo(() => {
     return {
-      totalMrr: companies.reduce((sum, company) => sum + company.monthlyPrice, 0),
+      mrr: companies.reduce((sum, company) => sum + company.monthlyPrice, 0),
       usage: companies.reduce((sum, company) => sum + company.usageCharges, 0),
       invoiced: companies.reduce((sum, company) => sum + company.invoiceTotal, 0),
+      active: companies.filter((company) => company.billingStatus === 'ACTIVE')
+        .length,
+      trials: companies.filter((company) => company.billingStatus === 'TRIAL')
+        .length,
       overdue: companies.filter((company) => company.invoiceStatus === 'OVERDUE')
         .length,
-      due: companies.filter((company) => company.invoiceStatus === 'DUE').length,
-      paid: companies.filter((company) => company.invoiceStatus === 'PAID').length,
     };
   }, [companies]);
 
-  function updateInvoiceStatus(id: string, status: InvoiceStatus) {
+  function setPlan(companyId: string, plan: PlanType) {
     setCompanies((prev) =>
       prev.map((company) =>
-        company.id === id ? { ...company, invoiceStatus: status } : company,
+        company.id === companyId
+          ? {
+              ...company,
+              plan,
+              monthlyPrice: PLAN_META[plan].monthlyPrice,
+              invoiceTotal: PLAN_META[plan].monthlyPrice + company.usageCharges,
+            }
+          : company,
+      ),
+    );
+  }
+
+  function setBillingStatus(companyId: string, billingStatus: BillingStatus) {
+    setCompanies((prev) =>
+      prev.map((company) =>
+        company.id === companyId ? { ...company, billingStatus } : company,
+      ),
+    );
+  }
+
+  function setInvoiceStatus(companyId: string, invoiceStatus: InvoiceStatus) {
+    setCompanies((prev) =>
+      prev.map((company) =>
+        company.id === companyId ? { ...company, invoiceStatus } : company,
       ),
     );
   }
@@ -192,7 +343,7 @@ export default function SuperAdminBillingPage() {
               Super Admin Billing
             </h1>
             <p className="mt-2 text-sm text-white/55">
-              Subscription plans, invoice states, usage charges and payment tracking across all companies.
+              Plan pricing aligned to Starter, Operator, Pro and Enterprise across all companies.
             </p>
           </div>
 
@@ -210,28 +361,73 @@ export default function SuperAdminBillingPage() {
         </div>
 
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <StatCard label="MRR" value={formatCurrency(stats.totalMrr)} />
+          <StatCard label="MRR" value={formatCurrency(stats.mrr)} />
           <StatCard label="Usage Charges" value={formatCurrency(stats.usage)} />
           <StatCard label="Invoiced" value={formatCurrency(stats.invoiced)} />
-          <StatCard label="Paid" value={stats.paid} />
-          <StatCard label="Due" value={stats.due} />
+          <StatCard label="Active" value={stats.active} />
+          <StatCard label="Trials" value={stats.trials} />
           <StatCard label="Overdue" value={stats.overdue} />
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <div className="mb-6 grid gap-4 xl:grid-cols-4">
+          {(Object.keys(PLAN_META) as PlanType[]).map((planKey) => {
+            const plan = PLAN_META[planKey];
+
+            return (
+              <section
+                key={planKey}
+                className={`rounded-3xl border p-6 ${plan.cardClass}`}
+              >
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <span
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${plan.badgeClass}`}
+                  >
+                    {plan.badge}
+                  </span>
+                </div>
+
+                <h2 className="text-3xl font-bold text-white uppercase">
+                  {plan.label}
+                </h2>
+
+                <div className="mt-4 flex items-end gap-2">
+                  <span className="text-5xl font-bold text-white">
+                    {plan.priceLabel.split('/')[0]}
+                  </span>
+                  <span className="pb-1 text-sm text-white/55">/month</span>
+                </div>
+
+                <div className="mt-5 space-y-3">
+                  {plan.features.map((feature) => (
+                    <div key={feature} className="flex gap-3 text-sm text-white/80">
+                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-white" />
+                      <span>{feature}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white/60">
+                  {companies.filter((company) => company.plan === planKey).length} companies on this plan
+                </div>
+              </section>
+            );
+          })}
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
           <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
             <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h2 className="text-2xl font-bold">Billing Accounts</h2>
+                <h2 className="text-2xl font-bold">Company Billing Accounts</h2>
                 <p className="mt-1 text-sm text-white/60">
-                  Review current plan, invoice totals and payment status by company.
+                  Review current plan, monthly charge, billing state and invoice status.
                 </p>
               </div>
 
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search billing accounts..."
+                placeholder="Search companies..."
                 className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50 lg:w-[320px]"
               />
             </div>
@@ -242,65 +438,73 @@ export default function SuperAdminBillingPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {filteredCompanies.map((company) => {
-                  const isSelected = selectedId === company.id;
+                {filteredCompanies.map((company) => (
+                  <div
+                    key={company.id}
+                    onClick={() => setSelectedId(company.id)}
+                    className={`cursor-pointer rounded-2xl border p-5 transition ${
+                      selectedId === company.id
+                        ? 'border-cyan-500/50 bg-[#0c1b2c]'
+                        : 'border-white/10 bg-[#0b1728]'
+                    }`}
+                  >
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-xl font-bold">{company.companyName}</h3>
 
-                  return (
-                    <div
-                      key={company.id}
-                      onClick={() => setSelectedId(company.id)}
-                      className={`cursor-pointer rounded-2xl border p-5 transition ${
-                        isSelected
-                          ? 'border-cyan-500/50 bg-[#0c1b2c]'
-                          : 'border-white/10 bg-[#0b1728]'
-                      }`}
-                    >
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-xl font-bold">{company.companyName}</h3>
+                          <span
+                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${PLAN_META[company.plan].badgeClass}`}
+                          >
+                            {PLAN_META[company.plan].label}
+                          </span>
 
-                            <span
-                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${planClass(
-                                company.plan,
-                              )}`}
-                            >
-                              {company.plan}
-                            </span>
+                          <span
+                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${billingStatusClass(
+                              company.billingStatus,
+                            )}`}
+                          >
+                            {company.billingStatus.replace('_', ' ')}
+                          </span>
 
-                            <span
-                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(
-                                company.invoiceStatus,
-                              )}`}
-                            >
-                              {company.invoiceStatus}
-                            </span>
-                          </div>
-
-                          <p className="mt-2 text-sm text-white/60">
-                            {company.billingEmail}
-                          </p>
-
-                          <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/45">
-                            <span>Base: {formatCurrency(company.monthlyPrice)}</span>
-                            <span>Usage: {formatCurrency(company.usageCharges)}</span>
-                            <span>Total: {formatCurrency(company.invoiceTotal)}</span>
-                            <span>Next Billing: {formatDate(company.nextBillingDate)}</span>
-                          </div>
+                          <span
+                            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${invoiceStatusClass(
+                              company.invoiceStatus,
+                            )}`}
+                          >
+                            {company.invoiceStatus}
+                          </span>
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
-                          <Link
-                            href={`/super-admin/companies/${company.id}/edit`}
-                            className="rounded-xl bg-cyan-600 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-500"
-                          >
-                            Edit Company
-                          </Link>
+                        <p className="mt-2 text-sm text-white/60">
+                          {company.billingEmail}
+                        </p>
+
+                        <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/45">
+                          <span>Base: {formatCurrency(company.monthlyPrice)}</span>
+                          <span>Usage: {formatCurrency(company.usageCharges)}</span>
+                          <span>Total: {formatCurrency(company.invoiceTotal)}</span>
+                          <span>Next Billing: {formatDate(company.nextBillingDate)}</span>
                         </div>
                       </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          href={`/super-admin/companies/${company.id}`}
+                          className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10"
+                        >
+                          Open
+                        </Link>
+                        <Link
+                          href={`/super-admin/companies/${company.id}/edit`}
+                          className="rounded-xl bg-cyan-600 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-500"
+                        >
+                          Edit
+                        </Link>
+                      </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             )}
           </section>
@@ -308,7 +512,7 @@ export default function SuperAdminBillingPage() {
           <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
             <h2 className="text-2xl font-bold">Billing Focus</h2>
             <p className="mt-1 text-sm text-white/60">
-              Selected company billing summary and invoice controls.
+              Selected company pricing, billing controls and plan alignment.
             </p>
 
             {!selectedCompany ? (
@@ -322,14 +526,14 @@ export default function SuperAdminBillingPage() {
                     <h3 className="text-xl font-bold text-white">
                       {selectedCompany.companyName}
                     </h3>
+
                     <span
-                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(
-                        selectedCompany.invoiceStatus,
-                      )}`}
+                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${PLAN_META[selectedCompany.plan].badgeClass}`}
                     >
-                      {selectedCompany.invoiceStatus}
+                      {PLAN_META[selectedCompany.plan].label}
                     </span>
                   </div>
+
                   <p className="mt-2 text-sm text-white/60">
                     {selectedCompany.billingEmail}
                   </p>
@@ -337,84 +541,122 @@ export default function SuperAdminBillingPage() {
 
                 <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
                   <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
-                    Charges
+                    Pricing
                   </h4>
-                  <DetailRow label="Plan" value={selectedCompany.plan} />
-                  <DetailRow
-                    label="Monthly Price"
-                    value={formatCurrency(selectedCompany.monthlyPrice)}
-                  />
-                  <DetailRow
-                    label="Usage Charges"
-                    value={formatCurrency(selectedCompany.usageCharges)}
-                  />
-                  <DetailRow
-                    label="Invoice Total"
-                    value={formatCurrency(selectedCompany.invoiceTotal)}
-                  />
+                  <DetailRow label="Plan" value={PLAN_META[selectedCompany.plan].label} />
+                  <DetailRow label="Monthly Price" value={formatCurrency(selectedCompany.monthlyPrice)} />
+                  <DetailRow label="Usage Charges" value={formatCurrency(selectedCompany.usageCharges)} />
+                  <DetailRow label="Invoice Total" value={formatCurrency(selectedCompany.invoiceTotal)} />
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
                   <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
                     Account
                   </h4>
-                  <DetailRow
-                    label="Payment Method"
-                    value={selectedCompany.paymentMethod || '—'}
-                  />
-                  <DetailRow
-                    label="Last Payment"
-                    value={formatDate(selectedCompany.lastPaymentDate)}
-                  />
-                  <DetailRow
-                    label="Next Billing"
-                    value={formatDate(selectedCompany.nextBillingDate)}
-                  />
-                  <DetailRow
-                    label="Active Users"
-                    value={String(selectedCompany.activeUsers)}
-                  />
-                  <DetailRow
-                    label="Active Drivers"
-                    value={String(selectedCompany.activeDrivers)}
-                  />
+                  <DetailRow label="Payment Method" value={selectedCompany.paymentMethod || '—'} />
+                  <DetailRow label="Last Payment" value={formatDate(selectedCompany.lastPaymentDate)} />
+                  <DetailRow label="Next Billing" value={formatDate(selectedCompany.nextBillingDate)} />
+                  <DetailRow label="Users" value={String(selectedCompany.users)} />
+                  <DetailRow label="Drivers" value={String(selectedCompany.drivers)} />
+                  <DetailRow label="Vehicles" value={String(selectedCompany.vehicles)} />
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
                   <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
-                    Actions
+                    Change Plan
+                  </h4>
+
+                  <div className="grid gap-2">
+                    {(Object.keys(PLAN_META) as PlanType[]).map((plan) => (
+                      <button
+                        key={plan}
+                        onClick={() => setPlan(selectedCompany.id, plan)}
+                        className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                          selectedCompany.plan === plan
+                            ? PLAN_META[plan].buttonClass
+                            : 'border border-white/10 bg-transparent text-white hover:bg-white/10'
+                        }`}
+                      >
+                        {PLAN_META[plan].label} · {PLAN_META[plan].priceLabel}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                    Billing Controls
                   </h4>
 
                   <div className="space-y-2">
                     <button
-                      onClick={() => updateInvoiceStatus(selectedCompany.id, 'PAID')}
+                      onClick={() => setBillingStatus(selectedCompany.id, 'ACTIVE')}
+                      className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                    >
+                      Mark Active
+                    </button>
+                    <button
+                      onClick={() => setBillingStatus(selectedCompany.id, 'TRIAL')}
+                      className="w-full rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500"
+                    >
+                      Mark Trial
+                    </button>
+                    <button
+                      onClick={() => setBillingStatus(selectedCompany.id, 'PAST_DUE')}
+                      className="w-full rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
+                    >
+                      Mark Past Due
+                    </button>
+                    <button
+                      onClick={() => setBillingStatus(selectedCompany.id, 'SUSPENDED')}
+                      className="w-full rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+                    >
+                      Suspend Billing
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                    Invoice Controls
+                  </h4>
+
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setInvoiceStatus(selectedCompany.id, 'PAID')}
                       className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
                     >
                       Mark Paid
                     </button>
-
                     <button
-                      onClick={() => updateInvoiceStatus(selectedCompany.id, 'DUE')}
+                      onClick={() => setInvoiceStatus(selectedCompany.id, 'DUE')}
                       className="w-full rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500"
                     >
                       Mark Due
                     </button>
-
                     <button
-                      onClick={() => updateInvoiceStatus(selectedCompany.id, 'OVERDUE')}
+                      onClick={() => setInvoiceStatus(selectedCompany.id, 'OVERDUE')}
                       className="w-full rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
                     >
                       Mark Overdue
                     </button>
-
                     <button
-                      onClick={() => updateInvoiceStatus(selectedCompany.id, 'DRAFT')}
+                      onClick={() => setInvoiceStatus(selectedCompany.id, 'PENDING')}
                       className="w-full rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
                     >
-                      Mark Draft
+                      Mark Pending
                     </button>
                   </div>
                 </div>
+
+                {selectedCompany.notes ? (
+                  <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                    <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                      Notes
+                    </h4>
+                    <p className="text-sm text-white/75">{selectedCompany.notes}</p>
+                  </div>
+                ) : null}
               </div>
             )}
           </section>
