@@ -28,6 +28,30 @@ type Invoice = {
   notes?: string | null;
 };
 
+type Account = {
+  id: string;
+  name: string;
+  code?: string | null;
+  status?: string;
+};
+
+type Booking = {
+  id: string;
+  reference: string;
+  status: string;
+  accountId?: string | null;
+  account?: Account | null;
+  pickupAt?: string | null;
+  pickupTime?: string | null;
+  createdAt?: string | null;
+  quotedPrice?: number | null;
+  customerName?: string | null;
+  pickupAddress?: string | null;
+  dropoffAddress?: string | null;
+  pickup?: string | null;
+  dropoff?: string | null;
+};
+
 type InvoiceFormState = {
   accountName: string;
   issueDate: string;
@@ -35,6 +59,16 @@ type InvoiceFormState = {
   tripCount: string;
   subtotal: string;
   vat: string;
+  notes: string;
+};
+
+type InvoiceBuilderState = {
+  accountId: string;
+  issueDate: string;
+  dueDate: string;
+  bookingFrom: string;
+  bookingTo: string;
+  vatRate: string;
   notes: string;
 };
 
@@ -47,6 +81,16 @@ const initialForm: InvoiceFormState = {
   tripCount: '1',
   subtotal: '0',
   vat: '0',
+  notes: '',
+};
+
+const initialBuilder: InvoiceBuilderState = {
+  accountId: '',
+  issueDate: today,
+  dueDate: today,
+  bookingFrom: today,
+  bookingTo: today,
+  vatRate: '20',
   notes: '',
 };
 
@@ -89,31 +133,71 @@ function toDateInput(value?: string | null) {
   return date.toISOString().slice(0, 10);
 }
 
+function getBookingDate(booking: Booking) {
+  return booking.pickupAt || booking.pickupTime || booking.createdAt || null;
+}
+
+function getBookingRoute(booking: Booking) {
+  const pickup = booking.pickupAddress || booking.pickup || '—';
+  const dropoff = booking.dropoffAddress || booking.dropoff || '—';
+  return `${pickup} → ${dropoff}`;
+}
+
+function isCompletedBooking(status?: string) {
+  return (status || '').toUpperCase() === 'COMPLETED';
+}
+
+function inDateRange(dateValue: string | null, start: string, end: string) {
+  if (!dateValue) return false;
+
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const startDate = new Date(`${start}T00:00:00`);
+  const endDate = new Date(`${end}T23:59:59`);
+
+  return date >= startDate && date <= endDate;
+}
+
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
   const [form, setForm] = useState<InvoiceFormState>(initialForm);
+  const [builder, setBuilder] = useState<InvoiceBuilderState>(initialBuilder);
+  const [selectedBookingIds, setSelectedBookingIds] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
     let mounted = true;
 
-    async function loadInvoices() {
+    async function loadData() {
       try {
         setLoading(true);
         setError('');
 
-        const data = await apiFetch<Invoice[]>('/invoices');
+        const [invoiceData, accountData, bookingData] = await Promise.all([
+          apiFetch<Invoice[]>('/invoices').catch(() => []),
+          apiFetch<Account[]>('/accounts').catch(() => []),
+          apiFetch<Booking[]>('/bookings').catch(() => []),
+        ]);
+
         if (!mounted) return;
 
-        const next = Array.isArray(data) ? data : [];
-        setInvoices(next);
-        setSelectedInvoiceId((current) => current ?? next[0]?.id ?? null);
+        const nextInvoices = Array.isArray(invoiceData) ? invoiceData : [];
+        const nextAccounts = Array.isArray(accountData) ? accountData : [];
+        const nextBookings = Array.isArray(bookingData) ? bookingData : [];
+
+        setInvoices(nextInvoices);
+        setAccounts(nextAccounts.filter((account) => (account.status || 'ACTIVE') !== 'CLOSED'));
+        setBookings(nextBookings);
+        setSelectedInvoiceId((current) => current ?? nextInvoices[0]?.id ?? null);
       } catch (err) {
         console.error(err);
         if (mounted) {
@@ -126,7 +210,7 @@ export default function InvoicesPage() {
       }
     }
 
-    void loadInvoices();
+    void loadData();
 
     return () => {
       mounted = false;
@@ -151,11 +235,6 @@ export default function InvoicesPage() {
     );
   }, [invoices, search]);
 
-  const selectedInvoice = useMemo(
-    () => invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? null,
-    [invoices, selectedInvoiceId],
-  );
-
   const stats = useMemo(() => {
     const total = invoices.reduce((sum, invoice) => sum + invoice.total, 0);
     const paid = invoices.reduce((sum, invoice) => sum + invoice.paidAmount, 0);
@@ -176,6 +255,50 @@ export default function InvoicesPage() {
     };
   }, [invoices]);
 
+  const builderBookings = useMemo(() => {
+    if (!builder.accountId) return [];
+
+    return bookings.filter((booking) => {
+      if (!isCompletedBooking(booking.status)) return false;
+      if ((booking.accountId || booking.account?.id || '') !== builder.accountId) {
+        return false;
+      }
+
+      return inDateRange(
+        getBookingDate(booking),
+        builder.bookingFrom,
+        builder.bookingTo,
+      );
+    });
+  }, [bookings, builder.accountId, builder.bookingFrom, builder.bookingTo]);
+
+  const selectedAccount = useMemo(
+    () => accounts.find((account) => account.id === builder.accountId) ?? null,
+    [accounts, builder.accountId],
+  );
+
+  const selectedBuilderBookings = useMemo(
+    () => builderBookings.filter((booking) => selectedBookingIds.includes(booking.id)),
+    [builderBookings, selectedBookingIds],
+  );
+
+  const builderTotals = useMemo(() => {
+    const subtotal = selectedBuilderBookings.reduce(
+      (sum, booking) => sum + Number(booking.quotedPrice ?? 0),
+      0,
+    );
+    const vatRate = Number(builder.vatRate || 0);
+    const vat = subtotal * (vatRate / 100);
+    const total = subtotal + vat;
+
+    return {
+      tripCount: selectedBuilderBookings.length,
+      subtotal,
+      vat,
+      total,
+    };
+  }, [selectedBuilderBookings, builder.vatRate]);
+
   function setField<K extends keyof InvoiceFormState>(
     key: K,
     value: InvoiceFormState[K],
@@ -186,14 +309,61 @@ export default function InvoicesPage() {
     }));
   }
 
+  function setBuilderField<K extends keyof InvoiceBuilderState>(
+    key: K,
+    value: InvoiceBuilderState[K],
+  ) {
+    setBuilder((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  }
+
   function resetForm() {
     setForm(initialForm);
     setEditingInvoiceId(null);
   }
 
+  function resetBuilder() {
+    setBuilder(initialBuilder);
+    setSelectedBookingIds([]);
+  }
+
   function setNotice(message: string) {
     setSuccess(message);
     setTimeout(() => setSuccess(''), 2500);
+  }
+
+  function toggleBookingSelection(bookingId: string) {
+    setSelectedBookingIds((prev) =>
+      prev.includes(bookingId)
+        ? prev.filter((id) => id !== bookingId)
+        : [...prev, bookingId],
+    );
+  }
+
+  function selectAllBuilderBookings() {
+    setSelectedBookingIds(builderBookings.map((booking) => booking.id));
+  }
+
+  function clearBuilderBookings() {
+    setSelectedBookingIds([]);
+  }
+
+  function copyBuilderToManualForm() {
+    if (!selectedAccount) return;
+
+    setForm({
+      accountName: selectedAccount.name,
+      issueDate: builder.issueDate,
+      dueDate: builder.dueDate,
+      tripCount: String(builderTotals.tripCount),
+      subtotal: builderTotals.subtotal.toFixed(2),
+      vat: builderTotals.vat.toFixed(2),
+      notes: builder.notes,
+    });
+
+    setNotice('Invoice builder copied into form');
   }
 
   async function submitInvoice(e: React.FormEvent<HTMLFormElement>) {
@@ -355,147 +525,371 @@ export default function InvoicesPage() {
           </div>
         )}
 
-        <div className="grid gap-6 xl:grid-cols-[430px_1fr]">
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-            <div className="mb-5 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-bold">
-                  {editingInvoiceId ? 'Edit Invoice' : 'Create Invoice'}
-                </h2>
+        <div className="grid gap-6 xl:grid-cols-[460px_1fr]">
+          <section className="space-y-6">
+            <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+              <div className="mb-5">
+                <h2 className="text-2xl font-bold">Invoice Builder</h2>
                 <p className="mt-1 text-sm text-white/60">
-                  Build monthly account invoices and billing runs.
+                  Build an invoice from completed account-linked bookings.
                 </p>
               </div>
 
-              {editingInvoiceId ? (
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white/80 transition hover:bg-white/10"
-                >
-                  Cancel edit
-                </button>
-              ) : null}
-            </div>
+              <div className="space-y-5">
+                <Field
+                  label="Account"
+                  input={
+                    <select
+                      value={builder.accountId}
+                      onChange={(e) => {
+                        setBuilderField('accountId', e.target.value);
+                        setSelectedBookingIds([]);
+                      }}
+                      className={inputClassName}
+                    >
+                      <option value="">Select account</option>
+                      {accounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.code
+                            ? `${account.name} (${account.code})`
+                            : account.name}
+                        </option>
+                      ))}
+                    </select>
+                  }
+                />
 
-            <form onSubmit={submitInvoice} className="space-y-5">
-              <Field
-                label="Account Name *"
-                input={
-                  <input
-                    value={form.accountName}
-                    onChange={(e) => setField('accountName', e.target.value)}
-                    placeholder="Northside Medical Centre"
-                    required
-                    className={inputClassName}
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field
+                    label="Booking From"
+                    input={
+                      <input
+                        type="date"
+                        value={builder.bookingFrom}
+                        onChange={(e) => {
+                          setBuilderField('bookingFrom', e.target.value);
+                          setSelectedBookingIds([]);
+                        }}
+                        className={inputClassName}
+                      />
+                    }
                   />
-                }
-              />
 
-              <div className="grid gap-4 md:grid-cols-2">
+                  <Field
+                    label="Booking To"
+                    input={
+                      <input
+                        type="date"
+                        value={builder.bookingTo}
+                        onChange={(e) => {
+                          setBuilderField('bookingTo', e.target.value);
+                          setSelectedBookingIds([]);
+                        }}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Field
+                    label="Issue Date"
+                    input={
+                      <input
+                        type="date"
+                        value={builder.issueDate}
+                        onChange={(e) => setBuilderField('issueDate', e.target.value)}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+
+                  <Field
+                    label="Due Date"
+                    input={
+                      <input
+                        type="date"
+                        value={builder.dueDate}
+                        onChange={(e) => setBuilderField('dueDate', e.target.value)}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+
+                  <Field
+                    label="VAT Rate %"
+                    input={
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={builder.vatRate}
+                        onChange={(e) => setBuilderField('vatRate', e.target.value)}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+                </div>
+
                 <Field
-                  label="Issue Date"
+                  label="Builder Notes"
                   input={
-                    <input
-                      type="date"
-                      value={form.issueDate}
-                      onChange={(e) => setField('issueDate', e.target.value)}
-                      className={inputClassName}
+                    <textarea
+                      rows={3}
+                      value={builder.notes}
+                      onChange={(e) => setBuilderField('notes', e.target.value)}
+                      placeholder="Trip period, PO number, billing notes..."
+                      className={`${inputClassName} resize-none`}
                     />
                   }
                 />
 
-                <Field
-                  label="Due Date"
-                  input={
-                    <input
-                      type="date"
-                      value={form.dueDate}
-                      onChange={(e) => setField('dueDate', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-              </div>
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllBuilderBookings}
+                      className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white transition hover:bg-white/10"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearBuilderBookings}
+                      className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white transition hover:bg-white/10"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={copyBuilderToManualForm}
+                      disabled={!selectedAccount || selectedBuilderBookings.length === 0}
+                      className="rounded-xl bg-cyan-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Copy to invoice form
+                    </button>
+                    <button
+                      type="button"
+                      onClick={resetBuilder}
+                      className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white transition hover:bg-white/10"
+                    >
+                      Reset builder
+                    </button>
+                  </div>
 
-              <div className="grid gap-4 md:grid-cols-3">
-                <Field
-                  label="Trip Count"
-                  input={
-                    <input
-                      type="number"
-                      min="0"
-                      value={form.tripCount}
-                      onChange={(e) => setField('tripCount', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <QuickValue label="Trips" value={String(builderTotals.tripCount)} />
+                    <QuickValue label="Subtotal" value={formatCurrency(builderTotals.subtotal)} />
+                    <QuickValue label="VAT" value={formatCurrency(builderTotals.vat)} />
+                    <QuickValue label="Total" value={formatCurrency(builderTotals.total)} />
+                  </div>
+                </div>
 
-                <Field
-                  label="Subtotal"
-                  input={
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.subtotal}
-                      onChange={(e) => setField('subtotal', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-white/70">
+                      Eligible Bookings
+                    </h3>
+                    <span className="text-xs text-white/50">
+                      {selectedBuilderBookings.length} selected / {builderBookings.length} available
+                    </span>
+                  </div>
 
-                <Field
-                  label="VAT"
-                  input={
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.vat}
-                      onChange={(e) => setField('vat', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-              </div>
+                  {builder.accountId === '' ? (
+                    <div className="text-sm text-white/60">Select an account to load completed trips.</div>
+                  ) : builderBookings.length === 0 ? (
+                    <div className="text-sm text-white/60">No completed account bookings found in this date range.</div>
+                  ) : (
+                    <div className="max-h-[320px] space-y-3 overflow-y-auto pr-1">
+                      {builderBookings.map((booking) => {
+                        const checked = selectedBookingIds.includes(booking.id);
 
-              <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
-                <div className="grid gap-3 md:grid-cols-3">
-                  <QuickValue label="Subtotal" value={formatCurrency(liveSubtotal)} />
-                  <QuickValue label="VAT" value={formatCurrency(liveVat)} />
-                  <QuickValue label="Total" value={formatCurrency(liveTotal)} />
+                        return (
+                          <label
+                            key={booking.id}
+                            className={`block cursor-pointer rounded-2xl border p-4 transition ${
+                              checked
+                                ? 'border-cyan-500/40 bg-cyan-500/10'
+                                : 'border-white/10 bg-black/20 hover:bg-white/5'
+                            }`}
+                          >
+                            <div className="flex gap-3">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleBookingSelection(booking.id)}
+                                className="mt-1 h-4 w-4 rounded border-white/20 bg-transparent"
+                              />
+
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <div className="text-sm font-semibold text-white">
+                                    {booking.reference}
+                                  </div>
+                                  <div className="text-sm font-semibold text-cyan-300">
+                                    {formatCurrency(Number(booking.quotedPrice ?? 0))}
+                                  </div>
+                                </div>
+
+                                <div className="mt-1 text-xs text-white/50">
+                                  {toDateInput(getBookingDate(booking))} · {booking.customerName || 'No customer'}
+                                </div>
+
+                                <div className="mt-2 text-sm text-white/70">
+                                  {getBookingRoute(booking)}
+                                </div>
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
+            </section>
 
-              <Field
-                label="Notes"
-                input={
-                  <textarea
-                    rows={4}
-                    value={form.notes}
-                    onChange={(e) => setField('notes', e.target.value)}
-                    placeholder="Invoice notes, trip period, PO number..."
-                    className={`${inputClassName} resize-none`}
+            <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl font-bold">
+                    {editingInvoiceId ? 'Edit Invoice' : 'Create Invoice'}
+                  </h2>
+                  <p className="mt-1 text-sm text-white/60">
+                    Save an invoice record from manual values or the builder.
+                  </p>
+                </div>
+
+                {editingInvoiceId ? (
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white/80 transition hover:bg-white/10"
+                  >
+                    Cancel edit
+                  </button>
+                ) : null}
+              </div>
+
+              <form onSubmit={submitInvoice} className="space-y-5">
+                <Field
+                  label="Account Name *"
+                  input={
+                    <input
+                      value={form.accountName}
+                      onChange={(e) => setField('accountName', e.target.value)}
+                      placeholder="Northside Medical Centre"
+                      required
+                      className={inputClassName}
+                    />
+                  }
+                />
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field
+                    label="Issue Date"
+                    input={
+                      <input
+                        type="date"
+                        value={form.issueDate}
+                        onChange={(e) => setField('issueDate', e.target.value)}
+                        className={inputClassName}
+                      />
+                    }
                   />
-                }
-              />
 
-              <button
-                type="submit"
-                disabled={saving}
-                className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {saving
-                  ? editingInvoiceId
-                    ? 'Saving Invoice...'
-                    : 'Creating Invoice...'
-                  : editingInvoiceId
-                    ? 'Save Invoice Changes'
-                    : 'Create Invoice'}
-              </button>
-            </form>
+                  <Field
+                    label="Due Date"
+                    input={
+                      <input
+                        type="date"
+                        value={form.dueDate}
+                        onChange={(e) => setField('dueDate', e.target.value)}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Field
+                    label="Trip Count"
+                    input={
+                      <input
+                        type="number"
+                        min="0"
+                        value={form.tripCount}
+                        onChange={(e) => setField('tripCount', e.target.value)}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+
+                  <Field
+                    label="Subtotal"
+                    input={
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.subtotal}
+                        onChange={(e) => setField('subtotal', e.target.value)}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+
+                  <Field
+                    label="VAT"
+                    input={
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.vat}
+                        onChange={(e) => setField('vat', e.target.value)}
+                        className={inputClassName}
+                      />
+                    }
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <QuickValue label="Subtotal" value={formatCurrency(liveSubtotal)} />
+                    <QuickValue label="VAT" value={formatCurrency(liveVat)} />
+                    <QuickValue label="Total" value={formatCurrency(liveTotal)} />
+                  </div>
+                </div>
+
+                <Field
+                  label="Notes"
+                  input={
+                    <textarea
+                      rows={4}
+                      value={form.notes}
+                      onChange={(e) => setField('notes', e.target.value)}
+                      placeholder="Invoice notes, trip period, PO number..."
+                      className={`${inputClassName} resize-none`}
+                    />
+                  }
+                />
+
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="w-full rounded-2xl bg-cyan-600 px-4 py-3 font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {saving
+                    ? editingInvoiceId
+                      ? 'Saving Invoice...'
+                      : 'Creating Invoice...'
+                    : editingInvoiceId
+                      ? 'Save Invoice Changes'
+                      : 'Create Invoice'}
+                </button>
+              </form>
+            </section>
           </section>
 
           <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
