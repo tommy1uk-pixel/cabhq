@@ -1,264 +1,463 @@
+'use client';
+
 import Link from 'next/link';
-import { fetchCompanies } from '@/lib/super-admin/api';
-import OverviewMetricCard from '@/components/super-admin/OverviewMetricCard';
-import OverviewPanel from '@/components/super-admin/OverviewPanel';
-import CompanyStatusBadge from '@/components/super-admin/CompanyStatusBadge';
-import type { Company } from '@/lib/super-admin/types';
+import { useMemo, useState } from 'react';
 
-function getCompanyDisplayName(company: Company): string {
-  const displayName =
-    'displayName' in company && typeof company.displayName === 'string'
-      ? company.displayName
-      : null;
+type CompanyStatus = 'ACTIVE' | 'TRIAL' | 'SUSPENDED';
+type BillingStatus = 'PAID' | 'OVERDUE' | 'TRIAL' | 'MANUAL';
 
-  return displayName?.trim() || company.name;
+type CompanyRow = {
+  id: string;
+  name: string;
+  slug: string;
+  status: CompanyStatus;
+  billingStatus: BillingStatus;
+  users: number;
+  drivers: number;
+  vehicles: number;
+  bookingsToday: number;
+  monthlyRevenue: number;
+  createdAt: string;
+};
+
+const initialCompanies: CompanyRow[] = [
+  {
+    id: '1',
+    name: 'Alpha Cars',
+    slug: 'alpha-cars',
+    status: 'ACTIVE',
+    billingStatus: 'PAID',
+    users: 8,
+    drivers: 34,
+    vehicles: 28,
+    bookingsToday: 142,
+    monthlyRevenue: 18420,
+    createdAt: '2025-11-02T09:20:00',
+  },
+  {
+    id: '2',
+    name: 'CityLine Transport',
+    slug: 'cityline-transport',
+    status: 'TRIAL',
+    billingStatus: 'TRIAL',
+    users: 3,
+    drivers: 11,
+    vehicles: 9,
+    bookingsToday: 37,
+    monthlyRevenue: 4120,
+    createdAt: '2026-03-18T14:40:00',
+  },
+  {
+    id: '3',
+    name: 'Metro Executive',
+    slug: 'metro-executive',
+    status: 'ACTIVE',
+    billingStatus: 'PAID',
+    users: 14,
+    drivers: 61,
+    vehicles: 44,
+    bookingsToday: 206,
+    monthlyRevenue: 33780,
+    createdAt: '2025-07-21T11:00:00',
+  },
+  {
+    id: '4',
+    name: 'Rapid Cab Group',
+    slug: 'rapid-cab-group',
+    status: 'SUSPENDED',
+    billingStatus: 'OVERDUE',
+    users: 5,
+    drivers: 19,
+    vehicles: 17,
+    bookingsToday: 0,
+    monthlyRevenue: 0,
+    createdAt: '2025-12-05T16:10:00',
+  },
+];
+
+function formatCurrency(value: number) {
+  return `£${value.toLocaleString('en-GB', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
-function getCompanyLegalName(company: Company): string {
-  const legalName =
-    'legalName' in company && typeof company.legalName === 'string'
-      ? company.legalName
-      : null;
-
-  return legalName?.trim() || company.name;
+function formatDate(value: string) {
+  const d = new Date(value);
+  return d.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 }
 
-export default async function SuperAdminHomePage() {
-  const companies = await fetchCompanies();
+function companyStatusClass(status: CompanyStatus) {
+  if (status === 'ACTIVE') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  }
+  if (status === 'TRIAL') {
+    return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
+  }
+  return 'border-red-500/30 bg-red-500/10 text-red-300';
+}
 
-  const totalCompanies = companies.length;
-  const activeCompanies = companies.filter(
-    (company) => (company.status || 'UNKNOWN') === 'ACTIVE',
-  ).length;
-  const pendingCompanies = companies.filter(
-    (company) => (company.status || 'UNKNOWN') === 'PENDING',
-  ).length;
-  const suspendedCompanies = companies.filter(
-    (company) => (company.status || 'UNKNOWN') === 'SUSPENDED',
-  ).length;
+function billingStatusClass(status: BillingStatus) {
+  if (status === 'PAID') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  }
+  if (status === 'TRIAL' || status === 'MANUAL') {
+    return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+  }
+  return 'border-red-500/30 bg-red-500/10 text-red-300';
+}
 
-  const totalDriverCapacity = companies.reduce(
-    (sum, company) => sum + (company.driverLimit ?? 0),
-    0,
+export default function SuperAdminOverviewPage() {
+  const [companies, setCompanies] = useState<CompanyRow[]>(initialCompanies);
+  const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialCompanies[0]?.id ?? null,
   );
 
-  const totalVehicleCapacity = companies.reduce(
-    (sum, company) => sum + (company.vehicleLimit ?? 0),
-    0,
+  const filteredCompanies = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return companies;
+
+    return companies.filter((company) =>
+      [
+        company.name,
+        company.slug,
+        company.status,
+        company.billingStatus,
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [companies, search]);
+
+  const selectedCompany = useMemo(
+    () => companies.find((company) => company.id === selectedId) ?? null,
+    [companies, selectedId],
   );
 
-  const newestCompanies = [...companies].slice(0, 5);
+  const stats = useMemo(() => {
+    return {
+      companies: companies.length,
+      active: companies.filter((company) => company.status === 'ACTIVE').length,
+      trial: companies.filter((company) => company.status === 'TRIAL').length,
+      suspended: companies.filter((company) => company.status === 'SUSPENDED').length,
+      revenue: companies.reduce((sum, company) => sum + company.monthlyRevenue, 0),
+      drivers: companies.reduce((sum, company) => sum + company.drivers, 0),
+    };
+  }, [companies]);
 
-  const statusBreakdown: [string, number][] = [
-    ['ACTIVE', activeCompanies],
-    ['PENDING', pendingCompanies],
-    ['SUSPENDED', suspendedCompanies],
-    [
-      'UNKNOWN',
-      companies.filter((c) => !c.status || c.status === 'UNKNOWN').length,
-    ],
-  ];
+  function updateCompanyStatus(id: string, status: CompanyStatus) {
+    setCompanies((prev) =>
+      prev.map((company) =>
+        company.id === id ? { ...company, status } : company,
+      ),
+    );
+  }
+
+  function updateBillingStatus(id: string, billingStatus: BillingStatus) {
+    setCompanies((prev) =>
+      prev.map((company) =>
+        company.id === id ? { ...company, billingStatus } : company,
+      ),
+    );
+  }
 
   return (
-    <div className="space-y-8">
-      <section className="rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-950 to-slate-900 p-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-          <div className="space-y-3">
-            <div className="inline-flex rounded-full border border-slate-700 px-3 py-1 text-xs font-medium text-slate-300">
-              Platform Control Centre
+    <main className="min-h-screen bg-[#05070c] px-4 py-6 text-white md:px-6">
+      <div className="mx-auto max-w-[1850px]">
+        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">
+              Platform Control
             </div>
-
-            <div>
-              <h1 className="text-4xl font-semibold tracking-tight text-white">
-                Super Admin Overview
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm text-slate-400">
-                Monitor companies, capacity, onboarding readiness, and the overall
-                health of the CabHQ platform from one place.
-              </p>
-            </div>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">
+              Super Admin Overview
+            </h1>
+            <p className="mt-2 text-sm text-white/55">
+              Company activity, billing state, usage totals and tenant controls.
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-3">
             <Link
               href="/super-admin/companies"
-              className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
             >
-              View companies
+              Open Companies
             </Link>
             <Link
               href="/super-admin/companies/new"
-              className="rounded-xl bg-white px-4 py-2 text-sm font-medium text-slate-950"
+              className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
             >
-              Add company
+              Add Company
             </Link>
           </div>
         </div>
-      </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <OverviewMetricCard
-          label="Total Companies"
-          value={String(totalCompanies)}
-          hint="All tenant organisations"
-        />
-        <OverviewMetricCard
-          label="Active"
-          value={String(activeCompanies)}
-          hint="Live operational companies"
-        />
-        <OverviewMetricCard
-          label="Pending"
-          value={String(pendingCompanies)}
-          hint="Setup not complete"
-        />
-        <OverviewMetricCard
-          label="Suspended"
-          value={String(suspendedCompanies)}
-          hint="Access restricted"
-        />
-        <OverviewMetricCard
-          label="Driver Capacity"
-          value={String(totalDriverCapacity)}
-          hint="Total allowed drivers"
-        />
-        <OverviewMetricCard
-          label="Vehicle Capacity"
-          value={String(totalVehicleCapacity)}
-          hint="Total allowed vehicles"
-        />
-      </section>
+        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <StatCard label="Companies" value={stats.companies} />
+          <StatCard label="Active" value={stats.active} />
+          <StatCard label="Trial" value={stats.trial} />
+          <StatCard label="Suspended" value={stats.suspended} />
+          <StatCard label="Drivers" value={stats.drivers} />
+          <StatCard label="Revenue" value={formatCurrency(stats.revenue)} />
+        </section>
 
-      <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <OverviewPanel title="Newest Companies">
-          <div className="space-y-3">
-            {newestCompanies.length === 0 ? (
-              <div className="text-sm text-slate-400">No companies found.</div>
+        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+            <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-2xl font-bold">Companies</h2>
+                <p className="mt-1 text-sm text-white/60">
+                  Review tenant usage, live status and billing posture.
+                </p>
+              </div>
+
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search companies..."
+                className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50 lg:w-[300px]"
+              />
+            </div>
+
+            {filteredCompanies.length === 0 ? (
+              <div className="rounded-2xl bg-[#0b1728] p-6 text-white/60">
+                No companies found.
+              </div>
             ) : (
-              newestCompanies.map((company) => (
-                <div
-                  key={company.id}
-                  className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3"
-                >
-                  <div>
-                    <div className="font-medium text-white">
-                      {getCompanyDisplayName(company)}
-                    </div>
-                    <div className="mt-1 text-xs text-slate-400">
-                      {getCompanyLegalName(company)}
-                    </div>
-                  </div>
+              <div className="space-y-4">
+                {filteredCompanies.map((company) => {
+                  const isSelected = selectedId === company.id;
 
-                  <div className="flex items-center gap-3">
-                    <CompanyStatusBadge status={company.status || 'UNKNOWN'} />
-                    <Link
-                      href={`/super-admin/companies/${company.id}`}
-                      className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-white hover:bg-slate-800"
+                  return (
+                    <div
+                      key={company.id}
+                      onClick={() => setSelectedId(company.id)}
+                      className={`cursor-pointer rounded-2xl border p-5 transition ${
+                        isSelected
+                          ? 'border-cyan-500/50 bg-[#0c1b2c]'
+                          : 'border-white/10 bg-[#0b1728]'
+                      }`}
                     >
-                      Open
-                    </Link>
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-xl font-bold">{company.name}</h3>
+
+                            <span
+                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${companyStatusClass(
+                                company.status,
+                              )}`}
+                            >
+                              {company.status}
+                            </span>
+
+                            <span
+                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${billingStatusClass(
+                                company.billingStatus,
+                              )}`}
+                            >
+                              {company.billingStatus}
+                            </span>
+                          </div>
+
+                          <p className="mt-2 text-sm text-white/60">
+                            {company.slug}
+                          </p>
+
+                          <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/45">
+                            <span>Users: {company.users}</span>
+                            <span>Drivers: {company.drivers}</span>
+                            <span>Vehicles: {company.vehicles}</span>
+                            <span>Bookings Today: {company.bookingsToday}</span>
+                            <span>Revenue: {formatCurrency(company.monthlyRevenue)}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <Link
+                            href={`/super-admin/companies/${company.id}/edit`}
+                            className="rounded-xl bg-cyan-600 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-500"
+                          >
+                            Edit
+                          </Link>
+                          <Link
+                            href={`/super-admin/companies/${company.id}`}
+                            className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10"
+                          >
+                            Open
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+            <h2 className="text-2xl font-bold">Company Focus</h2>
+            <p className="mt-1 text-sm text-white/60">
+              Selected tenant summary and quick admin actions.
+            </p>
+
+            {!selectedCompany ? (
+              <div className="mt-5 rounded-2xl bg-[#0b1728] p-6 text-white/60">
+                No company selected.
+              </div>
+            ) : (
+              <div className="mt-5 space-y-4">
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-xl font-bold text-white">
+                      {selectedCompany.name}
+                    </h3>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${companyStatusClass(
+                        selectedCompany.status,
+                      )}`}
+                    >
+                      {selectedCompany.status}
+                    </span>
+                  </div>
+
+                  <p className="mt-2 text-sm text-white/60">{selectedCompany.slug}</p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                    Usage
+                  </h4>
+                  <DetailRow label="Users" value={String(selectedCompany.users)} />
+                  <DetailRow label="Drivers" value={String(selectedCompany.drivers)} />
+                  <DetailRow label="Vehicles" value={String(selectedCompany.vehicles)} />
+                  <DetailRow
+                    label="Bookings Today"
+                    value={String(selectedCompany.bookingsToday)}
+                  />
+                  <DetailRow
+                    label="Monthly Revenue"
+                    value={formatCurrency(selectedCompany.monthlyRevenue)}
+                  />
+                  <DetailRow
+                    label="Created"
+                    value={formatDate(selectedCompany.createdAt)}
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                    Quick Actions
+                  </h4>
+
+                  <div className="space-y-2">
+                    <button
+                      onClick={() =>
+                        updateCompanyStatus(selectedCompany.id, 'ACTIVE')
+                      }
+                      className="w-full rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                    >
+                      Mark Active
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        updateCompanyStatus(selectedCompany.id, 'TRIAL')
+                      }
+                      className="w-full rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500"
+                    >
+                      Mark Trial
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        updateCompanyStatus(selectedCompany.id, 'SUSPENDED')
+                      }
+                      className="w-full rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
+                    >
+                      Suspend Company
+                    </button>
                   </div>
                 </div>
-              ))
-            )}
-          </div>
-        </OverviewPanel>
 
-        <OverviewPanel title="Platform Snapshot">
-          <div className="space-y-4">
-            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Current Position
-              </div>
-              <div className="mt-2 text-sm text-slate-300">
-                CabHQ is now running with a centralised Super Admin layer, tenant
-                list view, company detail workspace, and edit-company foundation.
-              </div>
-            </div>
+                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
+                  <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+                    Billing
+                  </h4>
 
-            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Next Recommended Builds
-              </div>
-              <div className="mt-3 space-y-2 text-sm text-slate-300">
-                <div>• edit company save flow completion</div>
-                <div>• suspend / reactivate company actions</div>
-                <div>• create company admin user flow</div>
-                <div>• platform audit trail</div>
-                <div>• company onboarding tracker</div>
-              </div>
-            </div>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() =>
+                        updateBillingStatus(selectedCompany.id, 'PAID')
+                      }
+                      className="w-full rounded-xl border border-white/10 px-4 py-2 text-sm text-white hover:bg-white/10"
+                    >
+                      Mark Paid
+                    </button>
 
-            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Attention Areas
-              </div>
-              <div className="mt-3 space-y-2 text-sm text-slate-300">
-                <div>• legacy companies need status backfill</div>
-                <div>• driver and vehicle limits need real data</div>
-                <div>• metadata fields need cleaning for old records</div>
-              </div>
-            </div>
-          </div>
-        </OverviewPanel>
-      </section>
+                    <button
+                      onClick={() =>
+                        updateBillingStatus(selectedCompany.id, 'TRIAL')
+                      }
+                      className="w-full rounded-xl border border-white/10 px-4 py-2 text-sm text-white hover:bg-white/10"
+                    >
+                      Mark Trial
+                    </button>
 
-      <section className="grid gap-6 xl:grid-cols-2">
-        <OverviewPanel title="Company Status Breakdown">
-          <div className="space-y-3">
-            {statusBreakdown.map(([label, value]) => (
-              <div
-                key={label}
-                className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-900/40 px-4 py-3"
-              >
-                <div className="flex items-center gap-3">
-                  <CompanyStatusBadge status={label} />
+                    <button
+                      onClick={() =>
+                        updateBillingStatus(selectedCompany.id, 'OVERDUE')
+                      }
+                      className="w-full rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-200 hover:bg-red-500/20"
+                    >
+                      Mark Overdue
+                    </button>
+                  </div>
                 </div>
-                <div className="text-lg font-semibold text-white">{value}</div>
               </div>
-            ))}
-          </div>
-        </OverviewPanel>
+            )}
+          </section>
+        </div>
+      </div>
+    </main>
+  );
+}
 
-        <OverviewPanel title="Capacity Summary">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Driver Capacity
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-white">
-                {totalDriverCapacity}
-              </div>
-              <div className="mt-1 text-xs text-slate-400">
-                Combined platform allowance
-              </div>
-            </div>
+function StatCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+      <p className="text-sm text-white/60">{label}</p>
+      <p className="mt-3 text-3xl font-bold text-white">{value}</p>
+    </div>
+  );
+}
 
-            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Vehicle Capacity
-              </div>
-              <div className="mt-2 text-2xl font-semibold text-white">
-                {totalVehicleCapacity}
-              </div>
-              <div className="mt-1 text-xs text-slate-400">
-                Combined platform allowance
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 md:col-span-2">
-              <div className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                Operational Note
-              </div>
-              <div className="mt-2 text-sm text-slate-300">
-                Once driver, vehicle, bookings, and dispatch metrics are wired into
-                platform analytics, this panel can become a live operational
-                dashboard instead of a structural summary.
-              </div>
-            </div>
-          </div>
-        </OverviewPanel>
-      </section>
+function DetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-white/5 py-2 last:border-b-0">
+      <span className="text-sm text-white/50">{label}</span>
+      <span className="max-w-[60%] text-right text-sm text-white/85">
+        {value}
+      </span>
     </div>
   );
 }
