@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 type JwtPayload = {
   sub: string;
-  companyId: string;
+  companyId?: string;
   email?: string;
   role?: string;
   type?: 'USER' | 'DRIVER';
@@ -22,7 +22,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload) {
-    if (!payload?.sub || !payload?.companyId) {
+    if (!payload?.sub) {
       throw new UnauthorizedException('Invalid token payload');
     }
 
@@ -30,11 +30,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Invalid token type');
     }
 
-    const user = await this.prisma.user.findFirst({
-      where: {
-        id: payload.sub,
-        companyId: payload.companyId,
-      },
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
       include: {
         company: true,
       },
@@ -42,6 +39,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     if (!user) {
       throw new UnauthorizedException('User not found');
+    }
+
+    if (user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('User suspended');
     }
 
     return {

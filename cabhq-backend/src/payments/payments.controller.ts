@@ -20,7 +20,7 @@ type AuthenticatedRequest = Request & {
     id?: string;
     email?: string;
     role?: string;
-    companyId: string;
+    companyId?: string | null;
   };
 };
 
@@ -31,7 +31,7 @@ export class PaymentsController {
 
   @Get()
   async list(@Req() req: AuthenticatedRequest) {
-    return this.paymentsService.list(req.user.companyId);
+    return this.paymentsService.list(req.user.companyId ?? '');
   }
 
   @Post()
@@ -39,7 +39,7 @@ export class PaymentsController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: CreatePaymentDto,
   ) {
-    return this.paymentsService.create(req.user.companyId, dto);
+    return this.paymentsService.create(req.user.companyId ?? '', dto);
   }
 
   @Patch(':id')
@@ -48,7 +48,7 @@ export class PaymentsController {
     @Param('id') id: string,
     @Body() dto: UpdatePaymentDto,
   ) {
-    return this.paymentsService.update(req.user.companyId, id, dto);
+    return this.paymentsService.update(req.user.companyId ?? '', id, dto);
   }
 
   @Patch(':id/status')
@@ -58,7 +58,7 @@ export class PaymentsController {
     @Body() body: { status: string },
   ) {
     return this.paymentsService.updateStatus(
-      req.user.companyId,
+      req.user.companyId ?? '',
       id,
       body.status,
     );
@@ -66,6 +66,6 @@ export class PaymentsController {
 
   @Delete(':id')
   async remove(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
-    return this.paymentsService.remove(req.user.companyId, id);
+    return this.paymentsService.remove(req.user.companyId ?? '', id);
   }
 }

@@ -20,7 +20,7 @@ type AuthenticatedRequest = Request & {
     id?: string;
     email?: string;
     role?: string;
-    companyId: string;
+    companyId?: string | null;
   };
 };
 
@@ -31,7 +31,7 @@ export class InvoicesController {
 
   @Get()
   async list(@Req() req: AuthenticatedRequest) {
-    return this.invoicesService.list(req.user.companyId);
+    return this.invoicesService.list(req.user.companyId ?? '');
   }
 
   @Post()
@@ -39,7 +39,7 @@ export class InvoicesController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: CreateInvoiceDto,
   ) {
-    return this.invoicesService.create(req.user.companyId, dto);
+    return this.invoicesService.create(req.user.companyId ?? '', dto);
   }
 
   @Patch(':id')
@@ -48,7 +48,7 @@ export class InvoicesController {
     @Param('id') id: string,
     @Body() dto: UpdateInvoiceDto,
   ) {
-    return this.invoicesService.update(req.user.companyId, id, dto);
+    return this.invoicesService.update(req.user.companyId ?? '', id, dto);
   }
 
   @Patch(':id/status')
@@ -58,7 +58,7 @@ export class InvoicesController {
     @Body() body: { status: string },
   ) {
     return this.invoicesService.updateStatus(
-      req.user.companyId,
+      req.user.companyId ?? '',
       id,
       body.status,
     );
@@ -66,6 +66,6 @@ export class InvoicesController {
 
   @Delete(':id')
   async remove(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
-    return this.invoicesService.remove(req.user.companyId, id);
+    return this.invoicesService.remove(req.user.companyId ?? '', id);
   }
 }
