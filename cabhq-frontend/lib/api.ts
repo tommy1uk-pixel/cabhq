@@ -16,7 +16,7 @@ function getStoredToken(useDriverToken?: boolean): string | null {
 
   return useDriverToken
     ? localStorage.getItem('driverToken')
-    : localStorage.getItem('token');
+    : localStorage.getItem('cabhq_token');
 }
 
 function clearStoredAuth(useDriverToken?: boolean): void {
@@ -26,8 +26,8 @@ function clearStoredAuth(useDriverToken?: boolean): void {
     localStorage.removeItem('driverToken');
     localStorage.removeItem('driver');
   } else {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    localStorage.removeItem('cabhq_token');
+    localStorage.removeItem('cabhq_user');
   }
 }
 
@@ -57,6 +57,7 @@ export async function apiFetch<T = unknown>(
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers,
+    cache: 'no-store',
   });
 
   const contentType = response.headers.get('content-type') || '';
