@@ -6,13 +6,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { DivIcon, LatLngTuple, Map as LeafletMap } from 'leaflet';
 import { closeSocket, getSocket } from '@/lib/socket';
+import { apiFetch } from '@/lib/api';
 import AddressAutofillInput, {
   type SelectedAddress,
 } from '@/components/AddressAutofillInput';
-
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') ||
-  'http://localhost:3002';
 
 const MapContainer = dynamic(
   () => import('react-leaflet').then((mod) => mod.MapContainer),
@@ -66,6 +63,13 @@ type DriverSuggestion = {
   vehicle?: Vehicle;
 };
 
+type Account = {
+  id: string;
+  name: string;
+  code?: string | null;
+  status?: string;
+};
+
 type Booking = {
   id: string;
   reference: string;
@@ -83,6 +87,8 @@ type Booking = {
   notes?: string | null;
   driverId?: string | null;
   driver?: Driver | null;
+  accountId?: string | null;
+  account?: Account | null;
   pickupLatitude?: number | null;
   pickupLongitude?: number | null;
   dropoffLatitude?: number | null;
@@ -102,6 +108,7 @@ type TimelineEvent = {
 type BookingFormState = {
   customerName: string;
   customerPhone: string;
+  accountId: string;
   pickupAddress: string;
   dropoffAddress: string;
   whenType: 'ASAP' | 'SCHEDULED';
@@ -118,6 +125,7 @@ type BookingFormState = {
 const initialForm: BookingFormState = {
   customerName: '',
   customerPhone: '',
+  accountId: '',
   pickupAddress: '',
   dropoffAddress: '',
   whenType: 'ASAP',
@@ -146,6 +154,11 @@ function getDropoffLabel(booking: Booking) {
 
 function getPickupTimeLabel(booking: Booking) {
   return booking.pickupAt || booking.pickupTime || '';
+}
+
+function getAccountLabel(booking: Booking) {
+  if (booking.account?.name) return booking.account.name;
+  return 'Private';
 }
 
 function getVehicleLabel(vehicle: Vehicle) {
@@ -252,32 +265,20 @@ function bookingRowTone(status?: string) {
   return 'border-white/10 bg-black/20';
 }
 
+function accountTone(hasAccount: boolean) {
+  return hasAccount
+    ? 'border-violet-500/25 bg-violet-500/10 text-violet-300'
+    : 'border-slate-500/25 bg-slate-500/10 text-slate-300';
+}
+
 function isCompleted(status?: string) {
   return ['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(
     (status || '').toUpperCase(),
   );
 }
 
-function isCancelled(status?: string) {
-  return ['CANCELLED', 'NO_SHOW'].includes((status || '').toUpperCase());
-}
-
 function isLive(status?: string) {
   return !isCompleted(status);
-}
-
-function getAssignedDriverPosition(
-  booking: Booking | null,
-  drivers: Driver[],
-): LatLngTuple | null {
-  if (!booking?.driverId) return null;
-
-  const driver = drivers.find((d) => d.id === booking.driverId);
-  if (!driver || driver.latitude == null || driver.longitude == null) {
-    return null;
-  }
-
-  return [driver.latitude, driver.longitude] as LatLngTuple;
 }
 
 function Card({
@@ -301,6 +302,7 @@ function Card({
 export default function DispatchPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -495,18 +497,7 @@ export default function DispatchPage() {
   ]);
 
   const loadBookings = useCallback(async () => {
-    if (!token) return;
-
-    const response = await fetch(`${API_URL}/bookings/dispatch-board`, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to load bookings (${response.status})`);
-    }
-
-    const data = (await response.json()) as Booking[];
+    const data = await apiFetch<Booking[]>('/bookings/dispatch-board');
     const nextBookings = Array.isArray(data) ? data : [];
     setBookings(nextBookings);
 
@@ -514,26 +505,15 @@ export default function DispatchPage() {
       if (!current) return current;
       return nextBookings.find((b) => b.id === current.id) ?? current;
     });
-  }, [token]);
+  }, []);
 
   const loadDrivers = useCallback(
     async (showSpinner = true) => {
-      if (!token) return;
-
       try {
         setDriversError('');
         if (showSpinner) setDriversLoading(true);
 
-        const response = await fetch(`${API_URL}/drivers`, {
-          headers: { Authorization: `Bearer ${token}` },
-          cache: 'no-store',
-        });
-
-        if (!response.ok) {
-          throw new Error(`Failed to load drivers (${response.status})`);
-        }
-
-        const data = (await response.json()) as Driver[];
+        const data = await apiFetch<Driver[]>('/drivers');
         setDrivers(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error(error);
@@ -544,16 +524,25 @@ export default function DispatchPage() {
         if (showSpinner) setDriversLoading(false);
       }
     },
-    [token],
+    [],
   );
 
-  useEffect(() => {
-    if (!token) return;
+  const loadAccounts = useCallback(async () => {
+    try {
+      const data = await apiFetch<Account[]>('/accounts');
+      const next = Array.isArray(data) ? data : [];
+      setAccounts(next.filter((account) => (account.status || 'ACTIVE') !== 'CLOSED'));
+    } catch (error) {
+      console.error(error);
+      setAccounts([]);
+    }
+  }, []);
 
+  useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
-        await Promise.all([loadBookings(), loadDrivers(true)]);
+        await Promise.all([loadBookings(), loadDrivers(true), loadAccounts()]);
       } catch (error) {
         console.error(error);
       } finally {
@@ -562,18 +551,16 @@ export default function DispatchPage() {
     };
 
     void load();
-  }, [token, loadBookings, loadDrivers]);
+  }, [loadBookings, loadDrivers, loadAccounts]);
 
   useEffect(() => {
-    if (!token) return;
-
     const interval = setInterval(() => {
       void loadDrivers(false);
       void loadBookings();
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [token, loadDrivers, loadBookings]);
+  }, [loadDrivers, loadBookings]);
 
   useEffect(() => {
     if (!token) return;
@@ -634,17 +621,7 @@ export default function DispatchPage() {
   const autoDispatch = async (id: string) => {
     try {
       setAutoDispatchingId(id);
-
-      const res = await fetch(`${API_URL}/bookings/${id}/auto-dispatch`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || 'Failed to auto dispatch');
-      }
-
+      await apiFetch(`/bookings/${id}/auto-dispatch`, { method: 'POST' });
       await loadBookings();
       await loadDrivers(false);
     } catch (error) {
@@ -658,23 +635,10 @@ export default function DispatchPage() {
   const assignDriver = async (bookingId: string, driverId: string) => {
     try {
       setAssigningKey(`${bookingId}:${driverId}`);
-
-      const res = await fetch(`${API_URL}/bookings/${bookingId}/assign-driver`, {
+      await apiFetch(`/bookings/${bookingId}/assign-driver`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ driverId }),
       });
-
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : null;
-
-      if (!res.ok) {
-        throw new Error(data?.message || 'Failed to assign driver');
-      }
-
       await Promise.all([loadBookings(), loadDrivers(false)]);
     } catch (error) {
       console.error(error);
@@ -720,6 +684,7 @@ export default function DispatchPage() {
       const payload = {
         customerName: form.customerName.trim(),
         customerPhone: form.customerPhone.trim() || null,
+        accountId: form.accountId || null,
         pickup: form.pickupAddress.trim(),
         dropoff: form.dropoffAddress.trim(),
         pickupTime: scheduledTime,
@@ -739,23 +704,10 @@ export default function DispatchPage() {
         notes: form.notes.trim() || null,
       };
 
-      const res = await fetch(`${API_URL}/bookings`, {
+      const createdBooking = await apiFetch<Booking>('/bookings', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify(payload),
       });
-
-      const text = await res.text();
-      const data = text ? JSON.parse(text) : null;
-
-      if (!res.ok) {
-        throw new Error(data?.message || 'Failed to create booking');
-      }
-
-      const createdBooking = data as Booking;
 
       setForm(initialForm);
       await Promise.all([loadBookings(), loadDrivers(false)]);
@@ -774,15 +726,7 @@ export default function DispatchPage() {
 
   const loadTimeline = async (bookingId: string) => {
     try {
-      const res = await fetch(`${API_URL}/bookings/${bookingId}/timeline`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) {
-        throw new Error(`Failed to load timeline (${res.status})`);
-      }
-
-      const data = (await res.json()) as TimelineEvent[];
+      const data = await apiFetch<TimelineEvent[]>(`/bookings/${bookingId}/timeline`);
       setTimeline(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error(error);
@@ -801,6 +745,7 @@ export default function DispatchPage() {
         (d) => d.isAvailable || d.status === 'AVAILABLE',
       ).length,
       liveGps: liveDrivers.length,
+      accountLinked: bookings.filter((b) => Boolean(b.accountId || b.account)).length,
     };
   }, [bookings, drivers, liveDrivers.length]);
 
@@ -827,6 +772,7 @@ export default function DispatchPage() {
         getDropoffLabel(booking),
         getDriverName(booking.driver),
         booking.status,
+        booking.account?.name,
       ]
         .filter(Boolean)
         .join(' ')
@@ -873,6 +819,7 @@ export default function DispatchPage() {
               onClick={() => {
                 void loadBookings();
                 void loadDrivers(true);
+                void loadAccounts();
               }}
               className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20"
             >
@@ -881,13 +828,14 @@ export default function DispatchPage() {
           </div>
         </div>
 
-        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-7">
           <Card label="Bookings" value={stats.bookings} hint="Total jobs" />
           <Card label="Live Jobs" value={stats.live} hint="Dispatch active" />
           <Card label="Completed" value={stats.completed} hint="Finished jobs" />
           <Card label="Drivers" value={stats.drivers} hint="Driver records" />
           <Card label="Available" value={stats.available} hint="Dispatch ready" />
           <Card label="GPS Live" value={stats.liveGps} hint="Live positions" />
+          <Card label="Account Jobs" value={stats.accountLinked} hint="Linked to accounts" />
         </section>
 
         <div className="mb-8 grid gap-6 xl:grid-cols-2">
@@ -916,6 +864,32 @@ export default function DispatchPage() {
                   setForm((prev) => ({ ...prev, customerPhone: value }))
                 }
                 placeholder="07..."
+              />
+
+              <SelectField
+                label="Account"
+                value={form.accountId}
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, accountId: value }))
+                }
+                options={[
+                  { label: 'Private / non-account booking', value: '' },
+                  ...accounts.map((account) => ({
+                    label: account.code
+                      ? `${account.name} (${account.code})`
+                      : account.name,
+                    value: account.id,
+                  })),
+                ]}
+              />
+
+              <InfoField
+                label="Account status"
+                value={
+                  form.accountId
+                    ? accounts.find((a) => a.id === form.accountId)?.status || 'ACTIVE'
+                    : 'Private booking'
+                }
               />
 
               <div className="md:col-span-2">
@@ -1218,7 +1192,7 @@ export default function DispatchPage() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search ref, customer, route, phone, driver..."
+                placeholder="Search ref, customer, route, phone, driver, account..."
                 className="w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50 xl:w-[360px]"
               />
             </div>
@@ -1250,7 +1224,7 @@ export default function DispatchPage() {
                         b.status,
                       )}`}
                     >
-                      <div className="grid gap-4 xl:grid-cols-[120px_150px_1.8fr_150px_130px_auto] xl:items-center">
+                      <div className="grid gap-4 xl:grid-cols-[120px_150px_1.6fr_160px_150px_130px_auto] xl:items-center">
                         <div>
                           <div className="text-sm font-bold text-white">{b.reference}</div>
                           <div className="mt-1 text-xs text-white/45">
@@ -1279,6 +1253,16 @@ export default function DispatchPage() {
                             <span>Passengers: {b.passengerCount ?? '—'}</span>
                             <span>Fare: {formatPrice(b.quotedPrice)}</span>
                           </div>
+                        </div>
+
+                        <div>
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${accountTone(
+                              Boolean(b.accountId || b.account),
+                            )}`}
+                          >
+                            {getAccountLabel(b)}
+                          </span>
                         </div>
 
                         <div className="flex flex-col gap-2">
@@ -1378,7 +1362,7 @@ export default function DispatchPage() {
                         b.status,
                       )}`}
                     >
-                      <div className="grid gap-3 xl:grid-cols-[130px_130px_1.8fr_150px_140px_auto] xl:items-center">
+                      <div className="grid gap-3 xl:grid-cols-[130px_130px_1.6fr_160px_150px_140px_auto] xl:items-center">
                         <div className="text-sm font-semibold text-white">
                           {b.reference}
                         </div>
@@ -1391,6 +1375,16 @@ export default function DispatchPage() {
                           <div className="truncate text-sm text-white/75">
                             {getPickupLabel(b)} → {getDropoffLabel(b)}
                           </div>
+                        </div>
+
+                        <div>
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${accountTone(
+                              Boolean(b.accountId || b.account),
+                            )}`}
+                          >
+                            {getAccountLabel(b)}
+                          </span>
                         </div>
 
                         <div>
@@ -1447,6 +1441,7 @@ export default function DispatchPage() {
                   <div>Dropoff: {getDropoffLabel(selectedBooking)}</div>
                   <div>Driver: {getDriverName(selectedBooking.driver)}</div>
                   <div>Status: {selectedBooking.status}</div>
+                  <div>Account: {getAccountLabel(selectedBooking)}</div>
                   <div>
                     Pickup coords:{' '}
                     {selectedBooking.pickupLatitude != null &&
@@ -1612,7 +1607,7 @@ function SelectField({
         className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition focus:border-cyan-500/50"
       >
         {options.map((option) => (
-          <option key={option.value} value={option.value}>
+          <option key={`${option.value}-${option.label}`} value={option.value}>
             {option.label}
           </option>
         ))}
