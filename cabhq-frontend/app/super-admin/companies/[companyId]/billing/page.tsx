@@ -2,18 +2,27 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { apiFetch } from '@/lib/api';
 import SuperAdminPageHeader from '@/components/super-admin/SuperAdminPageHeader';
 import SuperAdminPanel from '@/components/super-admin/SuperAdminPanel';
 import SuperAdminStatCard from '@/components/super-admin/SuperAdminStatCard';
 import SuperAdminDetailRow from '@/components/super-admin/SuperAdminDetailRow';
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') || 'http://localhost:3002';
-
 type BillingPlan = 'STARTER' | 'GROWTH' | 'PRO' | 'ENTERPRISE';
 type BillingStatus = 'ACTIVE' | 'TRIAL' | 'PAST_DUE' | 'CANCELLED' | string;
-type InvoiceStatus = 'ACTIVE' | 'TRIAL' | 'PAST_DUE' | 'CANCELLED' | string;
+type InvoiceStatus =
+  | 'DRAFT'
+  | 'SENT'
+  | 'PART_PAID'
+  | 'PAID'
+  | 'OVERDUE'
+  | 'VOID'
+  | 'ACTIVE'
+  | 'TRIAL'
+  | 'PAST_DUE'
+  | 'CANCELLED'
+  | string;
 
 type CompanyBilling = {
   companyId: string;
@@ -33,12 +42,22 @@ type Invoice = {
   id: string;
   companyId: string;
   invoiceNumber: string;
-  amount: number;
-  currency: string;
+  amount?: number;
+  total?: number;
+  balanceDue?: number;
+  paidAmount?: number;
+  currency?: string;
   status: InvoiceStatus;
   dueDate: string | null;
-  paidAt: string | null;
+  paidAt?: string | null;
   createdAt: string;
+};
+
+const planPrices: Record<BillingPlan, number> = {
+  STARTER: 49,
+  GROWTH: 89,
+  PRO: 149,
+  ENTERPRISE: 249,
 };
 
 function formatCurrency(value: number, currency = 'GBP') {
@@ -47,13 +66,14 @@ function formatCurrency(value: number, currency = 'GBP') {
     currency,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(value);
+  }).format(value || 0);
 }
 
 function formatDate(value?: string | null) {
   if (!value) return '—';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '—';
+
   return d.toLocaleDateString('en-GB', {
     day: '2-digit',
     month: 'short',
@@ -65,6 +85,7 @@ function formatDateTime(value?: string | null) {
   if (!value) return '—';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '—';
+
   return d.toLocaleString('en-GB', {
     day: '2-digit',
     month: 'short',
@@ -82,61 +103,66 @@ function planClass(plan: BillingPlan) {
 }
 
 function statusClass(status: BillingStatus | InvoiceStatus) {
-  if (status === 'ACTIVE') {
+  if (status === 'ACTIVE' || status === 'PAID') {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   }
-  if (status === 'TRIAL') {
+
+  if (status === 'TRIAL' || status === 'SENT' || status === 'PART_PAID') {
     return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
   }
-  if (status === 'PAST_DUE') {
+
+  if (status === 'PAST_DUE' || status === 'OVERDUE') {
     return 'border-red-500/30 bg-red-500/10 text-red-300';
   }
-  if (status === 'CANCELLED') {
-    return 'border-white/10 bg-white/5 text-white/70';
+
+  if (status === 'DRAFT') {
+    return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   }
+
   return 'border-white/10 bg-white/5 text-white/70';
+}
+
+function invoiceAmount(invoice: Invoice) {
+  return Number(invoice.total ?? invoice.amount ?? 0);
+}
+
+function invoiceCurrency(invoice: Invoice, fallback = 'GBP') {
+  return invoice.currency || fallback;
 }
 
 export default function SuperAdminCompanyBillingPage() {
   const params = useParams();
-  const companyId = Array.isArray(params.companyId) ? params.companyId[0] : params.companyId;
+  const companyId = Array.isArray(params.companyId)
+    ? params.companyId[0]
+    : params.companyId;
 
   const [billing, setBilling] = useState<CompanyBilling | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
-  useEffect(() => {
+  const loadBilling = useCallback(async () => {
     if (!companyId) return;
 
+    const [billingData, invoiceData] = await Promise.all([
+      apiFetch<CompanyBilling>(`/companies/${companyId}/billing`),
+      apiFetch<Invoice[]>(`/companies/${companyId}/invoices`).catch(() => []),
+    ]);
+
+    setBilling(billingData);
+    setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
+  }, [companyId]);
+
+  useEffect(() => {
     let active = true;
 
-    async function loadBilling() {
+    async function run() {
       try {
         setLoading(true);
         setError('');
-
-        const [billingRes, invoicesRes] = await Promise.all([
-          fetch(`${API_URL}/companies/${companyId}/billing`, { cache: 'no-store' }),
-          fetch(`${API_URL}/companies/${companyId}/invoices`, { cache: 'no-store' }),
-        ]);
-
-        if (!billingRes.ok) {
-          throw new Error(`Failed to load billing (${billingRes.status})`);
-        }
-
-        if (!invoicesRes.ok) {
-          throw new Error(`Failed to load invoices (${invoicesRes.status})`);
-        }
-
-        const billingData = (await billingRes.json()) as CompanyBilling;
-        const invoiceData = (await invoicesRes.json()) as Invoice[];
-
-        if (!active) return;
-
-        setBilling(billingData);
-        setInvoices(Array.isArray(invoiceData) ? invoiceData : []);
+        await loadBilling();
       } catch (err) {
         if (!active) return;
         setError(err instanceof Error ? err.message : 'Failed to load billing');
@@ -145,20 +171,45 @@ export default function SuperAdminCompanyBillingPage() {
       }
     }
 
-    void loadBilling();
+    void run();
 
     return () => {
       active = false;
     };
-  }, [companyId]);
+  }, [loadBilling]);
 
   const stats = useMemo(() => {
+    const invoiceTotal = invoices.reduce((sum, invoice) => {
+      return sum + invoiceAmount(invoice);
+    }, 0);
+
+    const unpaidValue = invoices.reduce((sum, invoice) => {
+      const status = String(invoice.status || '').toUpperCase();
+
+      if (status === 'PAID' || status === 'VOID' || status === 'CANCELLED') {
+        return sum;
+      }
+
+      return sum + Number(invoice.balanceDue ?? invoiceAmount(invoice));
+    }, 0);
+
+    const paidValue = invoices.reduce((sum, invoice) => {
+      return sum + Number(invoice.paidAmount ?? 0);
+    }, 0);
+
     return {
       invoices: invoices.length,
-      unpaid: billing?.unpaidInvoices ?? 0,
+      unpaid: billing?.unpaidInvoices ?? invoices.filter((invoice) =>
+        ['SENT', 'PART_PAID', 'OVERDUE', 'PAST_DUE'].includes(
+          String(invoice.status).toUpperCase(),
+        ),
+      ).length,
       monthlyPrice: billing?.monthlyPrice ?? 0,
       trial: billing?.billingStatus === 'TRIAL' ? 'Yes' : 'No',
       nextDue: billing?.subscriptionEndsAt ? formatDate(billing.subscriptionEndsAt) : '—',
+      invoiceTotal,
+      unpaidValue,
+      paidValue,
     };
   }, [billing, invoices]);
 
@@ -166,37 +217,22 @@ export default function SuperAdminCompanyBillingPage() {
     if (!billing || !companyId) return;
 
     try {
-      setSaving(true);
+      setSavingKey(`status-${nextStatus}`);
       setError('');
+      setSuccess('');
 
-      const res = await fetch(`${API_URL}/companies/${companyId}/billing`, {
+      await apiFetch<CompanyBilling>(`/companies/${companyId}/billing`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          billingStatus: nextStatus,
-        }),
+        body: JSON.stringify({ billingStatus: nextStatus }),
       });
 
-      if (!res.ok) {
-        throw new Error(`Failed to update billing (${res.status})`);
-      }
-
-      const refreshed = await fetch(`${API_URL}/companies/${companyId}/billing`, {
-        cache: 'no-store',
-      });
-
-      if (!refreshed.ok) {
-        throw new Error(`Failed to refresh billing (${refreshed.status})`);
-      }
-
-      const billingData = (await refreshed.json()) as CompanyBilling;
-      setBilling(billingData);
+      await loadBilling();
+      setSuccess(`Billing status updated to ${nextStatus}`);
+      setTimeout(() => setSuccess(''), 1800);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update billing');
     } finally {
-      setSaving(false);
+      setSavingKey(null);
     }
   }
 
@@ -204,37 +240,25 @@ export default function SuperAdminCompanyBillingPage() {
     if (!billing || !companyId) return;
 
     try {
-      setSaving(true);
+      setSavingKey(`plan-${nextPlan}`);
       setError('');
+      setSuccess('');
 
-      const res = await fetch(`${API_URL}/companies/${companyId}/billing`, {
+      await apiFetch<CompanyBilling>(`/companies/${companyId}/billing`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           billingPlan: nextPlan,
+          monthlyPrice: planPrices[nextPlan],
         }),
       });
 
-      if (!res.ok) {
-        throw new Error(`Failed to update plan (${res.status})`);
-      }
-
-      const refreshed = await fetch(`${API_URL}/companies/${companyId}/billing`, {
-        cache: 'no-store',
-      });
-
-      if (!refreshed.ok) {
-        throw new Error(`Failed to refresh billing (${refreshed.status})`);
-      }
-
-      const billingData = (await refreshed.json()) as CompanyBilling;
-      setBilling(billingData);
+      await loadBilling();
+      setSuccess(`Plan updated to ${nextPlan}`);
+      setTimeout(() => setSuccess(''), 1800);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update plan');
     } finally {
-      setSaving(false);
+      setSavingKey(null);
     }
   }
 
@@ -274,7 +298,7 @@ export default function SuperAdminCompanyBillingPage() {
         <SuperAdminPageHeader
           eyebrow="Company Billing"
           title={billing.companyName}
-          description={`Billing plan, status, subscription dates and invoices.`}
+          description="Billing plan, subscription status, trial dates and company invoices."
           actions={
             <>
               <Link
@@ -283,6 +307,7 @@ export default function SuperAdminCompanyBillingPage() {
               >
                 Back to Company
               </Link>
+
               <Link
                 href={`/super-admin/companies/${billing.companyId}/edit`}
                 className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
@@ -301,6 +326,7 @@ export default function SuperAdminCompanyBillingPage() {
           >
             {billing.billingPlan}
           </span>
+
           <span
             className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(
               billing.billingStatus,
@@ -310,6 +336,18 @@ export default function SuperAdminCompanyBillingPage() {
           </span>
         </div>
 
+        {(error || success) && (
+          <div
+            className={`mb-6 rounded-2xl border p-4 text-sm ${
+              error
+                ? 'border-red-500/20 bg-red-500/10 text-red-200'
+                : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+            }`}
+          >
+            {error || success}
+          </div>
+        )}
+
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <SuperAdminStatCard
             label="Monthly Price"
@@ -317,15 +355,12 @@ export default function SuperAdminCompanyBillingPage() {
           />
           <SuperAdminStatCard label="Invoices" value={stats.invoices} />
           <SuperAdminStatCard label="Unpaid Invoices" value={stats.unpaid} />
-          <SuperAdminStatCard label="Trial" value={stats.trial} />
+          <SuperAdminStatCard
+            label="Unpaid Value"
+            value={formatCurrency(stats.unpaidValue, billing.currency)}
+          />
           <SuperAdminStatCard label="Next Due" value={stats.nextDue} />
         </section>
-
-        {error ? (
-          <div className="mb-6 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-red-200">
-            {error}
-          </div>
-        ) : null}
 
         <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
           <section className="space-y-6">
@@ -339,6 +374,7 @@ export default function SuperAdminCompanyBillingPage() {
                   value={formatCurrency(billing.monthlyPrice, billing.currency)}
                 />
                 <SuperAdminDetailRow label="Currency" value={billing.currency} />
+                <SuperAdminDetailRow label="Trial Active" value={stats.trial} />
                 <SuperAdminDetailRow label="Trial Ends" value={formatDate(billing.trialEndsAt)} />
                 <SuperAdminDetailRow
                   label="Subscription Starts"
@@ -373,6 +409,7 @@ export default function SuperAdminCompanyBillingPage() {
                             <div className="text-lg font-bold text-white">
                               {invoice.invoiceNumber}
                             </div>
+
                             <span
                               className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(
                                 invoice.status,
@@ -389,8 +426,19 @@ export default function SuperAdminCompanyBillingPage() {
                           </div>
                         </div>
 
-                        <div className="text-lg font-bold text-white">
-                          {formatCurrency(invoice.amount, invoice.currency)}
+                        <div className="text-right">
+                          <div className="text-lg font-bold text-white">
+                            {formatCurrency(
+                              invoiceAmount(invoice),
+                              invoiceCurrency(invoice, billing.currency),
+                            )}
+                          </div>
+
+                          {invoice.balanceDue != null ? (
+                            <div className="mt-1 text-xs text-white/45">
+                              Balance: {formatCurrency(invoice.balanceDue, invoiceCurrency(invoice, billing.currency))}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -403,67 +451,83 @@ export default function SuperAdminCompanyBillingPage() {
           <section className="space-y-6">
             <SuperAdminPanel title="Plan Controls">
               <div className="grid gap-3">
-                <button
-                  disabled={saving}
-                  onClick={() => updateBillingPlan('STARTER')}
-                  className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-50"
-                >
-                  Move to Starter
-                </button>
-                <button
-                  disabled={saving}
-                  onClick={() => updateBillingPlan('GROWTH')}
-                  className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-50"
-                >
-                  Move to Growth
-                </button>
-                <button
-                  disabled={saving}
-                  onClick={() => updateBillingPlan('PRO')}
-                  className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-50"
-                >
-                  Move to Pro
-                </button>
-                <button
-                  disabled={saving}
-                  onClick={() => updateBillingPlan('ENTERPRISE')}
-                  className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-50"
-                >
-                  Move to Enterprise
-                </button>
+                {(['STARTER', 'GROWTH', 'PRO', 'ENTERPRISE'] as BillingPlan[]).map(
+                  (plan) => (
+                    <button
+                      key={plan}
+                      disabled={Boolean(savingKey) || billing.billingPlan === plan}
+                      onClick={() => updateBillingPlan(plan)}
+                      className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition disabled:opacity-50 ${
+                        billing.billingPlan === plan
+                          ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
+                          : 'border-white/10 text-white hover:bg-white/10'
+                      }`}
+                    >
+                      {savingKey === `plan-${plan}`
+                        ? 'Updating...'
+                        : `Move to ${plan} · ${formatCurrency(planPrices[plan], billing.currency)}`}
+                    </button>
+                  ),
+                )}
               </div>
             </SuperAdminPanel>
 
             <SuperAdminPanel title="Billing Status Controls">
               <div className="grid gap-3">
                 <button
-                  disabled={saving}
+                  disabled={Boolean(savingKey)}
                   onClick={() => updateBillingStatus('ACTIVE')}
                   className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
                 >
-                  Mark Active
+                  {savingKey === 'status-ACTIVE' ? 'Updating...' : 'Mark Active'}
                 </button>
+
                 <button
-                  disabled={saving}
+                  disabled={Boolean(savingKey)}
                   onClick={() => updateBillingStatus('TRIAL')}
                   className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-50"
                 >
-                  Mark Trial
+                  {savingKey === 'status-TRIAL' ? 'Updating...' : 'Mark Trial'}
                 </button>
+
                 <button
-                  disabled={saving}
+                  disabled={Boolean(savingKey)}
                   onClick={() => updateBillingStatus('PAST_DUE')}
                   className="rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50"
                 >
-                  Mark Past Due
+                  {savingKey === 'status-PAST_DUE' ? 'Updating...' : 'Mark Past Due'}
                 </button>
+
                 <button
-                  disabled={saving}
+                  disabled={Boolean(savingKey)}
                   onClick={() => updateBillingStatus('CANCELLED')}
                   className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-50"
                 >
-                  Mark Cancelled
+                  {savingKey === 'status-CANCELLED'
+                    ? 'Updating...'
+                    : 'Mark Cancelled'}
                 </button>
+              </div>
+            </SuperAdminPanel>
+
+            <SuperAdminPanel title="Billing Health">
+              <div className="space-y-3">
+                <SuperAdminDetailRow
+                  label="Invoice Total"
+                  value={formatCurrency(stats.invoiceTotal, billing.currency)}
+                />
+                <SuperAdminDetailRow
+                  label="Paid Recorded"
+                  value={formatCurrency(stats.paidValue, billing.currency)}
+                />
+                <SuperAdminDetailRow
+                  label="Unpaid Value"
+                  value={formatCurrency(stats.unpaidValue, billing.currency)}
+                />
+                <SuperAdminDetailRow
+                  label="Unpaid Count"
+                  value={String(stats.unpaid)}
+                />
               </div>
             </SuperAdminPanel>
           </section>
