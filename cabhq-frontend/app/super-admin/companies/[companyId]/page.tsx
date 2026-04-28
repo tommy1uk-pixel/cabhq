@@ -3,13 +3,11 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import { apiFetch } from '@/lib/api';
 import SuperAdminPageHeader from '@/components/super-admin/SuperAdminPageHeader';
 import SuperAdminPanel from '@/components/super-admin/SuperAdminPanel';
 import SuperAdminStatCard from '@/components/super-admin/SuperAdminStatCard';
 import SuperAdminDetailRow from '@/components/super-admin/SuperAdminDetailRow';
-
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') || 'http://localhost:3002';
 
 type CompanyStatus = 'ACTIVE' | 'TRIAL' | 'SUSPENDED' | 'PENDING';
 type PlanType = 'STARTER' | 'GROWTH' | 'PRO' | 'ENTERPRISE' | string;
@@ -29,22 +27,22 @@ type ApiCompanyUser = {
 type ApiCompany = {
   id: string;
   name: string;
-  code: string;
-  slug: string;
+  code?: string | null;
+  slug?: string | null;
   status: string;
-  contactName: string | null;
-  contactEmail: string | null;
-  contactPhone: string | null;
-  timezone: string;
-  currency: string;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  timezone?: string | null;
+  currency?: string | null;
   driverLimit: number;
   vehicleLimit: number;
   dispatcherSeatLimit: number;
   billingPlan: string;
   billingStatus: string;
-  trialEndsAt: string | null;
-  subscriptionStartsAt: string | null;
-  subscriptionEndsAt: string | null;
+  trialEndsAt?: string | null;
+  subscriptionStartsAt?: string | null;
+  subscriptionEndsAt?: string | null;
   internalNotes?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -197,12 +195,12 @@ function mapCompany(apiCompany: ApiCompany): CompanyDetail {
   return {
     id: apiCompany.id,
     companyName: apiCompany.name || 'Untitled Company',
-    code: apiCompany.code,
-    slug: apiCompany.slug,
+    code: apiCompany.code || '—',
+    slug: apiCompany.slug || '—',
     status,
     plan: apiCompany.billingPlan || 'STARTER',
     createdAt: apiCompany.createdAt,
-    renewalDate: apiCompany.subscriptionEndsAt,
+    renewalDate: apiCompany.subscriptionEndsAt ?? null,
     paymentStatus: apiCompany.billingStatus || 'TRIAL',
     monthlyRevenue: 0,
     unpaidInvoices: 0,
@@ -221,11 +219,11 @@ function mapCompany(apiCompany: ApiCompany): CompanyDetail {
     salesRep: 'Unassigned',
     lastContactAt: apiCompany.updatedAt,
     internalNotes: apiCompany.internalNotes || '',
-    timezone: apiCompany.timezone,
-    currency: apiCompany.currency,
+    timezone: apiCompany.timezone || 'Europe/London',
+    currency: apiCompany.currency || 'GBP',
     dispatcherSeatLimit: apiCompany.dispatcherSeatLimit ?? 0,
-    trialEndsAt: apiCompany.trialEndsAt,
-    subscriptionStartsAt: apiCompany.subscriptionStartsAt,
+    trialEndsAt: apiCompany.trialEndsAt ?? null,
+    subscriptionStartsAt: apiCompany.subscriptionStartsAt ?? null,
     users: apiCompany.users ?? [],
   };
 }
@@ -245,6 +243,7 @@ export default function SuperAdminCompanyDetailPage() {
     password: '',
     role: 'ADMIN',
   });
+
   const [userActionError, setUserActionError] = useState('');
   const [userActionSuccess, setUserActionSuccess] = useState('');
   const [creatingUser, setCreatingUser] = useState(false);
@@ -258,16 +257,9 @@ export default function SuperAdminCompanyDetailPage() {
   async function loadCompany() {
     if (!companyId) return;
 
-    const res = await fetch(`${API_URL}/companies/${companyId}`, {
-      cache: 'no-store',
-    });
-
-    if (!res.ok) {
-      throw new Error(`Failed to load company (${res.status})`);
-    }
-
-    const data = (await res.json()) as ApiCompany;
+    const data = await apiFetch<ApiCompany>(`/companies/${companyId}`);
     const mapped = mapCompany(data);
+
     setCompany(mapped);
     setNotes(mapped.internalNotes);
   }
@@ -281,15 +273,9 @@ export default function SuperAdminCompanyDetailPage() {
       try {
         setLoading(true);
         setPageError('');
-        const res = await fetch(`${API_URL}/companies/${companyId}`, {
-          cache: 'no-store',
-        });
 
-        if (!res.ok) {
-          throw new Error(`Failed to load company (${res.status})`);
-        }
+        const data = await apiFetch<ApiCompany>(`/companies/${companyId}`);
 
-        const data = (await res.json()) as ApiCompany;
         if (!active) return;
 
         const mapped = mapCompany(data);
@@ -316,10 +302,10 @@ export default function SuperAdminCompanyDetailPage() {
     return company.plan === 'STARTER'
       ? 49
       : company.plan === 'GROWTH'
-      ? 89
-      : company.plan === 'PRO'
-      ? 149
-      : 249;
+        ? 89
+        : company.plan === 'PRO'
+          ? 149
+          : 249;
   }, [company]);
 
   async function saveNotes() {
@@ -331,18 +317,12 @@ export default function SuperAdminCompanyDetailPage() {
       setQuickActionSuccess('');
       setQuickActionLoading('save-notes');
 
-      const res = await fetch(`${API_URL}/companies/${companyId}`, {
+      await apiFetch<ApiCompany>(`/companies/${companyId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           internalNotes: notes,
         }),
       });
-
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(bodyText || `Failed to save notes (${res.status})`);
-      }
 
       await loadCompany();
       setSaved(true);
@@ -372,20 +352,14 @@ export default function SuperAdminCompanyDetailPage() {
       setUserActionError('');
       setUserActionSuccess('');
 
-      const res = await fetch(`${API_URL}/companies/${companyId}/users`, {
+      await apiFetch(`/companies/${companyId}/users`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: newUser.email.trim(),
           password: newUser.password.trim(),
           role: newUser.role,
         }),
       });
-
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(bodyText || `Failed to create user (${res.status})`);
-      }
 
       await loadCompany();
 
@@ -394,6 +368,7 @@ export default function SuperAdminCompanyDetailPage() {
         password: '',
         role: 'ADMIN',
       });
+
       setUserActionSuccess('User created');
       setTimeout(() => setUserActionSuccess(''), 1500);
     } catch (err) {
@@ -411,16 +386,10 @@ export default function SuperAdminCompanyDetailPage() {
       setUserActionError('');
       setUserActionSuccess('');
 
-      const res = await fetch(`${API_URL}/companies/${companyId}/users/${userId}/status`, {
+      await apiFetch(`/companies/${companyId}/users/${userId}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       });
-
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(bodyText || `Failed to update user status (${res.status})`);
-      }
 
       await loadCompany();
       setUserActionSuccess(`User marked ${status.toLowerCase()}`);
@@ -445,16 +414,10 @@ export default function SuperAdminCompanyDetailPage() {
       setUserActionError('');
       setUserActionSuccess('');
 
-      const res = await fetch(`${API_URL}/companies/${companyId}/users/${userId}/password`, {
+      await apiFetch(`/companies/${companyId}/users/${userId}/password`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
       });
-
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(bodyText || `Failed to reset password (${res.status})`);
-      }
 
       setUserActionSuccess('Password reset');
       setTimeout(() => setUserActionSuccess(''), 1500);
@@ -475,16 +438,10 @@ export default function SuperAdminCompanyDetailPage() {
       setQuickActionError('');
       setQuickActionSuccess('');
 
-      const res = await fetch(`${API_URL}/companies/${companyId}/status`, {
+      await apiFetch(`/companies/${companyId}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus }),
       });
-
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(bodyText || `Failed to update company status (${res.status})`);
-      }
 
       await loadCompany();
       setQuickActionSuccess(`Company marked ${nextStatus.toLowerCase()}`);
@@ -514,16 +471,10 @@ export default function SuperAdminCompanyDetailPage() {
       setQuickActionError('');
       setQuickActionSuccess('');
 
-      const res = await fetch(`${API_URL}/companies/${companyId}/extend-trial`, {
+      await apiFetch(`/companies/${companyId}/extend-trial`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ trialEndsAt: trialInput }),
       });
-
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(bodyText || `Failed to extend trial (${res.status})`);
-      }
 
       await loadCompany();
       setQuickActionSuccess('Trial extended');
@@ -587,19 +538,13 @@ export default function SuperAdminCompanyDetailPage() {
         />
 
         <div className="mb-6 flex flex-wrap gap-2">
-          <span
-            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(company.status)}`}
-          >
+          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(company.status)}`}>
             {company.status}
           </span>
-          <span
-            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${planClass(company.plan)}`}
-          >
+          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${planClass(company.plan)}`}>
             {company.plan}
           </span>
-          <span
-            className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${paymentClass(company.paymentStatus)}`}
-          >
+          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${paymentClass(company.paymentStatus)}`}>
             {company.paymentStatus}
           </span>
         </div>
@@ -627,10 +572,7 @@ export default function SuperAdminCompanyDetailPage() {
                 <SuperAdminDetailRow label="Plan Amount" value={formatCurrency(billingTotal)} />
                 <SuperAdminDetailRow label="Billing Status" value={company.paymentStatus} />
                 <SuperAdminDetailRow label="Trial Ends" value={formatDate(company.trialEndsAt)} />
-                <SuperAdminDetailRow
-                  label="Subscription Starts"
-                  value={formatDate(company.subscriptionStartsAt)}
-                />
+                <SuperAdminDetailRow label="Subscription Starts" value={formatDate(company.subscriptionStartsAt)} />
                 <SuperAdminDetailRow label="Renewal Date" value={formatDate(company.renewalDate)} />
                 <SuperAdminDetailRow label="Timezone" value={company.timezone} />
                 <SuperAdminDetailRow label="Currency" value={company.currency} />
@@ -645,9 +587,7 @@ export default function SuperAdminCompanyDetailPage() {
                   <div className="grid gap-4 md:grid-cols-3">
                     <input
                       value={newUser.email}
-                      onChange={(e) =>
-                        setNewUser((prev) => ({ ...prev, email: e.target.value }))
-                      }
+                      onChange={(e) => setNewUser((prev) => ({ ...prev, email: e.target.value }))}
                       placeholder="user@company.com"
                       className={inputClassName}
                     />
@@ -671,9 +611,7 @@ export default function SuperAdminCompanyDetailPage() {
                     <input
                       type="password"
                       value={newUser.password}
-                      onChange={(e) =>
-                        setNewUser((prev) => ({ ...prev, password: e.target.value }))
-                      }
+                      onChange={(e) => setNewUser((prev) => ({ ...prev, password: e.target.value }))}
                       placeholder="Temporary password"
                       className={inputClassName}
                     />
@@ -705,26 +643,15 @@ export default function SuperAdminCompanyDetailPage() {
                 ) : (
                   <div className="space-y-3">
                     {company.users.map((user) => (
-                      <div
-                        key={user.id}
-                        className="rounded-2xl border border-white/10 bg-[#0b1728] p-4"
-                      >
+                      <div key={user.id} className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
                         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                           <div>
                             <div className="flex flex-wrap items-center gap-2">
                               <div className="font-semibold text-white">{user.email}</div>
-                              <span
-                                className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${userRoleClass(
-                                  user.role,
-                                )}`}
-                              >
+                              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${userRoleClass(user.role)}`}>
                                 {user.role}
                               </span>
-                              <span
-                                className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${userStatusClass(
-                                  user.status,
-                                )}`}
-                              >
+                              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${userStatusClass(user.status)}`}>
                                 {user.status}
                               </span>
                             </div>
@@ -771,19 +698,14 @@ export default function SuperAdminCompanyDetailPage() {
 
             <SuperAdminPanel title="Usage">
               <div className="mb-4">
-                <span
-                  className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${usageClass(company.usageHealth)}`}
-                >
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${usageClass(company.usageHealth)}`}>
                   {company.usageHealth} USAGE HEALTH
                 </span>
               </div>
               <div className="space-y-3">
                 <SuperAdminDetailRow label="Driver Limit" value={company.drivers.toLocaleString('en-GB')} />
                 <SuperAdminDetailRow label="Vehicle Limit" value={company.vehicles.toLocaleString('en-GB')} />
-                <SuperAdminDetailRow
-                  label="Dispatcher Seats"
-                  value={company.dispatcherSeatLimit.toLocaleString('en-GB')}
-                />
+                <SuperAdminDetailRow label="Dispatcher Seats" value={company.dispatcherSeatLimit.toLocaleString('en-GB')} />
                 <SuperAdminDetailRow label="API Calls" value={company.apiCalls.toLocaleString('en-GB')} />
                 <SuperAdminDetailRow label="SMS Used" value={company.smsUsed.toLocaleString('en-GB')} />
                 <SuperAdminDetailRow label="Emails Sent" value={company.emailsSent.toLocaleString('en-GB')} />
