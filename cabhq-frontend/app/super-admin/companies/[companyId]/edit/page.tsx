@@ -2,14 +2,35 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import SuperAdminPageHeader from '@/components/super-admin/SuperAdminPageHeader';
+import SuperAdminPanel from '@/components/super-admin/SuperAdminPanel';
+import SuperAdminStatCard from '@/components/super-admin/SuperAdminStatCard';
+import SuperAdminDetailRow from '@/components/super-admin/SuperAdminDetailRow';
 
 const API_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') || 'http://localhost:3002';
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '') ||
+  'http://localhost:3002';
 
-type PlanType = 'STARTER' | 'GROWTH' | 'PRO' | 'ENTERPRISE';
-type StatusType = 'PENDING' | 'ACTIVE' | 'SUSPENDED';
-type BillingStatusType = 'ACTIVE' | 'TRIAL' | 'PAST_DUE' | 'CANCELLED';
+/* =====================================================
+   TYPES
+===================================================== */
+
+type CompanyStatus = 'ACTIVE' | 'TRIAL' | 'SUSPENDED' | 'PENDING';
+type PlanType = 'STARTER' | 'GROWTH' | 'PRO' | 'ENTERPRISE' | string;
+type PaymentStatus = 'ACTIVE' | 'TRIAL' | 'PAST_DUE' | 'CANCELLED' | string;
+type UsageHealth = 'GOOD' | 'HIGH' | 'LIMITED';
+
+type UserRole = 'ADMIN' | 'OPERATOR' | 'DRIVER' | 'SUPER_ADMIN';
+type UserStatus = 'ACTIVE' | 'SUSPENDED';
+
+type ApiCompanyUser = {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  createdAt: string;
+};
 
 type ApiCompany = {
   id: string;
@@ -30,494 +51,850 @@ type ApiCompany = {
   trialEndsAt: string | null;
   subscriptionStartsAt: string | null;
   subscriptionEndsAt: string | null;
+  internalNotes?: string | null;
   createdAt: string;
   updatedAt: string;
-  users?: Array<{
-    id: string;
-    email: string;
-    role: string;
-    status: string;
-    createdAt: string;
-  }>;
+  users?: ApiCompanyUser[];
 };
 
-type FormState = {
+type CompanyDetail = {
+  id: string;
   companyName: string;
   code: string;
   slug: string;
-  contactName: string;
-  email: string;
-  phone: string;
+  status: CompanyStatus;
   plan: PlanType;
-  status: StatusType;
-  billingStatus: BillingStatusType;
+  createdAt: string;
+  renewalDate: string | null;
+  paymentStatus: PaymentStatus;
+  monthlyRevenue: number;
+  unpaidInvoices: number;
+  drivers: number;
+  vehicles: number;
+  activeUsers: number;
+  bookingsMonth: number;
+  apiCalls: number;
+  smsUsed: number;
+  emailsSent: number;
+  storageGb: number;
+  usageHealth: UsageHealth;
+  ownerName: string;
+  ownerEmail: string;
+  ownerPhone: string;
+  salesRep: string;
+  lastContactAt: string | null;
+  internalNotes: string;
   timezone: string;
   currency: string;
-  driverLimit: string;
-  vehicleLimit: string;
-  dispatcherSeatLimit: string;
-  trialEndsAt: string;
-  subscriptionStartsAt: string;
-  subscriptionEndsAt: string;
+  dispatcherSeatLimit: number;
+  trialEndsAt: string | null;
+  subscriptionStartsAt: string | null;
+  users: ApiCompanyUser[];
 };
 
-const initialForm: FormState = {
-  companyName: '',
-  code: '',
-  slug: '',
-  contactName: '',
-  email: '',
-  phone: '',
-  plan: 'STARTER',
-  status: 'PENDING',
-  billingStatus: 'TRIAL',
-  timezone: 'Europe/London',
-  currency: 'GBP',
-  driverLimit: '10',
-  vehicleLimit: '10',
-  dispatcherSeatLimit: '3',
-  trialEndsAt: '',
-  subscriptionStartsAt: '',
-  subscriptionEndsAt: '',
+type NewUserForm = {
+  email: string;
+  password: string;
+  role: UserRole;
 };
+
+/* =====================================================
+   HELPERS
+===================================================== */
+
+function formatCurrency(value: number) {
+  return `£${value.toLocaleString('en-GB', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return '—';
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+
+  return d.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '—';
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+
+  return d.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 function toDateInput(value?: string | null) {
   if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toISOString().slice(0, 10);
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+
+  return d.toISOString().slice(0, 10);
 }
 
-function mapCompanyToForm(company: ApiCompany): FormState {
+function addDays(days: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function deriveUsageHealth(company: ApiCompany): UsageHealth {
+  const total =
+    (company.driverLimit ?? 0) +
+    (company.vehicleLimit ?? 0) +
+    (company.dispatcherSeatLimit ?? 0);
+
+  if (total >= 100) return 'HIGH';
+  if (total >= 40) return 'GOOD';
+  return 'LIMITED';
+}
+
+function mapCompany(company: ApiCompany): CompanyDetail {
   return {
-    companyName: company.name ?? '',
-    code: company.code ?? '',
-    slug: company.slug ?? '',
-    contactName: company.contactName ?? '',
-    email: company.contactEmail ?? '',
-    phone: company.contactPhone ?? '',
-    plan: (company.billingPlan as PlanType) || 'STARTER',
-    status: (company.status as StatusType) || 'PENDING',
-    billingStatus: (company.billingStatus as BillingStatusType) || 'TRIAL',
-    timezone: company.timezone ?? 'Europe/London',
-    currency: company.currency ?? 'GBP',
-    driverLimit: String(company.driverLimit ?? 10),
-    vehicleLimit: String(company.vehicleLimit ?? 10),
-    dispatcherSeatLimit: String(company.dispatcherSeatLimit ?? 3),
-    trialEndsAt: toDateInput(company.trialEndsAt),
-    subscriptionStartsAt: toDateInput(company.subscriptionStartsAt),
-    subscriptionEndsAt: toDateInput(company.subscriptionEndsAt),
+    id: company.id,
+    companyName: company.name || 'Untitled Company',
+    code: company.code,
+    slug: company.slug,
+    status:
+      company.billingStatus === 'TRIAL'
+        ? 'TRIAL'
+        : ((company.status?.toUpperCase() as CompanyStatus) || 'PENDING'),
+    plan: company.billingPlan || 'STARTER',
+    createdAt: company.createdAt,
+    renewalDate: company.subscriptionEndsAt,
+    paymentStatus: company.billingStatus || 'TRIAL',
+
+    monthlyRevenue: 0,
+    unpaidInvoices: 0,
+    bookingsMonth: 0,
+    apiCalls: 0,
+    smsUsed: 0,
+    emailsSent: 0,
+    storageGb: 0,
+
+    drivers: company.driverLimit ?? 0,
+    vehicles: company.vehicleLimit ?? 0,
+    activeUsers:
+      company.users?.filter((u) => u.status === 'ACTIVE').length ?? 0,
+
+    usageHealth: deriveUsageHealth(company),
+
+    ownerName: company.contactName?.trim() || 'No contact assigned',
+    ownerEmail: company.contactEmail?.trim() || 'No email',
+    ownerPhone: company.contactPhone?.trim() || 'No phone',
+
+    salesRep: 'Unassigned',
+    lastContactAt: company.updatedAt,
+    internalNotes: company.internalNotes || '',
+
+    timezone: company.timezone,
+    currency: company.currency,
+    dispatcherSeatLimit: company.dispatcherSeatLimit ?? 0,
+    trialEndsAt: company.trialEndsAt,
+    subscriptionStartsAt: company.subscriptionStartsAt,
+
+    users: company.users ?? [],
   };
 }
 
-export default function EditCompanyPage() {
-  const params = useParams();
-  const companyId = Array.isArray(params.companyId) ? params.companyId[0] : params.companyId;
+/* =====================================================
+   STYLES
+===================================================== */
 
-  const [form, setForm] = useState<FormState>(initialForm);
-  const [companyNameForTitle, setCompanyNameForTitle] = useState('Edit Company');
+const inputClass =
+  'w-full rounded-2xl border border-white/10 bg-[#07111f] px-4 py-3 text-white outline-none focus:border-cyan-500/50';
+
+const buttonPrimary =
+  'rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-50';
+
+const buttonDanger =
+  'rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50';
+
+const buttonSuccess =
+  'rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50';
+
+const buttonOutline =
+  'rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-50';
+
+/* =====================================================
+   PAGE
+===================================================== */
+
+export default function SuperAdminCompanyDetailPage() {
+  const params = useParams();
+
+  const companyId = Array.isArray(params.companyId)
+    ? params.companyId[0]
+    : params.companyId;
+
+  const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const [pageError, setPageError] = useState('');
+
+  const [notes, setNotes] = useState('');
+  const [notesSaving, setNotesSaving] = useState(false);
+
+  const [newUser, setNewUser] = useState<NewUserForm>({
+    email: '',
+    password: '',
+    role: 'ADMIN',
+  });
+
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [userBusyId, setUserBusyId] = useState<string | null>(null);
+
+  const [quickBusy, setQuickBusy] = useState<string | null>(null);
+
+  const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
+
+  /* =====================================================
+     DATA
+  ===================================================== */
+
+  async function loadCompany() {
+    if (!companyId) return;
+
+    const res = await fetch(`${API_URL}/companies/${companyId}`, {
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      throw new Error(`Failed to load company (${res.status})`);
+    }
+
+    const data = (await res.json()) as ApiCompany;
+
+    const mapped = mapCompany(data);
+
+    setCompany(mapped);
+    setNotes(mapped.internalNotes);
+  }
 
   useEffect(() => {
     if (!companyId) return;
 
     let active = true;
 
-    async function loadCompany() {
+    async function run() {
       try {
         setLoading(true);
-        setError('');
+        setPageError('');
 
-        const res = await fetch(`${API_URL}/companies/${companyId}`, {
-          cache: 'no-store',
-        });
-
-        if (!res.ok) {
-          throw new Error(`Failed to load company (${res.status})`);
-        }
-
-        const data = (await res.json()) as ApiCompany;
-
-        if (!active) return;
-
-        setForm(mapCompanyToForm(data));
-        setCompanyNameForTitle(data.name || 'Edit Company');
+        await loadCompany();
       } catch (err) {
         if (!active) return;
-        setError(err instanceof Error ? err.message : 'Failed to load company');
+
+        setPageError(
+          err instanceof Error ? err.message : 'Failed to load company',
+        );
       } finally {
         if (active) setLoading(false);
       }
     }
 
-    void loadCompany();
+    void run();
 
     return () => {
       active = false;
     };
   }, [companyId]);
 
-  function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+  function notifySuccess(message: string) {
+    setSuccess(message);
+    setTimeout(() => setSuccess(''), 1800);
   }
 
-  async function saveCompany() {
+  function notifyError(message: string) {
+    setError(message);
+    setTimeout(() => setError(''), 2500);
+  }
+
+  /* =====================================================
+     NOTES
+  ===================================================== */
+
+  async function saveNotes() {
     if (!companyId) return;
 
     try {
-      setSaving(true);
-      setSaved(false);
-      setError('');
-
-      const payload = {
-        name: form.companyName.trim() || null,
-        code: form.code.trim() || null,
-        slug: form.slug.trim() || null,
-        contactName: form.contactName.trim() || null,
-        contactEmail: form.email.trim() || null,
-        contactPhone: form.phone.trim() || null,
-        status: form.status,
-        timezone: form.timezone.trim() || 'Europe/London',
-        currency: form.currency.trim() || 'GBP',
-        driverLimit: form.driverLimit ? Number(form.driverLimit) : null,
-        vehicleLimit: form.vehicleLimit ? Number(form.vehicleLimit) : null,
-        dispatcherSeatLimit: form.dispatcherSeatLimit
-          ? Number(form.dispatcherSeatLimit)
-          : null,
-        billingPlan: form.plan,
-        billingStatus: form.billingStatus,
-        trialEndsAt: form.trialEndsAt || null,
-        subscriptionStartsAt: form.subscriptionStartsAt || null,
-        subscriptionEndsAt: form.subscriptionEndsAt || null,
-      };
+      setNotesSaving(true);
 
       const res = await fetch(`${API_URL}/companies/${companyId}`, {
         method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          internalNotes: notes,
+        }),
       });
 
-      if (!res.ok) {
-        const bodyText = await res.text();
-        throw new Error(bodyText || `Failed to save company (${res.status})`);
-      }
+      if (!res.ok) throw new Error('Failed to save notes');
 
-      const updated = (await res.json()) as ApiCompany;
-      setForm(mapCompanyToForm(updated));
-      setCompanyNameForTitle(updated.name || 'Edit Company');
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1400);
+      await loadCompany();
+      notifySuccess('Notes saved');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save company');
+      notifyError(
+        err instanceof Error ? err.message : 'Failed to save notes',
+      );
     } finally {
-      setSaving(false);
+      setNotesSaving(false);
     }
   }
 
+  /* =====================================================
+     USERS
+  ===================================================== */
+
+  async function createUser() {
+    if (!companyId) return;
+
+    if (!newUser.email.trim()) {
+      return notifyError('Email required');
+    }
+
+    if (newUser.password.length < 8) {
+      return notifyError('Password must be at least 8 characters');
+    }
+
+    try {
+      setCreatingUser(true);
+
+      const res = await fetch(
+        `${API_URL}/companies/${companyId}/users`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newUser),
+        },
+      );
+
+      if (!res.ok) throw new Error('Failed to create user');
+
+      setNewUser({
+        email: '',
+        password: '',
+        role: 'ADMIN',
+      });
+
+      await loadCompany();
+      notifySuccess('User created');
+    } catch (err) {
+      notifyError(
+        err instanceof Error ? err.message : 'Failed to create user',
+      );
+    } finally {
+      setCreatingUser(false);
+    }
+  }
+
+  async function updateUserStatus(
+    userId: string,
+    status: UserStatus,
+  ) {
+    if (!companyId) return;
+
+    try {
+      setUserBusyId(userId);
+
+      const res = await fetch(
+        `${API_URL}/companies/${companyId}/users/${userId}/status`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        },
+      );
+
+      if (!res.ok) throw new Error('Failed to update user');
+
+      await loadCompany();
+      notifySuccess('User updated');
+    } catch (err) {
+      notifyError(
+        err instanceof Error ? err.message : 'Failed to update user',
+      );
+    } finally {
+      setUserBusyId(null);
+    }
+  }
+
+  async function resetPassword(
+    userId: string,
+    email: string,
+  ) {
+    if (!companyId) return;
+
+    const password = window.prompt(
+      `Enter new password for ${email}`,
+    );
+
+    if (!password) return;
+
+    try {
+      setUserBusyId(userId);
+
+      const res = await fetch(
+        `${API_URL}/companies/${companyId}/users/${userId}/password`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        },
+      );
+
+      if (!res.ok) throw new Error('Failed to reset password');
+
+      notifySuccess('Password reset');
+    } catch (err) {
+      notifyError(
+        err instanceof Error ? err.message : 'Failed password reset',
+      );
+    } finally {
+      setUserBusyId(null);
+    }
+  }
+
+  /* =====================================================
+     QUICK ACTIONS
+  ===================================================== */
+
+  async function patchCompanyStatus(
+    status: 'ACTIVE' | 'PENDING' | 'SUSPENDED',
+  ) {
+    if (!companyId) return;
+
+    try {
+      setQuickBusy(status);
+
+      const res = await fetch(
+        `${API_URL}/companies/${companyId}/status`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        },
+      );
+
+      if (!res.ok) throw new Error('Failed status update');
+
+      await loadCompany();
+      notifySuccess('Company updated');
+    } catch (err) {
+      notifyError(
+        err instanceof Error ? err.message : 'Failed status update',
+      );
+    } finally {
+      setQuickBusy(null);
+    }
+  }
+
+  async function extendTrial() {
+    if (!companyId) return;
+
+    const value = window.prompt(
+      'New trial end date',
+      toDateInput(company?.trialEndsAt) || addDays(14),
+    );
+
+    if (!value) return;
+
+    try {
+      setQuickBusy('trial');
+
+      const res = await fetch(
+        `${API_URL}/companies/${companyId}/extend-trial`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ trialEndsAt: value }),
+        },
+      );
+
+      if (!res.ok) throw new Error('Failed to extend trial');
+
+      await loadCompany();
+      notifySuccess('Trial extended');
+    } catch (err) {
+      notifyError(
+        err instanceof Error ? err.message : 'Failed trial update',
+      );
+    } finally {
+      setQuickBusy(null);
+    }
+  }
+
+  /* =====================================================
+     MEMO
+  ===================================================== */
+
+  const monthlyPlanPrice = useMemo(() => {
+    if (!company) return 0;
+
+    if (company.plan === 'STARTER') return 49;
+    if (company.plan === 'GROWTH') return 89;
+    if (company.plan === 'PRO') return 149;
+
+    return 249;
+  }, [company]);
+
+  /* =====================================================
+     RENDER
+  ===================================================== */
+
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#03060d] px-4 py-6 text-white md:px-6">
-        <div className="mx-auto max-w-[1300px] rounded-2xl border border-white/10 bg-[#07111f] p-6 text-white/60">
-          Loading company...
-        </div>
+      <main className="min-h-screen bg-[#05070c] p-6 text-white">
+        Loading company...
       </main>
     );
   }
 
-  if (error && !companyId) {
+  if (!company || pageError) {
     return (
-      <main className="min-h-screen bg-[#03060d] px-4 py-6 text-white md:px-6">
-        <div className="mx-auto max-w-[1300px] rounded-2xl border border-red-500/20 bg-red-500/10 p-6 text-red-200">
-          {error}
-        </div>
+      <main className="min-h-screen bg-[#05070c] p-6 text-red-300">
+        {pageError || 'Company not found'}
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#03060d] px-4 py-6 text-white md:px-6">
-      <div className="mx-auto max-w-[1300px]">
-        <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.24em] text-cyan-300">
-              Super Admin
-            </div>
-            <h1 className="mt-3 text-4xl font-bold tracking-tight">
-              Edit Company
-            </h1>
-            <p className="mt-2 text-white/60">
-              Update company profile, plan, billing and default settings for {companyNameForTitle}.
-            </p>
-          </div>
+    <main className="min-h-screen bg-[#05070c] px-4 py-6 text-white md:px-6">
+      <div className="mx-auto max-w-[1850px]">
+        <SuperAdminPageHeader
+          eyebrow="Company Detail"
+          title={company.companyName}
+          description={`Company ID: ${company.id} · Created ${formatDate(
+            company.createdAt,
+          )}`}
+          actions={
+            <>
+              <Link href="/super-admin/companies" className={buttonOutline}>
+                Back
+              </Link>
 
-          <div className="flex gap-3">
-            <Link
-              href={`/super-admin/companies/${companyId}`}
-              className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
-            >
-              Back to Company
-            </Link>
-          </div>
-        </div>
-
-        {error ? (
-          <div className="mb-6 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-red-200">
-            {error}
-          </div>
-        ) : null}
-
-        <section className="rounded-3xl border border-white/10 bg-[#07111f] p-8">
-          <div className="grid gap-8">
-            <div>
-              <h2 className="text-2xl font-bold">Core Information</h2>
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <Field
-                  label="Company Name"
-                  input={
-                    <input
-                      value={form.companyName}
-                      onChange={(e) => setField('companyName', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Company Code"
-                  input={
-                    <input
-                      value={form.code}
-                      onChange={(e) => setField('code', e.target.value.toUpperCase())}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Slug"
-                  input={
-                    <input
-                      value={form.slug}
-                      onChange={(e) => setField('slug', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Contact Name"
-                  input={
-                    <input
-                      value={form.contactName}
-                      onChange={(e) => setField('contactName', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Email"
-                  input={
-                    <input
-                      value={form.email}
-                      onChange={(e) => setField('email', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Phone"
-                  input={
-                    <input
-                      value={form.phone}
-                      onChange={(e) => setField('phone', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-              </div>
-            </div>
-
-            <div>
-              <h2 className="text-2xl font-bold">Subscription</h2>
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <Field
-                  label="Plan"
-                  input={
-                    <select
-                      value={form.plan}
-                      onChange={(e) => setField('plan', e.target.value as PlanType)}
-                      className={inputClassName}
-                    >
-                      <option value="STARTER">Starter</option>
-                      <option value="GROWTH">Growth</option>
-                      <option value="PRO">Pro</option>
-                      <option value="ENTERPRISE">Enterprise</option>
-                    </select>
-                  }
-                />
-                <Field
-                  label="Company Status"
-                  input={
-                    <select
-                      value={form.status}
-                      onChange={(e) => setField('status', e.target.value as StatusType)}
-                      className={inputClassName}
-                    >
-                      <option value="PENDING">Pending</option>
-                      <option value="ACTIVE">Active</option>
-                      <option value="SUSPENDED">Suspended</option>
-                    </select>
-                  }
-                />
-                <Field
-                  label="Billing Status"
-                  input={
-                    <select
-                      value={form.billingStatus}
-                      onChange={(e) =>
-                        setField('billingStatus', e.target.value as BillingStatusType)
-                      }
-                      className={inputClassName}
-                    >
-                      <option value="TRIAL">Trial</option>
-                      <option value="ACTIVE">Active</option>
-                      <option value="PAST_DUE">Past Due</option>
-                      <option value="CANCELLED">Cancelled</option>
-                    </select>
-                  }
-                />
-                <Field
-                  label="Trial Ends"
-                  input={
-                    <input
-                      type="date"
-                      value={form.trialEndsAt}
-                      onChange={(e) => setField('trialEndsAt', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Subscription Starts"
-                  input={
-                    <input
-                      type="date"
-                      value={form.subscriptionStartsAt}
-                      onChange={(e) => setField('subscriptionStartsAt', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Subscription Ends"
-                  input={
-                    <input
-                      type="date"
-                      value={form.subscriptionEndsAt}
-                      onChange={(e) => setField('subscriptionEndsAt', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-              </div>
-            </div>
-
-            <div>
-              <h2 className="text-2xl font-bold">Limits & Defaults</h2>
-              <div className="mt-5 grid gap-4 md:grid-cols-2">
-                <Field
-                  label="Timezone"
-                  input={
-                    <input
-                      value={form.timezone}
-                      onChange={(e) => setField('timezone', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Currency"
-                  input={
-                    <input
-                      value={form.currency}
-                      onChange={(e) => setField('currency', e.target.value.toUpperCase())}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Driver Limit"
-                  input={
-                    <input
-                      type="number"
-                      min="0"
-                      value={form.driverLimit}
-                      onChange={(e) => setField('driverLimit', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Vehicle Limit"
-                  input={
-                    <input
-                      type="number"
-                      min="0"
-                      value={form.vehicleLimit}
-                      onChange={(e) => setField('vehicleLimit', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-                <Field
-                  label="Dispatcher Seat Limit"
-                  input={
-                    <input
-                      type="number"
-                      min="0"
-                      value={form.dispatcherSeatLimit}
-                      onChange={(e) => setField('dispatcherSeatLimit', e.target.value)}
-                      className={inputClassName}
-                    />
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={saveCompany}
-                disabled={saving}
-                className="rounded-2xl bg-cyan-600 px-5 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-50"
+              <Link
+                href={`/super-admin/companies/${company.id}/edit`}
+                className={buttonPrimary}
               >
-                {saving ? 'Saving...' : 'Save Changes'}
+                Edit Company
+              </Link>
+
+              <Link
+                href={`/super-admin/companies/${company.id}/billing`}
+                className={buttonOutline}
+              >
+                Billing
+              </Link>
+            </>
+          }
+        />
+
+        {(success || error) && (
+          <div
+            className={`mb-6 rounded-2xl border px-4 py-3 text-sm ${
+              success
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                : 'border-red-500/30 bg-red-500/10 text-red-200'
+            }`}
+          >
+            {success || error}
+          </div>
+        )}
+
+        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <SuperAdminStatCard label="Drivers" value={company.drivers} />
+          <SuperAdminStatCard label="Vehicles" value={company.vehicles} />
+          <SuperAdminStatCard
+            label="Users"
+            value={company.activeUsers}
+          />
+          <SuperAdminStatCard
+            label="Plan"
+            value={company.plan}
+          />
+          <SuperAdminStatCard
+            label="Monthly"
+            value={formatCurrency(monthlyPlanPrice)}
+          />
+          <SuperAdminStatCard
+            label="Usage"
+            value={company.usageHealth}
+          />
+        </section>
+
+        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          {/* LEFT */}
+          <section className="space-y-6">
+            <SuperAdminPanel title="Company Information">
+              <div className="space-y-3">
+                <SuperAdminDetailRow
+                  label="Company"
+                  value={company.companyName}
+                />
+                <SuperAdminDetailRow
+                  label="Code"
+                  value={company.code}
+                />
+                <SuperAdminDetailRow
+                  label="Slug"
+                  value={company.slug}
+                />
+                <SuperAdminDetailRow
+                  label="Owner"
+                  value={company.ownerName}
+                />
+                <SuperAdminDetailRow
+                  label="Email"
+                  value={company.ownerEmail}
+                />
+                <SuperAdminDetailRow
+                  label="Phone"
+                  value={company.ownerPhone}
+                />
+                <SuperAdminDetailRow
+                  label="Timezone"
+                  value={company.timezone}
+                />
+                <SuperAdminDetailRow
+                  label="Currency"
+                  value={company.currency}
+                />
+                <SuperAdminDetailRow
+                  label="Trial Ends"
+                  value={formatDate(company.trialEndsAt)}
+                />
+                <SuperAdminDetailRow
+                  label="Renewal"
+                  value={formatDate(company.renewalDate)}
+                />
+              </div>
+            </SuperAdminPanel>
+
+            <SuperAdminPanel title="User Management">
+              <div className="mb-6 grid gap-4 md:grid-cols-3">
+                <input
+                  placeholder="Email"
+                  value={newUser.email}
+                  onChange={(e) =>
+                    setNewUser((p) => ({
+                      ...p,
+                      email: e.target.value,
+                    }))
+                  }
+                  className={inputClass}
+                />
+
+                <select
+                  value={newUser.role}
+                  onChange={(e) =>
+                    setNewUser((p) => ({
+                      ...p,
+                      role: e.target.value as UserRole,
+                    }))
+                  }
+                  className={inputClass}
+                >
+                  <option>ADMIN</option>
+                  <option>OPERATOR</option>
+                  <option>DRIVER</option>
+                  <option>SUPER_ADMIN</option>
+                </select>
+
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={newUser.password}
+                  onChange={(e) =>
+                    setNewUser((p) => ({
+                      ...p,
+                      password: e.target.value,
+                    }))
+                  }
+                  className={inputClass}
+                />
+              </div>
+
+              <button
+                onClick={createUser}
+                disabled={creatingUser}
+                className={buttonPrimary}
+              >
+                {creatingUser ? 'Creating...' : 'Create User'}
               </button>
 
-              {saved ? <span className="text-sm text-emerald-300">Saved</span> : null}
-            </div>
-          </div>
-        </section>
+              <div className="mt-6 space-y-3">
+                {company.users.map((user) => (
+                  <div
+                    key={user.id}
+                    className="rounded-2xl border border-white/10 bg-[#0b1728] p-4"
+                  >
+                    <div className="font-semibold">{user.email}</div>
+
+                    <div className="mt-1 text-xs text-white/50">
+                      {user.role} · {user.status} · Created{' '}
+                      {formatDateTime(user.createdAt)}
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {user.status === 'ACTIVE' ? (
+                        <button
+                          onClick={() =>
+                            updateUserStatus(
+                              user.id,
+                              'SUSPENDED',
+                            )
+                          }
+                          disabled={userBusyId === user.id}
+                          className={buttonDanger}
+                        >
+                          Suspend
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            updateUserStatus(
+                              user.id,
+                              'ACTIVE',
+                            )
+                          }
+                          disabled={userBusyId === user.id}
+                          className={buttonSuccess}
+                        >
+                          Activate
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() =>
+                          resetPassword(
+                            user.id,
+                            user.email,
+                          )
+                        }
+                        disabled={userBusyId === user.id}
+                        className={buttonOutline}
+                      >
+                        Reset Password
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SuperAdminPanel>
+
+            <SuperAdminPanel title="Internal Notes">
+              <textarea
+                rows={8}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className={inputClass}
+              />
+
+              <div className="mt-4">
+                <button
+                  onClick={saveNotes}
+                  disabled={notesSaving}
+                  className={buttonPrimary}
+                >
+                  {notesSaving ? 'Saving...' : 'Save Notes'}
+                </button>
+              </div>
+            </SuperAdminPanel>
+          </section>
+
+          {/* RIGHT */}
+          <section className="space-y-6">
+            <SuperAdminPanel title="Quick Actions">
+              <div className="grid gap-3">
+                <button
+                  onClick={extendTrial}
+                  disabled={quickBusy === 'trial'}
+                  className={buttonPrimary}
+                >
+                  Extend Trial
+                </button>
+
+                <button
+                  onClick={() =>
+                    patchCompanyStatus('ACTIVE')
+                  }
+                  disabled={quickBusy === 'ACTIVE'}
+                  className={buttonSuccess}
+                >
+                  Mark Active
+                </button>
+
+                <button
+                  onClick={() =>
+                    patchCompanyStatus('PENDING')
+                  }
+                  disabled={quickBusy === 'PENDING'}
+                  className={buttonOutline}
+                >
+                  Mark Pending
+                </button>
+
+                <button
+                  onClick={() =>
+                    patchCompanyStatus('SUSPENDED')
+                  }
+                  disabled={quickBusy === 'SUSPENDED'}
+                  className={buttonDanger}
+                >
+                  Suspend Company
+                </button>
+              </div>
+            </SuperAdminPanel>
+
+            <SuperAdminPanel title="Usage">
+              <div className="space-y-3">
+                <SuperAdminDetailRow
+                  label="Driver Limit"
+                  value={company.drivers.toString()}
+                />
+                <SuperAdminDetailRow
+                  label="Vehicle Limit"
+                  value={company.vehicles.toString()}
+                />
+                <SuperAdminDetailRow
+                  label="Dispatcher Seats"
+                  value={company.dispatcherSeatLimit.toString()}
+                />
+                <SuperAdminDetailRow
+                  label="API Calls"
+                  value={company.apiCalls.toString()}
+                />
+                <SuperAdminDetailRow
+                  label="SMS Used"
+                  value={company.smsUsed.toString()}
+                />
+                <SuperAdminDetailRow
+                  label="Emails Sent"
+                  value={company.emailsSent.toString()}
+                />
+                <SuperAdminDetailRow
+                  label="Storage"
+                  value={`${company.storageGb} GB`}
+                />
+              </div>
+            </SuperAdminPanel>
+          </section>
+        </div>
       </div>
     </main>
   );
 }
-
-function Field({
-  label,
-  input,
-}: {
-  label: string;
-  input: React.ReactNode;
-}) {
-  return (
-    <label className="block">
-      <div className="mb-2 text-sm font-medium text-white/75">{label}</div>
-      {input}
-    </label>
-  );
-}
-
-const inputClassName =
-  'w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-white outline-none focus:border-cyan-500/50';
