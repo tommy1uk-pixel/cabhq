@@ -22,19 +22,37 @@ type BookingEvent = {
 type Booking = {
   id: string;
   reference: string;
+
   pickup: string;
   dropoff: string;
   pickupLat?: number | null;
   pickupLng?: number | null;
   dropoffLat?: number | null;
   dropoffLng?: number | null;
+
   status: string;
   pickupTime: string;
+
+  customerName?: string | null;
+  customerPhone?: string | null;
+
+  isThirdPartyBooking?: boolean;
+  bookerName?: string | null;
+  bookerPhone?: string | null;
+  bookerEmail?: string | null;
+  passengerName?: string | null;
+  passengerPhone?: string | null;
+  passengerNotes?: string | null;
+
+  passengerCount?: number | null;
+  notes?: string | null;
+
   pricingMode?: string | null;
   quotedPrice?: number | null;
   calculatedFare?: number | null;
   distanceMiles?: number | null;
   durationMinutes?: number | null;
+
   createdAt: string;
   driver?: Driver | null;
   driverId?: string | null;
@@ -76,6 +94,13 @@ export default function BookingDetailsDrawer({
 }: Props) {
   if (!booking) return null;
 
+  const bookerName = booking.bookerName || booking.customerName || '—';
+  const bookerPhone = booking.bookerPhone || booking.customerPhone || '—';
+  const passengerName =
+    booking.passengerName || booking.customerName || booking.bookerName || '—';
+  const passengerPhone =
+    booking.passengerPhone || booking.customerPhone || booking.bookerPhone || '—';
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50">
       <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-white/10 bg-[#07111f] text-white shadow-2xl">
@@ -89,6 +114,12 @@ export default function BookingDetailsDrawer({
               <p className="mt-2 text-sm text-white/60">
                 {booking.pickup} → {booking.dropoff}
               </p>
+
+              {booking.isThirdPartyBooking ? (
+                <div className="mt-3 inline-flex rounded-full border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold text-fuchsia-300">
+                  Booked for someone else
+                </div>
+              ) : null}
             </div>
 
             <button
@@ -136,10 +167,7 @@ export default function BookingDetailsDrawer({
                   : 'No price'
               }
             />
-            <Card
-              label="Pricing Mode"
-              value={booking.pricingMode || 'Not set'}
-            />
+            <Card label="Pricing Mode" value={booking.pricingMode || 'Not set'} />
             <Card
               label="Distance"
               value={
@@ -156,6 +184,54 @@ export default function BookingDetailsDrawer({
                   : 'Unknown'
               }
             />
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="text-lg font-bold">People</h3>
+              <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/60">
+                {booking.isThirdPartyBooking ? 'Third-party booking' : 'Direct booking'}
+              </span>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-xl border border-white/10 bg-[#0b1728] p-4">
+                <p className="text-xs uppercase tracking-[0.15em] text-white/40">
+                  Booked By
+                </p>
+                <p className="mt-2 text-sm font-semibold text-white">{bookerName}</p>
+                <p className="mt-1 text-sm text-white/60">{bookerPhone}</p>
+                {booking.bookerEmail ? (
+                  <p className="mt-1 break-words text-xs text-white/45">
+                    {booking.bookerEmail}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-[#0b1728] p-4">
+                <p className="text-xs uppercase tracking-[0.15em] text-white/40">
+                  Passenger
+                </p>
+                <p className="mt-2 text-sm font-semibold text-white">
+                  {passengerName}
+                </p>
+                <p className="mt-1 text-sm text-white/60">{passengerPhone}</p>
+                <p className="mt-2 text-xs text-white/45">
+                  Passengers: {booking.passengerCount ?? '—'}
+                </p>
+              </div>
+            </div>
+
+            {booking.passengerNotes ? (
+              <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4">
+                <p className="text-xs uppercase tracking-[0.15em] text-cyan-300">
+                  Passenger Notes
+                </p>
+                <p className="mt-2 text-sm text-cyan-50">
+                  {booking.passengerNotes}
+                </p>
+              </div>
+            ) : null}
           </section>
 
           <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
@@ -182,7 +258,8 @@ export default function BookingDetailsDrawer({
                       Last update: {formatDateTime(booking.driver.lastLocationAt)}
                     </p>
                   ) : null}
-                  {booking.driver.latitude != null && booking.driver.longitude != null ? (
+                  {booking.driver.latitude != null &&
+                  booking.driver.longitude != null ? (
                     <p className="mt-1 text-xs text-white/45">
                       {booking.driver.latitude.toFixed(5)},{' '}
                       {booking.driver.longitude.toFixed(5)}
@@ -267,6 +344,15 @@ export default function BookingDetailsDrawer({
               </div>
             </div>
           </section>
+
+          {booking.notes ? (
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+              <h3 className="mb-4 text-lg font-bold">Booking Notes</h3>
+              <div className="rounded-xl border border-white/10 bg-[#0b1728] p-4 text-sm text-white/80">
+                {booking.notes}
+              </div>
+            </section>
+          ) : null}
 
           <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <h3 className="mb-4 text-lg font-bold">Timeline</h3>

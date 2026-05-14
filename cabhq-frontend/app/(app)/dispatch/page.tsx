@@ -15,18 +15,22 @@ const MapContainer = dynamic(
   () => import('react-leaflet').then((mod) => mod.MapContainer),
   { ssr: false },
 );
+
 const TileLayer = dynamic(
   () => import('react-leaflet').then((mod) => mod.TileLayer),
   { ssr: false },
 );
+
 const Marker = dynamic(
   () => import('react-leaflet').then((mod) => mod.Marker),
   { ssr: false },
 );
+
 const Popup = dynamic(
   () => import('react-leaflet').then((mod) => mod.Popup),
   { ssr: false },
 );
+
 const Polyline = dynamic(
   () => import('react-leaflet').then((mod) => mod.Polyline),
   { ssr: false },
@@ -49,6 +53,8 @@ type Driver = {
   status?: string;
   latitude?: number | null;
   longitude?: number | null;
+  heading?: number | null;
+  speed?: number | null;
   lastLocationAt?: string | null;
   vehicle?: Vehicle;
 };
@@ -73,14 +79,14 @@ type Account = {
 type Booking = {
   id: string;
   reference: string;
-  customerName?: string;
-  customerPhone?: string;
-  pickupAddress?: string;
-  dropoffAddress?: string;
-  pickup?: string;
-  dropoff?: string;
-  pickupAt?: string;
-  pickupTime?: string;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  pickupAddress?: string | null;
+  dropoffAddress?: string | null;
+  pickup?: string | null;
+  dropoff?: string | null;
+  pickupAt?: string | null;
+  pickupTime?: string | null;
   status: string;
   quotedPrice?: number | null;
   passengerCount?: number | null;
@@ -122,6 +128,45 @@ type BookingFormState = {
   dropoffLongitude: number | null;
 };
 
+type PricingQuote = {
+  pricingMode: 'FIXED' | 'TARIFF';
+  tariffName: string | null;
+  quotedPrice: number;
+  calculatedFare: number;
+  distanceMiles: number;
+  durationMinutes: number;
+  routeSource?: string;
+  matchedRoute: {
+    id: string;
+    fromLabel: string;
+    toLabel: string;
+    fixedPrice: number;
+  } | null;
+};
+
+type RouteResponse = {
+  distanceMiles: number;
+  durationMinutes: number;
+  coordinates: LatLngTuple[];
+};
+
+type SocketBookingPayload = {
+  booking: Booking;
+};
+
+type SocketDriverPayload = {
+  driver: Driver;
+};
+
+type SocketDriverLocationPayload = {
+  driverId: string;
+  latitude: number;
+  longitude: number;
+  heading?: number | null;
+  speed?: number | null;
+  lastLocationAt?: string | null;
+};
+
 const initialForm: BookingFormState = {
   customerName: '',
   customerPhone: '',
@@ -157,8 +202,7 @@ function getPickupTimeLabel(booking: Booking) {
 }
 
 function getAccountLabel(booking: Booking) {
-  if (booking.account?.name) return booking.account.name;
-  return 'Private';
+  return booking.account?.name || 'Private';
 }
 
 function getVehicleLabel(vehicle: Vehicle) {
@@ -218,6 +262,7 @@ function toDateTimeLocalValue(date = new Date()) {
   const dd = pad(date.getDate());
   const hh = pad(date.getHours());
   const min = pad(date.getMinutes());
+
   return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
 }
 
@@ -258,7 +303,11 @@ function bookingRowTone(status?: string) {
     return 'border-red-500/15 bg-red-500/[0.05]';
   }
 
-  if (['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB', 'ALLOCATED'].includes(normalized)) {
+  if (
+    ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB', 'ALLOCATED'].includes(
+      normalized,
+    )
+  ) {
     return 'border-cyan-500/15 bg-cyan-500/[0.05]';
   }
 
@@ -281,29 +330,12 @@ function isLive(status?: string) {
   return !isCompleted(status);
 }
 
-function Card({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string | number;
-  hint?: string;
-}) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-      <div className="text-sm text-white/55">{label}</div>
-      <div className="mt-3 text-3xl font-bold text-white">{value}</div>
-      {hint ? <div className="mt-2 text-xs text-white/35">{hint}</div> : null}
-    </div>
-  );
-}
-
 export default function DispatchPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [driversLoading, setDriversLoading] = useState(false);
@@ -315,7 +347,12 @@ export default function DispatchPage() {
   );
   const [creatingBooking, setCreatingBooking] = useState(false);
   const [bookingError, setBookingError] = useState('');
+  const [pricingLoading, setPricingLoading] = useState(false);
+  const [pricingResult, setPricingResult] = useState<PricingQuote | null>(null);
+  const [driverPickupRoute, setDriverPickupRoute] = useState<LatLngTuple[]>([]);
+  const [pickupDropoffRoute, setPickupDropoffRoute] = useState<LatLngTuple[]>([]);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const [statusBusy, setStatusBusy] = useState<string | null>(null);
   const [driverIconFactory, setDriverIconFactory] =
     useState<((driver: Driver) => DivIcon) | null>(null);
   const [bookingIconFactory, setBookingIconFactory] =
@@ -333,6 +370,7 @@ export default function DispatchPage() {
 
     async function loadLeaflet() {
       const L = await import('leaflet');
+
       if (!mounted) return;
 
       setDriverIconFactory(() => (driver: Driver) => {
@@ -412,7 +450,12 @@ export default function DispatchPage() {
 
   const selectedDriver = useMemo<Driver | null>(() => {
     if (!selectedBooking?.driverId) return null;
-    return drivers.find((d) => d.id === selectedBooking.driverId) ?? null;
+
+    return (
+      drivers.find((driver) => driver.id === selectedBooking.driverId) ??
+      selectedBooking.driver ??
+      null
+    );
   }, [selectedBooking, drivers]);
 
   const selectedDriverPosition = useMemo<LatLngTuple | null>(() => {
@@ -434,6 +477,7 @@ export default function DispatchPage() {
     ) {
       return null;
     }
+
     return [
       selectedBooking.pickupLatitude,
       selectedBooking.pickupLongitude,
@@ -447,6 +491,7 @@ export default function DispatchPage() {
     ) {
       return null;
     }
+
     return [
       selectedBooking.dropoffLatitude,
       selectedBooking.dropoffLongitude,
@@ -456,30 +501,33 @@ export default function DispatchPage() {
   const mapCenter = useMemo<LatLngTuple>(() => {
     if (selectedPickupPosition) return selectedPickupPosition;
     if (selectedDriverPosition) return selectedDriverPosition;
+
     if (liveDrivers.length > 0) {
       return [
         liveDrivers[0].latitude as number,
         liveDrivers[0].longitude as number,
       ] as LatLngTuple;
     }
+
     return [51.5074, -0.1278] as LatLngTuple;
   }, [liveDrivers, selectedPickupPosition, selectedDriverPosition]);
 
   useEffect(() => {
     if (!mapRef.current) return;
 
-    const points: LatLngTuple[] = [
-      ...liveDrivers.map(
-        (driver): LatLngTuple => [
-          driver.latitude as number,
-          driver.longitude as number,
-        ],
-      ),
-    ];
+    const points: LatLngTuple[] = liveDrivers.map(
+      (driver): LatLngTuple => [
+        driver.latitude as number,
+        driver.longitude as number,
+      ],
+    );
 
     if (selectedDriverPosition) points.push(selectedDriverPosition);
     if (selectedPickupPosition) points.push(selectedPickupPosition);
     if (selectedDropoffPosition) points.push(selectedDropoffPosition);
+
+    driverPickupRoute.forEach((point) => points.push(point));
+    pickupDropoffRoute.forEach((point) => points.push(point));
 
     if (points.length === 0) return;
 
@@ -494,72 +542,170 @@ export default function DispatchPage() {
     selectedDriverPosition,
     selectedPickupPosition,
     selectedDropoffPosition,
+    driverPickupRoute,
+    pickupDropoffRoute,
   ]);
+
+  const syncBooking = useCallback((booking: Booking) => {
+    setBookings((prev) => {
+      const exists = prev.some((item) => item.id === booking.id);
+
+      if (!exists) {
+        return [booking, ...prev];
+      }
+
+      return prev.map((item) => (item.id === booking.id ? booking : item));
+    });
+
+    setSelectedBooking((current) =>
+      current?.id === booking.id ? booking : current,
+    );
+  }, []);
+
+  const syncDriver = useCallback((driver: Driver) => {
+    setDrivers((prev) => {
+      const exists = prev.some((item) => item.id === driver.id);
+
+      if (!exists) {
+        return [driver, ...prev];
+      }
+
+      return prev.map((item) => (item.id === driver.id ? driver : item));
+    });
+
+    setSelectedBooking((current) => {
+      if (!current?.driverId || current.driverId !== driver.id) {
+        return current;
+      }
+
+      return {
+        ...current,
+        driver,
+      };
+    });
+  }, []);
+
+  const syncDriverLocation = useCallback((payload: SocketDriverLocationPayload) => {
+    setDrivers((prev) =>
+      prev.map((driver) =>
+        driver.id === payload.driverId
+          ? {
+              ...driver,
+              latitude: payload.latitude,
+              longitude: payload.longitude,
+              heading: payload.heading ?? driver.heading ?? null,
+              speed: payload.speed ?? driver.speed ?? null,
+              lastLocationAt:
+                payload.lastLocationAt ?? new Date().toISOString(),
+            }
+          : driver,
+      ),
+    );
+
+    setSelectedBooking((current) => {
+      if (!current?.driver || current.driver.id !== payload.driverId) {
+        return current;
+      }
+
+      return {
+        ...current,
+        driver: {
+          ...current.driver,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          heading: payload.heading ?? current.driver.heading ?? null,
+          speed: payload.speed ?? current.driver.speed ?? null,
+          lastLocationAt:
+            payload.lastLocationAt ?? new Date().toISOString(),
+        },
+      };
+    });
+  }, []);
 
   const loadBookings = useCallback(async () => {
     const data = await apiFetch<Booking[]>('/bookings/dispatch-board');
     const nextBookings = Array.isArray(data) ? data : [];
+
     setBookings(nextBookings);
 
     setSelectedBooking((current) => {
       if (!current) return current;
-      return nextBookings.find((b) => b.id === current.id) ?? current;
+      return (
+        nextBookings.find((booking) => booking.id === current.id) ?? current
+      );
     });
   }, []);
 
-  const loadDrivers = useCallback(
-    async (showSpinner = true) => {
-      try {
-        setDriversError('');
-        if (showSpinner) setDriversLoading(true);
+  const loadDrivers = useCallback(async (showSpinner = true) => {
+    try {
+      setDriversError('');
 
-        const data = await apiFetch<Driver[]>('/drivers');
-        setDrivers(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error(error);
-        setDriversError(
-          error instanceof Error ? error.message : 'Failed to load drivers',
-        );
-      } finally {
-        if (showSpinner) setDriversLoading(false);
+      if (showSpinner) {
+        setDriversLoading(true);
       }
-    },
-    [],
-  );
+
+      const data = await apiFetch<Driver[]>('/drivers');
+      setDrivers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error(error);
+      setDriversError(
+        error instanceof Error ? error.message : 'Failed to load drivers',
+      );
+    } finally {
+      if (showSpinner) {
+        setDriversLoading(false);
+      }
+    }
+  }, []);
 
   const loadAccounts = useCallback(async () => {
     try {
       const data = await apiFetch<Account[]>('/accounts');
       const next = Array.isArray(data) ? data : [];
-      setAccounts(next.filter((account) => (account.status || 'ACTIVE') !== 'CLOSED'));
+
+      setAccounts(
+        next.filter((account) => (account.status || 'ACTIVE') !== 'CLOSED'),
+      );
     } catch (error) {
       console.error(error);
       setAccounts([]);
     }
   }, []);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true);
-        await Promise.all([loadBookings(), loadDrivers(true), loadAccounts()]);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void load();
+  const refreshBoard = useCallback(async () => {
+    await Promise.all([loadBookings(), loadDrivers(true), loadAccounts()]);
   }, [loadBookings, loadDrivers, loadAccounts]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    let mounted = true;
+
+    async function load() {
+      try {
+        setLoading(true);
+        await refreshBoard();
+      } catch (error) {
+        console.error(error);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+
+    return () => {
+      mounted = false;
+    };
+  }, [refreshBoard]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
       void loadDrivers(false);
       void loadBookings();
-    }, 10000);
+    }, 15000);
 
-    return () => clearInterval(interval);
+    return () => window.clearInterval(interval);
   }, [loadDrivers, loadBookings]);
 
   useEffect(() => {
@@ -567,78 +713,138 @@ export default function DispatchPage() {
 
     const socket = getSocket(token);
 
-    socket.on('connect', () => setConnected(true));
-    socket.on('disconnect', () => setConnected(false));
+    const handleConnect = () => setConnected(true);
+    const handleDisconnect = () => setConnected(false);
 
-    socket.on('booking:created', (p) => {
-      setBookings((prev) => {
-        const exists = prev.some((b) => b.id === p.booking.id);
-        if (exists) {
-          return prev.map((b) => (b.id === p.booking.id ? p.booking : b));
-        }
-        return [p.booking, ...prev];
-      });
-    });
+    const handleBookingCreated = (payload: SocketBookingPayload) => {
+      if (payload?.booking) {
+        syncBooking(payload.booking);
+      }
+    };
 
-    socket.on('booking:updated', (p) => {
-      setBookings((prev) =>
-        prev.map((b) => (b.id === p.booking.id ? p.booking : b)),
+    const handleBookingUpdated = (payload: SocketBookingPayload) => {
+      if (payload?.booking) {
+        syncBooking(payload.booking);
+      }
+    };
+
+    const handleDriverUpdated = (payload: SocketDriverPayload) => {
+      if (payload?.driver) {
+        syncDriver(payload.driver);
+      }
+    };
+
+    const handleDriverLocation = (payload: SocketDriverLocationPayload) => {
+      if (
+        payload?.driverId &&
+        typeof payload.latitude === 'number' &&
+        typeof payload.longitude === 'number'
+      ) {
+        syncDriverLocation(payload);
+      }
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+
+    socket.on('booking:created', handleBookingCreated);
+    socket.on('booking:updated', handleBookingUpdated);
+    socket.on('booking:assigned', handleBookingUpdated);
+    socket.on('booking:status_changed', handleBookingUpdated);
+    socket.on('booking:offer_created', handleBookingUpdated);
+
+    socket.on('driver:updated', handleDriverUpdated);
+    socket.on('driver:location', handleDriverLocation);
+
+    if (socket.connected) {
+      setConnected(true);
+    }
+
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+
+      socket.off('booking:created', handleBookingCreated);
+      socket.off('booking:updated', handleBookingUpdated);
+      socket.off('booking:assigned', handleBookingUpdated);
+      socket.off('booking:status_changed', handleBookingUpdated);
+      socket.off('booking:offer_created', handleBookingUpdated);
+
+      socket.off('driver:updated', handleDriverUpdated);
+      socket.off('driver:location', handleDriverLocation);
+
+      closeSocket();
+    };
+  }, [token, syncBooking, syncDriver, syncDriverLocation]);
+
+  async function fetchRoute(
+    from: LatLngTuple | null,
+    to: LatLngTuple | null,
+  ): Promise<LatLngTuple[]> {
+    if (!from || !to) return [];
+
+    try {
+      const route = await apiFetch<RouteResponse>(
+        `/locations/route?fromLat=${encodeURIComponent(String(from[0]))}&fromLng=${encodeURIComponent(
+          String(from[1]),
+        )}&toLat=${encodeURIComponent(String(to[0]))}&toLng=${encodeURIComponent(String(to[1]))}`,
       );
-      setSelectedBooking((prev) =>
-        prev?.id === p.booking.id ? p.booking : prev,
-      );
-    });
 
-    socket.on('booking:assigned', (p) => {
-      setBookings((prev) =>
-        prev.map((b) => (b.id === p.booking.id ? p.booking : b)),
-      );
-      setSelectedBooking((prev) =>
-        prev?.id === p.booking.id ? p.booking : prev,
-      );
-    });
+      return Array.isArray(route.coordinates) ? route.coordinates : [];
+    } catch (error) {
+      console.error('Failed to load route:', error);
+      return [];
+    }
+  }
 
-    socket.on('booking:status_changed', (p) => {
-      setBookings((prev) =>
-        prev.map((b) => (b.id === p.booking.id ? p.booking : b)),
-      );
-      setSelectedBooking((prev) =>
-        prev?.id === p.booking.id ? p.booking : prev,
-      );
-    });
+  useEffect(() => {
+    let cancelled = false;
 
-    socket.on('driver:updated', (p) => {
-      setDrivers((prev) => {
-        const existing = prev.some((d) => d.id === p.driver.id);
-        if (!existing) return [p.driver, ...prev];
-        return prev.map((d) => (d.id === p.driver.id ? p.driver : d));
-      });
-    });
+    async function loadRoutes() {
+      const [driverToPickup, pickupToDropoff] = await Promise.all([
+        fetchRoute(selectedDriverPosition, selectedPickupPosition),
+        fetchRoute(selectedPickupPosition, selectedDropoffPosition),
+      ]);
 
-    return () => closeSocket();
-  }, [token]);
+      if (cancelled) return;
 
-  const autoDispatch = async (id: string) => {
+      setDriverPickupRoute(driverToPickup);
+      setPickupDropoffRoute(pickupToDropoff);
+    }
+
+    void loadRoutes();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDriverPosition, selectedPickupPosition, selectedDropoffPosition]);
+
+  async function autoDispatch(id: string) {
     try {
       setAutoDispatchingId(id);
-      await apiFetch(`/bookings/${id}/auto-dispatch`, { method: 'POST' });
-      await loadBookings();
-      await loadDrivers(false);
+
+      await apiFetch(`/bookings/${id}/auto-dispatch`, {
+        method: 'POST',
+      });
+
+      await Promise.all([loadBookings(), loadDrivers(false)]);
     } catch (error) {
       console.error(error);
       alert(error instanceof Error ? error.message : 'Failed to auto dispatch');
     } finally {
       setAutoDispatchingId(null);
     }
-  };
+  }
 
-  const assignDriver = async (bookingId: string, driverId: string) => {
+  async function assignDriver(bookingId: string, driverId: string) {
     try {
       setAssigningKey(`${bookingId}:${driverId}`);
+
       await apiFetch(`/bookings/${bookingId}/assign-driver`, {
         method: 'POST',
         body: JSON.stringify({ driverId }),
       });
+
       await Promise.all([loadBookings(), loadDrivers(false)]);
     } catch (error) {
       console.error(error);
@@ -646,9 +852,123 @@ export default function DispatchPage() {
     } finally {
       setAssigningKey(null);
     }
-  };
+  }
 
-  const createBooking = async (autoDispatchAfterCreate = false) => {
+  async function updateBookingStatus(bookingId: string, status: string) {
+    try {
+      setStatusBusy(status);
+
+      await apiFetch(`/bookings/${bookingId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+
+      await Promise.all([loadBookings(), loadDrivers(false)]);
+      await loadTimeline(bookingId);
+    } catch (error) {
+      console.error(error);
+      alert(error instanceof Error ? error.message : 'Failed to update status');
+    } finally {
+      setStatusBusy(null);
+    }
+  }
+
+  async function cancelBooking(bookingId: string) {
+    const confirmed = window.confirm('Cancel this booking?');
+    if (!confirmed) return;
+
+    try {
+      setStatusBusy('CANCELLED');
+
+      await apiFetch(`/bookings/${bookingId}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: 'Cancelled from dispatch drawer' }),
+      });
+
+      await Promise.all([loadBookings(), loadDrivers(false)]);
+      await loadTimeline(bookingId);
+    } catch (error) {
+      console.error(error);
+      alert(error instanceof Error ? error.message : 'Failed to cancel booking');
+    } finally {
+      setStatusBusy(null);
+    }
+  }
+
+  useEffect(() => {
+  let cancelled = false;
+
+  async function calculateQuote() {
+    if (!form.pickupAddress.trim() || !form.dropoffAddress.trim()) {
+      setPricingResult(null);
+      return;
+    }
+
+    try {
+      setPricingLoading(true);
+
+      const pickupTime =
+        form.whenType === 'SCHEDULED' && form.pickupAt
+          ? new Date(form.pickupAt).toISOString()
+          : new Date().toISOString();
+
+      const quote = await apiFetch<PricingQuote>('/pricing/quote', {
+        method: 'POST',
+        body: JSON.stringify({
+          pickup: form.pickupAddress,
+          dropoff: form.dropoffAddress,
+          pickupLat: form.pickupLatitude,
+          pickupLng: form.pickupLongitude,
+          dropoffLat: form.dropoffLatitude,
+          dropoffLng: form.dropoffLongitude,
+          pickupTime,
+          passengerCount: form.passengerCount,
+          isPreBooked: form.whenType === 'SCHEDULED',
+        }),
+      });
+
+      if (cancelled) return;
+
+      setPricingResult(quote);
+
+      setForm((prev) => ({
+        ...prev,
+        quotedPrice: quote.quotedPrice.toFixed(2),
+      }));
+    } catch (error) {
+      console.error('Quote failed:', error);
+
+      if (!cancelled) {
+        setPricingResult(null);
+      }
+    } finally {
+      if (!cancelled) {
+        setPricingLoading(false);
+      }
+    }
+  }
+
+  const timer = window.setTimeout(() => {
+    void calculateQuote();
+  }, 600);
+
+  return () => {
+    cancelled = true;
+    window.clearTimeout(timer);
+  };
+}, [
+  form.pickupAddress,
+  form.dropoffAddress,
+  form.pickupLatitude,
+  form.pickupLongitude,
+  form.dropoffLatitude,
+  form.dropoffLongitude,
+  form.whenType,
+  form.pickupAt,
+  form.passengerCount,
+]);
+
+  async function createBooking(autoDispatchAfterCreate = false) {
     try {
       setCreatingBooking(true);
       setBookingError('');
@@ -685,79 +1005,108 @@ export default function DispatchPage() {
         customerName: form.customerName.trim(),
         customerPhone: form.customerPhone.trim() || null,
         accountId: form.accountId || null,
+
         pickup: form.pickupAddress.trim(),
         dropoff: form.dropoffAddress.trim(),
         pickupTime: scheduledTime,
+
+        pickupAddress: form.pickupAddress.trim(),
+        dropoffAddress: form.dropoffAddress.trim(),
+        pickupAt: scheduledTime,
+
         pickupLat: form.pickupLatitude,
         pickupLng: form.pickupLongitude,
         dropoffLat: form.dropoffLatitude,
         dropoffLng: form.dropoffLongitude,
-        pickupAddress: form.pickupAddress.trim(),
-        dropoffAddress: form.dropoffAddress.trim(),
-        pickupAt: scheduledTime,
+
         pickupLatitude: form.pickupLatitude,
         pickupLongitude: form.pickupLongitude,
         dropoffLatitude: form.dropoffLatitude,
         dropoffLongitude: form.dropoffLongitude,
+
         passengerCount: Number(form.passengerCount) || 1,
         quotedPrice: quotedPriceNumber,
         notes: form.notes.trim() || null,
+        autoDispatch: autoDispatchAfterCreate,
       };
 
-      const createdBooking = await apiFetch<Booking>('/bookings', {
+      const created = await apiFetch<Booking>('/bookings', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
 
-      setForm(initialForm);
-      await Promise.all([loadBookings(), loadDrivers(false)]);
-
-      if (autoDispatchAfterCreate && createdBooking?.id) {
-        await autoDispatch(createdBooking.id);
+      if (created?.id) {
+        syncBooking(created);
       }
-    } catch (err) {
+
+      setForm(initialForm);
+      setPricingResult(null);
+      await Promise.all([loadBookings(), loadDrivers(false)]);
+    } catch (error) {
       setBookingError(
-        err instanceof Error ? err.message : 'Failed to create booking',
+        error instanceof Error ? error.message : 'Failed to create booking',
       );
     } finally {
       setCreatingBooking(false);
     }
-  };
+  }
 
-  const loadTimeline = async (bookingId: string) => {
+  async function loadTimeline(bookingId: string) {
     try {
-      const data = await apiFetch<TimelineEvent[]>(`/bookings/${bookingId}/timeline`);
+      const data = await apiFetch<TimelineEvent[]>(
+        `/bookings/${bookingId}/timeline`,
+      );
+
       setTimeline(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error(error);
       setTimeline([]);
     }
-  };
+  }
+
+  function openBookingDrawer(booking: Booking) {
+    setSelectedBooking(booking);
+    setDrawerOpen(true);
+    void loadTimeline(booking.id);
+  }
 
   const stats = useMemo(() => {
     return {
       bookings: bookings.length,
-      live: bookings.filter((b) => isLive(b.status)).length,
-      completed: bookings.filter((b) => (b.status || '').toUpperCase() === 'COMPLETED')
-        .length,
+      live: bookings.filter((booking) => isLive(booking.status)).length,
+      completed: bookings.filter(
+        (booking) => (booking.status || '').toUpperCase() === 'COMPLETED',
+      ).length,
       drivers: drivers.length,
       available: drivers.filter(
-        (d) => d.isAvailable || d.status === 'AVAILABLE',
+        (driver) =>
+          driver.isAvailable ||
+          (driver.status || '').toUpperCase() === 'AVAILABLE',
       ).length,
       liveGps: liveDrivers.length,
-      accountLinked: bookings.filter((b) => Boolean(b.accountId || b.account)).length,
+      accountLinked: bookings.filter((booking) =>
+        Boolean(booking.accountId || booking.account),
+      ).length,
     };
   }, [bookings, drivers, liveDrivers.length]);
 
   const filteredBookings = useMemo(() => {
     const q = search.trim().toLowerCase();
+
     const ordered = [...bookings].sort((a, b) => {
       const aLive = isLive(a.status) ? 0 : 1;
       const bLive = isLive(b.status) ? 0 : 1;
+
       if (aLive !== bLive) return aLive - bLive;
 
-      const aTime = new Date(getPickupTimeLabel(a) || a.createdAt || 0).getTime();
-      const bTime = new Date(getPickupTimeLabel(b) || b.createdAt || 0).getTime();
+      const aTime = new Date(
+        getPickupTimeLabel(a) || a.createdAt || 0,
+      ).getTime();
+
+      const bTime = new Date(
+        getPickupTimeLabel(b) || b.createdAt || 0,
+      ).getTime();
+
       return aTime - bTime;
     });
 
@@ -782,12 +1131,12 @@ export default function DispatchPage() {
   }, [bookings, search]);
 
   const liveBookings = useMemo(
-    () => filteredBookings.filter((b) => isLive(b.status)),
+    () => filteredBookings.filter((booking) => isLive(booking.status)),
     [filteredBookings],
   );
 
   const completedBookings = useMemo(
-    () => filteredBookings.filter((b) => !isLive(b.status)),
+    () => filteredBookings.filter((booking) => !isLive(booking.status)),
     [filteredBookings],
   );
 
@@ -799,11 +1148,14 @@ export default function DispatchPage() {
             <div className="text-[11px] uppercase tracking-[0.24em] text-white/35">
               Operations
             </div>
+
             <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">
               Dispatch
             </h1>
+
             <p className="mt-2 text-sm text-white/55">
-              Live bookings, quick booking entry, driver map and dispatch control.
+              Live bookings, quick booking entry, driver map and dispatch
+              control.
             </p>
           </div>
 
@@ -816,11 +1168,7 @@ export default function DispatchPage() {
             </div>
 
             <button
-              onClick={() => {
-                void loadBookings();
-                void loadDrivers(true);
-                void loadAccounts();
-              }}
+              onClick={() => void refreshBoard()}
               className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20"
             >
               Refresh Board
@@ -835,7 +1183,11 @@ export default function DispatchPage() {
           <Card label="Drivers" value={stats.drivers} hint="Driver records" />
           <Card label="Available" value={stats.available} hint="Dispatch ready" />
           <Card label="GPS Live" value={stats.liveGps} hint="Live positions" />
-          <Card label="Account Jobs" value={stats.accountLinked} hint="Linked to accounts" />
+          <Card
+            label="Account Jobs"
+            value={stats.accountLinked}
+            hint="Linked to accounts"
+          />
         </section>
 
         <div className="mb-8 grid gap-6 xl:grid-cols-2">
@@ -887,7 +1239,8 @@ export default function DispatchPage() {
                 label="Account status"
                 value={
                   form.accountId
-                    ? accounts.find((a) => a.id === form.accountId)?.status || 'ACTIVE'
+                    ? accounts.find((account) => account.id === form.accountId)
+                        ?.status || 'ACTIVE'
                     : 'Private booking'
                 }
               />
@@ -902,6 +1255,9 @@ export default function DispatchPage() {
                     setForm((prev) => ({
                       ...prev,
                       pickupAddress: value,
+                      pickupLatitude: null,
+                      pickupLongitude: null,
+                      quotedPrice: '',
                     }))
                   }
                   onSelectAddress={(address: SelectedAddress) =>
@@ -925,6 +1281,9 @@ export default function DispatchPage() {
                     setForm((prev) => ({
                       ...prev,
                       dropoffAddress: value,
+                      dropoffLatitude: null,
+                      dropoffLongitude: null,
+                      quotedPrice: '',
                     }))
                   }
                   onSelectAddress={(address: SelectedAddress) =>
@@ -978,14 +1337,58 @@ export default function DispatchPage() {
                 }
               />
 
-              <Field
-                label="Quoted price"
-                value={form.quotedPrice}
-                onChange={(value) =>
-                  setForm((prev) => ({ ...prev, quotedPrice: value }))
-                }
-                placeholder="12.50"
-              />
+              <div>
+                <Field
+                  label="Quoted price"
+                  value={form.quotedPrice}
+                  onChange={(value) =>
+                    setForm((prev) => ({ ...prev, quotedPrice: value }))
+                  }
+                  placeholder="12.50"
+                />
+
+                {pricingLoading ? (
+                  <div className="mt-3 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-200">
+                    Calculating quote...
+                  </div>
+                ) : pricingResult ? (
+                  <div
+                    className={`mt-3 rounded-2xl border px-4 py-3 text-sm ${
+                      pricingResult.pricingMode === 'FIXED'
+                        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                        : 'border-cyan-500/20 bg-cyan-500/10 text-cyan-200'
+                    }`}
+                  >
+                    <div className="text-xs uppercase tracking-[0.18em] opacity-70">
+                      {pricingResult.pricingMode === 'FIXED'
+                        ? 'Fixed Route Fare'
+                        : pricingResult.tariffName || 'Tariff Fare'}
+                    </div>
+
+                    <div className="mt-2 text-2xl font-black">
+                      £{pricingResult.quotedPrice.toFixed(2)}
+                    </div>
+
+                    <div className="mt-2 text-xs opacity-75">
+                      {pricingResult.distanceMiles.toFixed(2)} miles •{' '}
+                      {pricingResult.durationMinutes} mins
+                    </div>
+
+                    {pricingResult.matchedRoute ? (
+                      <div className="mt-1 text-[11px] opacity-70">
+                        {pricingResult.matchedRoute.fromLabel} →{' '}
+                        {pricingResult.matchedRoute.toLabel}
+                      </div>
+                    ) : null}
+
+                    {pricingResult.routeSource ? (
+                      <div className="mt-1 text-[11px] opacity-50">
+                        Route: {pricingResult.routeSource}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
 
               <div className="md:col-span-2">
                 <TextAreaField
@@ -1035,9 +1438,10 @@ export default function DispatchPage() {
 
               <button
                 onClick={() => void loadDrivers(true)}
-                className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20"
+                disabled={driversLoading}
+                className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
               >
-                Refresh Drivers
+                {driversLoading ? 'Loading...' : 'Refresh Drivers'}
               </button>
             </div>
 
@@ -1066,21 +1470,28 @@ export default function DispatchPage() {
                   liveDrivers.map((driver) => (
                     <Marker
                       key={driver.id}
-                      position={[
-                        driver.latitude as number,
-                        driver.longitude as number,
-                      ] as LatLngTuple}
+                      position={
+                        [
+                          driver.latitude as number,
+                          driver.longitude as number,
+                        ] as LatLngTuple
+                      }
                       icon={driverIconFactory(driver)}
                     >
                       <Popup>
                         <div className="min-w-[180px] text-black">
-                          <div className="font-bold">{getDriverName(driver)}</div>
+                          <div className="font-bold">
+                            {getDriverName(driver)}
+                          </div>
+
                           <div className="mt-1 text-sm">
                             {(driver.status || 'UNKNOWN').replace(/_/g, ' ')}
                           </div>
+
                           <div className="mt-1 text-sm">
                             {getVehicleLabel(driver.vehicle ?? null)}
                           </div>
+
                           <div className="mt-2 text-xs text-gray-600">
                             GPS: {formatDateTime(driver.lastLocationAt)}
                           </div>
@@ -1099,12 +1510,14 @@ export default function DispatchPage() {
                         <div className="font-bold">
                           Assigned Driver: {getDriverName(selectedDriver)}
                         </div>
+
                         <div className="mt-1 text-sm">
                           {(selectedDriver.status || 'UNKNOWN').replace(
                             /_/g,
                             ' ',
                           )}
                         </div>
+
                         <div className="mt-1 text-sm">
                           {getVehicleLabel(selectedDriver.vehicle ?? null)}
                         </div>
@@ -1149,24 +1562,44 @@ export default function DispatchPage() {
                   </Marker>
                 ) : null}
 
-                {selectedDriverPosition && selectedPickupPosition ? (
+                {driverPickupRoute.length > 0 ? (
                   <Polyline
-                    positions={[selectedDriverPosition, selectedPickupPosition]}
+                    positions={driverPickupRoute}
                     pathOptions={{
                       color: '#22c55e',
                       weight: 4,
                       opacity: 0.85,
                     }}
                   />
+                ) : selectedDriverPosition && selectedPickupPosition ? (
+                  <Polyline
+                    positions={[selectedDriverPosition, selectedPickupPosition]}
+                    pathOptions={{
+                      color: '#22c55e',
+                      weight: 4,
+                      opacity: 0.45,
+                      dashArray: '8 8',
+                    }}
+                  />
                 ) : null}
 
-                {selectedPickupPosition && selectedDropoffPosition ? (
+                {pickupDropoffRoute.length > 0 ? (
+                  <Polyline
+                    positions={pickupDropoffRoute}
+                    pathOptions={{
+                      color: '#8b5cf6',
+                      weight: 4,
+                      opacity: 0.85,
+                    }}
+                  />
+                ) : selectedPickupPosition && selectedDropoffPosition ? (
                   <Polyline
                     positions={[selectedPickupPosition, selectedDropoffPosition]}
                     pathOptions={{
                       color: '#8b5cf6',
                       weight: 4,
-                      opacity: 0.85,
+                      opacity: 0.45,
+                      dashArray: '8 8',
                     }}
                   />
                 ) : null}
@@ -1175,368 +1608,651 @@ export default function DispatchPage() {
           </section>
         </div>
 
-        <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-5">
-          <div className="mb-5 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <section className="mb-6 rounded-3xl border border-white/10 bg-[#0b1220] p-5">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
               <h2 className="text-2xl font-bold text-white">Dispatch Board</h2>
               <p className="mt-1 text-sm text-white/55">
-                Live jobs first, completed jobs compact below.
+                Search live, completed and cancelled bookings.
               </p>
             </div>
 
-            <div className="flex w-full flex-col gap-3 sm:flex-row xl:w-auto">
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/65">
-                Live {liveBookings.length} · Completed {completedBookings.length}
-              </div>
-
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search ref, customer, route, phone, driver, account..."
-                className="w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50 xl:w-[360px]"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-6">
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-white/45">
-                  Live Jobs
-                </h3>
-                <span className="text-xs text-white/35">{liveBookings.length} items</span>
-              </div>
-
-              {loading ? (
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-5 text-sm text-white/55">
-                  Loading bookings...
-                </div>
-              ) : liveBookings.length === 0 ? (
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-5 text-sm text-white/55">
-                  No live bookings found.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {liveBookings.map((b) => (
-                    <div
-                      key={b.id}
-                      className={`rounded-2xl border px-4 py-4 ${bookingRowTone(
-                        b.status,
-                      )}`}
-                    >
-                      <div className="grid gap-4 xl:grid-cols-[120px_150px_1.6fr_160px_150px_130px_auto] xl:items-center">
-                        <div>
-                          <div className="text-sm font-bold text-white">{b.reference}</div>
-                          <div className="mt-1 text-xs text-white/45">
-                            {b.customerName || 'No name'}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-sm font-semibold text-white">
-                            {formatTimeOnly(getPickupTimeLabel(b))}
-                          </div>
-                          <div className="mt-1 text-xs text-white/45">
-                            {formatDateTime(getPickupTimeLabel(b))}
-                          </div>
-                        </div>
-
-                        <div className="min-w-0">
-                          <div className="truncate text-sm text-white">
-                            {getPickupLabel(b)}
-                          </div>
-                          <div className="truncate text-sm text-white/55">
-                            → {getDropoffLabel(b)}
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-4 text-xs text-white/40">
-                            <span>Phone: {b.customerPhone || '—'}</span>
-                            <span>Passengers: {b.passengerCount ?? '—'}</span>
-                            <span>Fare: {formatPrice(b.quotedPrice)}</span>
-                          </div>
-                        </div>
-
-                        <div>
-                          <span
-                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${accountTone(
-                              Boolean(b.accountId || b.account),
-                            )}`}
-                          >
-                            {getAccountLabel(b)}
-                          </span>
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                          <span
-                            className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(
-                              b.status,
-                            )}`}
-                          >
-                            {(b.status || 'UNKNOWN').replace(/_/g, ' ')}
-                          </span>
-                          <div className="text-sm text-white/70">
-                            {getDriverName(b.driver)}
-                          </div>
-                        </div>
-
-                        <div className="space-y-2">
-                          {b.suggestedDrivers?.slice(0, 2).map((suggested, index) => {
-                            const key = `${b.id}:${suggested.id}`;
-
-                            return (
-                              <button
-                                key={suggested.id}
-                                onClick={() => assignDriver(b.id, suggested.id)}
-                                disabled={assigningKey === key}
-                                className="block w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-left text-xs text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
-                              >
-                                <div className="font-semibold">
-                                  #{index + 1} {suggested.name}
-                                </div>
-                                <div className="mt-1 text-[11px] text-emerald-100/70">
-                                  {formatDistance(suggested.distanceMiles)} •{' '}
-                                  {assigningKey === key ? 'Assigning...' : 'Assign'}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        <div className="flex flex-wrap gap-2 xl:justify-end">
-                          <button
-                            onClick={() => autoDispatch(b.id)}
-                            disabled={autoDispatchingId === b.id}
-                            className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                          >
-                            {autoDispatchingId === b.id ? 'Running...' : 'Auto Dispatch'}
-                          </button>
-
-                          <button
-                            onClick={() => {
-                              setSelectedBooking(b);
-                              setTimelineOpen(true);
-                              void loadTimeline(b.id);
-                            }}
-                            className="rounded-xl bg-purple-600 px-3 py-2 text-xs font-semibold text-white"
-                          >
-                            Timeline
-                          </button>
-
-                          <button
-                            onClick={() => setSelectedBooking(b)}
-                            className="rounded-xl bg-cyan-700 px-3 py-2 text-xs font-semibold text-white"
-                          >
-                            Show on Map
-                          </button>
-                        </div>
-                      </div>
-
-                      {b.notes ? (
-                        <div className="mt-3 border-t border-white/5 pt-3 text-xs text-white/45">
-                          {b.notes}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold uppercase tracking-[0.18em] text-white/45">
-                  Completed / Cancelled
-                </h3>
-                <span className="text-xs text-white/35">{completedBookings.length} items</span>
-              </div>
-
-              {completedBookings.length === 0 ? (
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-5 text-sm text-white/55">
-                  No completed or cancelled bookings found.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {completedBookings.map((b) => (
-                    <div
-                      key={b.id}
-                      className={`rounded-2xl border px-4 py-3 ${bookingRowTone(
-                        b.status,
-                      )}`}
-                    >
-                      <div className="grid gap-3 xl:grid-cols-[130px_130px_1.6fr_160px_150px_140px_auto] xl:items-center">
-                        <div className="text-sm font-semibold text-white">
-                          {b.reference}
-                        </div>
-
-                        <div className="text-sm text-white/60">
-                          {formatTimeOnly(getPickupTimeLabel(b))}
-                        </div>
-
-                        <div className="min-w-0">
-                          <div className="truncate text-sm text-white/75">
-                            {getPickupLabel(b)} → {getDropoffLabel(b)}
-                          </div>
-                        </div>
-
-                        <div>
-                          <span
-                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${accountTone(
-                              Boolean(b.accountId || b.account),
-                            )}`}
-                          >
-                            {getAccountLabel(b)}
-                          </span>
-                        </div>
-
-                        <div>
-                          <span
-                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(
-                              b.status,
-                            )}`}
-                          >
-                            {(b.status || 'UNKNOWN').replace(/_/g, ' ')}
-                          </span>
-                        </div>
-
-                        <div className="text-sm text-white/60">
-                          {getDriverName(b.driver)}
-                        </div>
-
-                        <div className="flex flex-wrap gap-2 xl:justify-end">
-                          <button
-                            onClick={() => {
-                              setSelectedBooking(b);
-                              setTimelineOpen(true);
-                              void loadTimeline(b.id);
-                            }}
-                            className="rounded-xl border border-white/10 px-3 py-2 text-xs text-white/80 hover:bg-white/10"
-                          >
-                            Timeline
-                          </button>
-
-                          <button
-                            onClick={() => setSelectedBooking(b)}
-                            className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-500/20"
-                          >
-                            Show on Map
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search ref, customer, phone, route, driver, account..."
+              className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50 xl:w-[420px]"
+            />
           </div>
         </section>
 
-        {selectedBooking && (
-          <section className="mt-6 rounded-3xl border border-cyan-500/20 bg-cyan-500/[0.06] p-5">
-            <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-              <div>
-                <h3 className="text-xl font-bold text-cyan-200">
-                  Selected Booking · {selectedBooking.reference}
-                </h3>
-                <div className="mt-3 grid gap-2 text-sm text-white/75 md:grid-cols-2 xl:grid-cols-4">
-                  <div>Pickup: {getPickupLabel(selectedBooking)}</div>
-                  <div>Dropoff: {getDropoffLabel(selectedBooking)}</div>
-                  <div>Driver: {getDriverName(selectedBooking.driver)}</div>
-                  <div>Status: {selectedBooking.status}</div>
-                  <div>Account: {getAccountLabel(selectedBooking)}</div>
-                  <div>
-                    Pickup coords:{' '}
-                    {selectedBooking.pickupLatitude != null &&
-                    selectedBooking.pickupLongitude != null
-                      ? `${selectedBooking.pickupLatitude}, ${selectedBooking.pickupLongitude}`
-                      : 'Not available'}
-                  </div>
-                  <div>
-                    Dropoff coords:{' '}
-                    {selectedBooking.dropoffLatitude != null &&
-                    selectedBooking.dropoffLongitude != null
-                      ? `${selectedBooking.dropoffLatitude}, ${selectedBooking.dropoffLongitude}`
-                      : 'Not available'}
-                  </div>
-                  <div>
-                    Driver coords:{' '}
-                    {selectedDriverPosition
-                      ? `${selectedDriverPosition[0]}, ${selectedDriverPosition[1]}`
-                      : 'Not available'}
-                  </div>
-                </div>
-              </div>
+        <DispatchBoard
+          title="Live Jobs"
+          loading={loading}
+          bookings={liveBookings}
+          emptyLabel="No live bookings found."
+          assigningKey={assigningKey}
+          autoDispatchingId={autoDispatchingId}
+          onAssignDriver={assignDriver}
+          onAutoDispatch={autoDispatch}
+          onOpenBooking={openBookingDrawer}
+          onShowOnMap={(booking) => setSelectedBooking(booking)}
+        />
 
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => {
-                    setTimelineOpen(true);
-                    void loadTimeline(selectedBooking.id);
-                  }}
-                  className="rounded-2xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white"
-                >
-                  Open Timeline
-                </button>
+        <div className="mt-6">
+          <DispatchBoard
+            title="Completed / Cancelled"
+            loading={false}
+            bookings={completedBookings}
+            emptyLabel="No completed or cancelled bookings found."
+            compact
+            assigningKey={assigningKey}
+            autoDispatchingId={autoDispatchingId}
+            onAssignDriver={assignDriver}
+            onAutoDispatch={autoDispatch}
+            onOpenBooking={openBookingDrawer}
+            onShowOnMap={(booking) => setSelectedBooking(booking)}
+          />
+        </div>
 
-                <button
-                  onClick={() => setSelectedBooking(null)}
-                  className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-white/80 hover:bg-white/10"
-                >
-                  Clear Selection
-                </button>
-              </div>
-            </div>
-          </section>
-        )}
+        {drawerOpen && selectedBooking ? (
+          <BookingDrawer
+            booking={selectedBooking}
+            timeline={timeline}
+            drivers={drivers}
+            assigningKey={assigningKey}
+            autoDispatchingId={autoDispatchingId}
+            statusBusy={statusBusy}
+            selectedDriverPosition={selectedDriverPosition}
+            onClose={() => setDrawerOpen(false)}
+            onTimeline={() => {
+              setTimelineOpen(true);
+              void loadTimeline(selectedBooking.id);
+            }}
+            onAutoDispatch={autoDispatch}
+            onAssignDriver={assignDriver}
+            onUpdateStatus={updateBookingStatus}
+            onCancelBooking={cancelBooking}
+          />
+        ) : null}
 
         {timelineOpen && selectedBooking ? (
-          <div className="fixed inset-0 z-[1000] bg-black/80 p-4 md:p-8">
-            <div className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-[#0b1220] p-6">
-              <div className="mb-5 flex items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">
-                    Timeline · {selectedBooking.reference}
-                  </h2>
-                  <p className="mt-1 text-sm text-white/55">
-                    Booking history, status changes and dispatch events.
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => setTimelineOpen(false)}
-                  className="rounded-2xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
-                >
-                  Close
-                </button>
-              </div>
-
-              <div className="max-h-[70vh] space-y-3 overflow-y-auto">
-                {timeline.length === 0 ? (
-                  <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/55">
-                    No timeline entries found.
-                  </div>
-                ) : (
-                  timeline.map((t) => (
-                    <div
-                      key={t.id}
-                      className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                    >
-                      <div className="text-xs uppercase tracking-[0.18em] text-white/35">
-                        {formatDateTime(t.createdAt)}
-                      </div>
-                      <div className="mt-2 text-sm text-white">
-                        {t.message || t.type || 'Event'}
-                      </div>
-                      {t.note ? (
-                        <div className="mt-2 text-sm text-white/60">{t.note}</div>
-                      ) : null}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
+          <TimelineModal
+            booking={selectedBooking}
+            timeline={timeline}
+            onClose={() => setTimelineOpen(false)}
+          />
         ) : null}
       </div>
     </main>
+  );
+}
+
+function DispatchBoard({
+  title,
+  loading,
+  bookings,
+  emptyLabel,
+  compact = false,
+  assigningKey,
+  autoDispatchingId,
+  onAssignDriver,
+  onAutoDispatch,
+  onOpenBooking,
+  onShowOnMap,
+}: {
+  title: string;
+  loading: boolean;
+  bookings: Booking[];
+  emptyLabel: string;
+  compact?: boolean;
+  assigningKey: string | null;
+  autoDispatchingId: string | null;
+  onAssignDriver: (bookingId: string, driverId: string) => void;
+  onAutoDispatch: (bookingId: string) => void;
+  onOpenBooking: (booking: Booking) => void;
+  onShowOnMap: (booking: Booking) => void;
+}) {
+  return (
+    <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-5">
+      <div className="mb-5 flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-white">{title}</h2>
+          <p className="mt-1 text-sm text-white/55">{bookings.length} items</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-5 text-sm text-white/55">
+          Loading bookings...
+        </div>
+      ) : bookings.length === 0 ? (
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-5 text-sm text-white/55">
+          {emptyLabel}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {bookings.map((booking) => {
+            return (
+              <div
+                key={booking.id}
+                className={`rounded-2xl border px-4 py-4 ${bookingRowTone(
+                  booking.status,
+                )}`}
+              >
+                <div
+                  className={
+                    compact
+                      ? 'grid gap-3 xl:grid-cols-[130px_130px_1.6fr_160px_150px_140px_auto] xl:items-center'
+                      : 'grid gap-4 xl:grid-cols-[120px_150px_1.6fr_160px_150px_130px_auto] xl:items-center'
+                  }
+                >
+                  <div>
+                    <button
+                      onClick={() => onOpenBooking(booking)}
+                      className="text-left text-sm font-bold text-white hover:text-cyan-300"
+                    >
+                      {booking.reference}
+                    </button>
+
+                    {!compact ? (
+                      <div className="mt-1 text-xs text-white/45">
+                        {booking.customerName || 'No name'}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <div className="text-sm font-semibold text-white">
+                      {formatTimeOnly(getPickupTimeLabel(booking))}
+                    </div>
+
+                    {!compact ? (
+                      <div className="mt-1 text-xs text-white/45">
+                        {formatDateTime(getPickupTimeLabel(booking))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-white">
+                      {getPickupLabel(booking)}
+                    </div>
+
+                    <div className="truncate text-sm text-white/55">
+                      → {getDropoffLabel(booking)}
+                    </div>
+
+                    {!compact ? (
+                      <div className="mt-2 flex flex-wrap gap-4 text-xs text-white/40">
+                        <span>Phone: {booking.customerPhone || '—'}</span>
+                        <span>Passengers: {booking.passengerCount ?? '—'}</span>
+                        <span>Fare: {formatPrice(booking.quotedPrice)}</span>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <span
+                      className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${accountTone(
+                        Boolean(booking.accountId || booking.account),
+                      )}`}
+                    >
+                      {getAccountLabel(booking)}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <span
+                      className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(
+                        booking.status,
+                      )}`}
+                    >
+                      {(booking.status || 'UNKNOWN').replace(/_/g, ' ')}
+                    </span>
+
+                    <div className="text-sm text-white/70">
+                      {getDriverName(booking.driver)}
+                    </div>
+                  </div>
+
+                  {!compact ? (
+                    <div className="space-y-2">
+                      {booking.suggestedDrivers
+                        ?.slice(0, 2)
+                        .map((suggested, index) => {
+                          const key = `${booking.id}:${suggested.id}`;
+
+                          return (
+                            <button
+                              key={suggested.id}
+                              onClick={() =>
+                                onAssignDriver(booking.id, suggested.id)
+                              }
+                              disabled={assigningKey === key}
+                              className="block w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-left text-xs text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+                            >
+                              <div className="font-semibold">
+                                #{index + 1} {suggested.name}
+                              </div>
+
+                              <div className="mt-1 text-[11px] text-emerald-100/70">
+                                {formatDistance(suggested.distanceMiles)} •{' '}
+                                {assigningKey === key
+                                  ? 'Assigning...'
+                                  : 'Assign'}
+                              </div>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-white/50">
+                      {formatPrice(booking.quotedPrice)}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2 xl:justify-end">
+                    {!compact ? (
+                      <button
+                        onClick={() => onAutoDispatch(booking.id)}
+                        disabled={autoDispatchingId === booking.id}
+                        className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                      >
+                        {autoDispatchingId === booking.id ? 'Running...' : 'Auto'}
+                      </button>
+                    ) : null}
+
+                    <button
+                      onClick={() => onOpenBooking(booking)}
+                      className="rounded-xl bg-purple-600 px-3 py-2 text-xs font-semibold text-white"
+                    >
+                      Open
+                    </button>
+
+                    <button
+                      onClick={() => onShowOnMap(booking)}
+                      className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-500/20"
+                    >
+                      Map
+                    </button>
+                  </div>
+                </div>
+
+                {booking.notes && !compact ? (
+                  <div className="mt-3 border-t border-white/5 pt-3 text-xs text-white/45">
+                    {booking.notes}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function BookingDrawer({
+  booking,
+  timeline,
+  drivers,
+  assigningKey,
+  autoDispatchingId,
+  statusBusy,
+  selectedDriverPosition,
+  onClose,
+  onTimeline,
+  onAutoDispatch,
+  onAssignDriver,
+  onUpdateStatus,
+  onCancelBooking,
+}: {
+  booking: Booking;
+  timeline: TimelineEvent[];
+  drivers: Driver[];
+  assigningKey: string | null;
+  autoDispatchingId: string | null;
+  statusBusy: string | null;
+  selectedDriverPosition: LatLngTuple | null;
+  onClose: () => void;
+  onTimeline: () => void;
+  onAutoDispatch: (bookingId: string) => void;
+  onAssignDriver: (bookingId: string, driverId: string) => void;
+  onUpdateStatus: (bookingId: string, status: string) => void;
+  onCancelBooking: (bookingId: string) => void;
+}) {
+  const availableDrivers = drivers.filter(
+    (driver) =>
+      driver.isAvailable ||
+      (driver.status || '').toUpperCase() === 'AVAILABLE',
+  );
+
+  const isFinalStatus = isCompleted(booking.status);
+
+  return (
+    <div className="fixed inset-0 z-[900] bg-black/70">
+      <div className="absolute right-0 top-0 h-full w-full overflow-y-auto border-l border-white/10 bg-[#07101d] shadow-2xl md:w-[620px]">
+        <div className="sticky top-0 z-10 border-b border-white/10 bg-[#07101d]/95 p-5 backdrop-blur">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-[0.22em] text-white/35">
+                Booking Drawer
+              </div>
+
+              <h2 className="mt-2 text-2xl font-black text-white">
+                {booking.reference}
+              </h2>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(
+                    booking.status,
+                  )}`}
+                >
+                  {(booking.status || 'UNKNOWN').replace(/_/g, ' ')}
+                </span>
+
+                <span
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${accountTone(
+                    Boolean(booking.accountId || booking.account),
+                  )}`}
+                >
+                  {getAccountLabel(booking)}
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={onClose}
+              className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-5 p-5">
+          <DrawerPanel title="Trip">
+            <Detail label="Pickup" value={getPickupLabel(booking)} />
+            <Detail label="Dropoff" value={getDropoffLabel(booking)} />
+            <Detail
+              label="Pickup Time"
+              value={formatDateTime(getPickupTimeLabel(booking))}
+            />
+            <Detail
+              label="Passengers"
+              value={String(booking.passengerCount ?? '—')}
+            />
+            <Detail label="Fare" value={formatPrice(booking.quotedPrice)} />
+          </DrawerPanel>
+
+          <DrawerPanel title="Customer">
+            <Detail label="Name" value={booking.customerName || '—'} />
+            <Detail label="Phone" value={booking.customerPhone || '—'} />
+            <Detail label="Account" value={getAccountLabel(booking)} />
+            <Detail
+              label="Account Status"
+              value={booking.account?.status || '—'}
+            />
+          </DrawerPanel>
+
+          <DrawerPanel title="Driver">
+            <Detail
+              label="Assigned Driver"
+              value={getDriverName(booking.driver)}
+            />
+            <Detail
+              label="Vehicle"
+              value={getVehicleLabel(booking.driver?.vehicle ?? null)}
+            />
+            <Detail label="Driver Status" value={booking.driver?.status || '—'} />
+            <Detail
+              label="Driver GPS"
+              value={
+                selectedDriverPosition
+                  ? `${selectedDriverPosition[0]}, ${selectedDriverPosition[1]}`
+                  : 'Not available'
+              }
+            />
+          </DrawerPanel>
+
+          <DrawerPanel title="Dispatch Actions">
+            <div className="grid gap-3 md:grid-cols-2">
+              <button
+                onClick={() => onAutoDispatch(booking.id)}
+                disabled={autoDispatchingId === booking.id || isFinalStatus}
+                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+              >
+                {autoDispatchingId === booking.id
+                  ? 'Running...'
+                  : 'Auto Dispatch'}
+              </button>
+
+              <button
+                onClick={onTimeline}
+                className="rounded-2xl bg-purple-600 px-4 py-3 text-sm font-semibold text-white hover:bg-purple-500"
+              >
+                Open Timeline
+              </button>
+
+              <button
+                onClick={() => onUpdateStatus(booking.id, 'EN_ROUTE')}
+                disabled={Boolean(statusBusy) || isFinalStatus}
+                className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
+              >
+                {statusBusy === 'EN_ROUTE' ? 'Updating...' : 'Mark En Route'}
+              </button>
+
+              <button
+                onClick={() => onUpdateStatus(booking.id, 'ARRIVED')}
+                disabled={Boolean(statusBusy) || isFinalStatus}
+                className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
+              >
+                {statusBusy === 'ARRIVED' ? 'Updating...' : 'Mark Arrived'}
+              </button>
+
+              <button
+                onClick={() => onUpdateStatus(booking.id, 'ON_JOB')}
+                disabled={Boolean(statusBusy) || isFinalStatus}
+                className="rounded-2xl border border-violet-500/20 bg-violet-500/10 px-4 py-3 text-sm font-semibold text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
+              >
+                {statusBusy === 'ON_JOB' ? 'Updating...' : 'Mark On Job'}
+              </button>
+
+              <button
+                onClick={() => onUpdateStatus(booking.id, 'COMPLETED')}
+                disabled={Boolean(statusBusy) || isFinalStatus}
+                className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {statusBusy === 'COMPLETED' ? 'Updating...' : 'Complete Job'}
+              </button>
+
+              <button
+                onClick={() => onCancelBooking(booking.id)}
+                disabled={Boolean(statusBusy) || isFinalStatus}
+                className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50 md:col-span-2"
+              >
+                {statusBusy === 'CANCELLED'
+                  ? 'Cancelling...'
+                  : 'Cancel Booking'}
+              </button>
+            </div>
+          </DrawerPanel>
+
+          <DrawerPanel title="Assign Driver">
+            {availableDrivers.length === 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/55">
+                No available drivers found.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {availableDrivers.map((driver) => {
+                  const key = `${booking.id}:${driver.id}`;
+
+                  return (
+                    <button
+                      key={driver.id}
+                      onClick={() => onAssignDriver(booking.id, driver.id)}
+                      disabled={assigningKey === key || isFinalStatus}
+                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-left hover:bg-white/10 disabled:opacity-50"
+                    >
+                      <div className="font-semibold text-white">
+                        {getDriverName(driver)}
+                      </div>
+
+                      <div className="mt-1 text-xs text-white/45">
+                        {driver.status || 'UNKNOWN'} ·{' '}
+                        {getVehicleLabel(driver.vehicle ?? null)}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </DrawerPanel>
+
+          <DrawerPanel title="Notes">
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/70">
+              {booking.notes || 'No notes added.'}
+            </div>
+          </DrawerPanel>
+
+          <DrawerPanel title="Latest Timeline">
+            {timeline.length === 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/55">
+                No timeline entries found.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {timeline.slice(0, 5).map((event) => (
+                  <div
+                    key={event.id}
+                    className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                  >
+                    <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+                      {formatDateTime(event.createdAt)}
+                    </div>
+
+                    <div className="mt-2 text-sm text-white">
+                      {event.message || event.type || 'Event'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </DrawerPanel>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TimelineModal({
+  booking,
+  timeline,
+  onClose,
+}: {
+  booking: Booking;
+  timeline: TimelineEvent[];
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[1000] bg-black/80 p-4 md:p-8">
+      <div className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-[#0b1220] p-6">
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-white">
+              Timeline · {booking.reference}
+            </h2>
+
+            <p className="mt-1 text-sm text-white/55">
+              Booking history, status changes and dispatch events.
+            </p>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="rounded-2xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="max-h-[70vh] space-y-3 overflow-y-auto">
+          {timeline.length === 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/55">
+              No timeline entries found.
+            </div>
+          ) : (
+            timeline.map((event) => (
+              <div
+                key={event.id}
+                className="rounded-2xl border border-white/10 bg-black/20 p-4"
+              >
+                <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+                  {formatDateTime(event.createdAt)}
+                </div>
+
+                <div className="mt-2 text-sm text-white">
+                  {event.message || event.type || 'Event'}
+                </div>
+
+                {event.note ? (
+                  <div className="mt-2 text-sm text-white/60">
+                    {event.note}
+                  </div>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Card({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+      <div className="text-sm text-white/55">{label}</div>
+      <div className="mt-3 text-3xl font-bold text-white">{value}</div>
+      {hint ? <div className="mt-2 text-xs text-white/35">{hint}</div> : null}
+    </div>
+  );
+}
+
+function DrawerPanel({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
+      <h3 className="mb-4 text-lg font-bold text-white">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-white/5 py-2 last:border-b-0">
+      <span className="text-sm text-white/45">{label}</span>
+      <span className="max-w-[62%] text-right text-sm text-white/85">
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -1556,7 +2272,7 @@ function Field({
       <span className="block text-sm text-white/70">{label}</span>
       <input
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50"
       />
@@ -1580,7 +2296,7 @@ function NumberField({
         type="number"
         min={1}
         value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onChange={(event) => onChange(Number(event.target.value))}
         className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition focus:border-cyan-500/50"
       />
     </label>
@@ -1603,7 +2319,7 @@ function SelectField({
       <span className="block text-sm text-white/70">{label}</span>
       <select
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition focus:border-cyan-500/50"
       >
         {options.map((option) => (
@@ -1634,20 +2350,14 @@ function DateTimeField({
         type="datetime-local"
         value={value}
         min={min}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition focus:border-cyan-500/50"
       />
     </label>
   );
 }
 
-function InfoField({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function InfoField({ label, value }: { label: string; value: string }) {
   return (
     <div className="space-y-2">
       <span className="block text-sm text-white/70">{label}</span>
@@ -1674,7 +2384,7 @@ function TextAreaField({
       <span className="block text-sm text-white/70">{label}</span>
       <textarea
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         rows={4}
         className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50"

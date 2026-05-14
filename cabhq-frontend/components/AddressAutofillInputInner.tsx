@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { apiFetch } from '@/lib/api';
 
 export type SelectedAddress = {
   label: string;
@@ -12,9 +13,23 @@ export type SelectedAddress = {
 
 type Suggestion = {
   id: string;
-  label: string;
+  address: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  type?: string;
+};
+
+type RetrievedAddress = {
+  id: string;
+  address: string;
+  line1?: string | null;
+  line2?: string | null;
+  line3?: string | null;
+  town?: string | null;
+  county?: string | null;
   postcode?: string | null;
-  placeName?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 type AddressAutofillInputInnerProps = {
@@ -26,42 +41,6 @@ type AddressAutofillInputInnerProps = {
   onSelectAddress: (address: SelectedAddress) => void;
 };
 
-type IdealSuggestion = {
-  id: string;
-  suggestion: string;
-};
-
-type IdealAutocompleteResponse = {
-  result?: {
-    hits?: IdealSuggestion[];
-  };
-};
-
-type IdealResolvedAddress = {
-  line_1?: string;
-  line_2?: string;
-  line_3?: string;
-  post_town?: string;
-  county?: string;
-  postcode?: string;
-  organisation_name?: string;
-};
-
-type IdealResolveResponse = {
-  result?: IdealResolvedAddress;
-};
-
-type MapboxFeature = {
-  center?: [number, number] | number[] | null;
-};
-
-type MapboxResponse = {
-  features?: MapboxFeature[];
-};
-
-const IDEAL_API_KEY = process.env.NEXT_PUBLIC_IDEAL_POSTCODES_API_KEY ?? '';
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ?? '';
-
 export default function AddressAutofillInputInner({
   label,
   value,
@@ -71,7 +50,6 @@ export default function AddressAutofillInputInner({
   onSelectAddress,
 }: AddressAutofillInputInnerProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
 
   const [items, setItems] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -83,12 +61,14 @@ export default function AddressAutofillInputInner({
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (!wrapperRef.current) return;
+
       if (!wrapperRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
     }
 
     document.addEventListener('mousedown', handleClickOutside);
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
@@ -97,16 +77,7 @@ export default function AddressAutofillInputInner({
   useEffect(() => {
     const query = value.trim();
 
-    if (!IDEAL_API_KEY) {
-      setItems([]);
-      setOpen(false);
-      setLoading(false);
-      setError('Missing NEXT_PUBLIC_IDEAL_POSTCODES_API_KEY');
-      return;
-    }
-
     if (query.length < 3) {
-      abortRef.current?.abort();
       setItems([]);
       setOpen(false);
       setLoading(false);
@@ -120,38 +91,11 @@ export default function AddressAutofillInputInner({
         setLoading(true);
         setError('');
 
-        abortRef.current?.abort();
-        const controller = new AbortController();
-        abortRef.current = controller;
-
-        const url = new URL(
-          'https://api.ideal-postcodes.co.uk/v1/autocomplete/addresses',
+        const data = await apiFetch<Suggestion[]>(
+          `/mapbox/search?q=${encodeURIComponent(query)}`,
         );
 
-        url.searchParams.set('api_key', IDEAL_API_KEY);
-        url.searchParams.set('query', query);
-
-        const response = await fetch(url.toString(), {
-          method: 'GET',
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(
-            `Ideal Postcodes ${response.status}: ${text || 'request failed'}`,
-          );
-        }
-
-        const data: IdealAutocompleteResponse = await response.json();
-        const hits = Array.isArray(data.result?.hits) ? data.result!.hits! : [];
-
-        const nextItems: Suggestion[] = hits.map((hit) => ({
-          id: hit.id,
-          label: hit.suggestion,
-          postcode: extractPostcode(hit.suggestion),
-          placeName: hit.suggestion,
-        }));
+        const nextItems = Array.isArray(data) ? data : [];
 
         setItems(nextItems);
         setOpen(nextItems.length > 0);
@@ -160,11 +104,7 @@ export default function AddressAutofillInputInner({
         if (nextItems.length === 0) {
           setError('No addresses found');
         }
-      } catch (err: unknown) {
-        if (err instanceof Error && err.name === 'AbortError') {
-          return;
-        }
-
+      } catch (err) {
         console.error('Address lookup failed:', err);
         setItems([]);
         setOpen(false);
@@ -180,87 +120,40 @@ export default function AddressAutofillInputInner({
     };
   }, [value]);
 
-  async function geocodeWithMapbox(address: string) {
-    if (!MAPBOX_TOKEN) {
-      return { lat: null, lng: null };
-    }
-
-    const url = new URL(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
-        address,
-      )}.json`,
-    );
-
-    url.searchParams.set('access_token', MAPBOX_TOKEN);
-    url.searchParams.set('autocomplete', 'false');
-    url.searchParams.set('country', 'gb');
-    url.searchParams.set('language', 'en');
-    url.searchParams.set('limit', '1');
-
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-    });
-
-    if (!response.ok) {
-      return { lat: null, lng: null };
-    }
-
-    const data: MapboxResponse = await response.json();
-    const feature = Array.isArray(data.features) ? data.features[0] : undefined;
-    const center = Array.isArray(feature?.center) ? feature?.center : null;
-
-    const lng = typeof center?.[0] === 'number' ? center[0] : null;
-    const lat = typeof center?.[1] === 'number' ? center[1] : null;
-
-    return { lat, lng };
-  }
-
   async function selectItem(item: Suggestion) {
     try {
       setSelecting(true);
       setError('');
 
-      const url = new URL(
-        `https://api.ideal-postcodes.co.uk/v1/autocomplete/addresses/${encodeURIComponent(
-          item.id,
-        )}/gbr`,
-      );
+      let selected: RetrievedAddress | null = null;
 
-      url.searchParams.set('api_key', IDEAL_API_KEY);
-
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(
-          `Ideal Postcodes ${response.status}: ${text || 'resolve failed'}`,
+      try {
+        selected = await apiFetch<RetrievedAddress>(
+          `/mapbox/retrieve?id=${encodeURIComponent(item.id)}`,
         );
+      } catch (err) {
+        console.warn('Address retrieve failed, using suggestion fallback:', err);
       }
 
-      const data: IdealResolveResponse = await response.json();
-      const result = data.result;
+      const label = selected?.address || item.address;
+      const lat = selected?.latitude ?? item.latitude ?? null;
+      const lng = selected?.longitude ?? item.longitude ?? null;
 
-      const fullAddress = formatResolvedAddress(result) || item.label;
-      const postcode = result?.postcode?.trim() || item.postcode || null;
+      onChangeValue(label);
 
-      const coords = await geocodeWithMapbox(fullAddress);
-
-      onChangeValue(fullAddress);
       onSelectAddress({
-        label: fullAddress,
-        lat: coords.lat,
-        lng: coords.lng,
-        postcode,
-        placeName: result?.organisation_name?.trim() || item.placeName || null,
+        label,
+        lat,
+        lng,
+        postcode: selected?.postcode ?? null,
+        placeName: selected?.line1 ?? item.address,
       });
 
       setItems([]);
       setOpen(false);
       setHighlightedIndex(-1);
       setError('');
-    } catch (err: unknown) {
+    } catch (err) {
       console.error('Address resolve failed:', err);
       setError(err instanceof Error ? err.message : 'Failed to select address');
     } finally {
@@ -289,6 +182,7 @@ export default function AddressAutofillInputInner({
 
     if (event.key === 'Enter') {
       event.preventDefault();
+
       if (highlightedIndex >= 0 && highlightedIndex < items.length) {
         void selectItem(items[highlightedIndex]);
       }
@@ -310,17 +204,15 @@ export default function AddressAutofillInputInner({
         value={value}
         autoComplete={autoComplete}
         placeholder={placeholder}
-        onChange={(e) => {
-          onChangeValue(e.target.value);
+        onChange={(event) => {
+          onChangeValue(event.target.value);
           setOpen(true);
         }}
         onFocus={() => {
-          if (items.length > 0) {
-            setOpen(true);
-          }
+          if (items.length > 0) setOpen(true);
         }}
         onKeyDown={handleKeyDown}
-        className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-white placeholder:text-white/30 outline-none transition focus:border-cyan-400"
+        className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-cyan-400"
       />
 
       {loading ? (
@@ -329,7 +221,7 @@ export default function AddressAutofillInputInner({
 
       {selecting ? (
         <div className="mt-2 text-xs text-white/50">
-          Loading selected address...
+          Loading full address...
         </div>
       ) : null}
 
@@ -346,8 +238,8 @@ export default function AddressAutofillInputInner({
               <button
                 key={item.id}
                 type="button"
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                onMouseDown={(event) => {
+                  event.preventDefault();
                   void selectItem(item);
                 }}
                 onMouseEnter={() => setHighlightedIndex(index)}
@@ -356,10 +248,13 @@ export default function AddressAutofillInputInner({
                 }`}
               >
                 <div className="text-sm font-medium text-white">
-                  {item.label}
+                  {item.address}
                 </div>
+
                 <div className="mt-1 text-xs text-cyan-300/80">
-                  {item.postcode || 'Select address'}
+                  {item.latitude != null && item.longitude != null
+                    ? `${item.latitude.toFixed(5)}, ${item.longitude.toFixed(5)}`
+                    : 'Click to load full address'}
                 </div>
               </button>
             );
@@ -368,26 +263,4 @@ export default function AddressAutofillInputInner({
       ) : null}
     </div>
   );
-}
-
-function formatResolvedAddress(address?: IdealResolvedAddress) {
-  if (!address) return '';
-
-  const parts = [
-    address.line_1,
-    address.line_2,
-    address.line_3,
-    address.post_town,
-    address.county,
-    address.postcode,
-  ]
-    .map((part) => part?.trim())
-    .filter(Boolean);
-
-  return parts.join(', ');
-}
-
-function extractPostcode(text: string) {
-  const match = text.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i);
-  return match ? match[0].toUpperCase() : null;
 }

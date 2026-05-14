@@ -32,21 +32,42 @@ type Account = {
   notes?: string | null;
   createdAt?: string;
   updatedAt?: string;
-  invoices?: Array<{ id: string; total?: number; balanceDue?: number }>;
-  payments?: Array<{ id: string; amount?: number }>;
   bookings?: Array<{ id: string }>;
+  invoices?: Array<{
+    id: string;
+    total?: number | null;
+    balanceDue?: number | null;
+  }>;
+  payments?: Array<{
+    id: string;
+    amount?: number | null;
+  }>;
+};
+
+type UiAccount = Account & {
+  uiType: AccountType;
+  uiStatus: AccountStatus;
+  paymentTermsDays: number;
+  creditLimitValue: number;
+  currentBalance: number;
+  invoiceCount: number;
+  tripsThisMonth: number;
+  monthlyRevenue: number;
+  billingAddress: string;
 };
 
 type AccountFormState = {
   name: string;
   code: string;
-  type: AccountType;
   status: AccountStatus;
   contactName: string;
   email: string;
   phone: string;
-  billingAddress: string;
-  paymentTermsDays: string;
+  address1: string;
+  address2: string;
+  city: string;
+  postcode: string;
+  paymentTerms: string;
   creditLimit: string;
   vatNumber: string;
   notes: string;
@@ -55,14 +76,16 @@ type AccountFormState = {
 const initialForm: AccountFormState = {
   name: '',
   code: '',
-  type: 'BUSINESS',
   status: 'ACTIVE',
   contactName: '',
   email: '',
   phone: '',
-  billingAddress: '',
-  paymentTermsDays: '30',
-  creditLimit: '5000',
+  address1: '',
+  address2: '',
+  city: '',
+  postcode: '',
+  paymentTerms: '30',
+  creditLimit: '0',
   vatNumber: '',
   notes: '',
 };
@@ -117,33 +140,46 @@ function inferAccountType(name: string): AccountType {
   return 'BUSINESS';
 }
 
+function normaliseStatus(status?: string): AccountStatus {
+  const value = (status || 'ACTIVE').toUpperCase();
+
+  if (value === 'ON_HOLD') return 'ON_HOLD';
+  if (value === 'CLOSED') return 'CLOSED';
+
+  return 'ACTIVE';
+}
+
 function parseBillingAddress(account: Account) {
   return [account.address1, account.address2, account.city, account.postcode]
     .filter(Boolean)
     .join(', ');
 }
 
-function toUiAccount(account: Account) {
-  const invoiceCount = account.invoices?.length ?? 0;
-  const currentBalance = (account.invoices ?? []).reduce(
+function toUiAccount(account: Account): UiAccount {
+  const invoices = account.invoices ?? [];
+  const bookings = account.bookings ?? [];
+
+  const invoiceCount = invoices.length;
+
+  const currentBalance = invoices.reduce(
     (sum, invoice) => sum + Number(invoice.balanceDue ?? 0),
     0,
   );
-  const monthlyRevenue = (account.invoices ?? []).reduce(
+
+  const monthlyRevenue = invoices.reduce(
     (sum, invoice) => sum + Number(invoice.total ?? 0),
     0,
   );
-  const tripsThisMonth = account.bookings?.length ?? 0;
 
   return {
     ...account,
     uiType: inferAccountType(account.name),
-    uiStatus: (account.status as AccountStatus) || 'ACTIVE',
+    uiStatus: normaliseStatus(account.status),
     paymentTermsDays: Number(account.paymentTerms ?? 30),
     creditLimitValue: Number(account.creditLimit ?? 0),
     currentBalance,
     invoiceCount,
-    tripsThisMonth,
+    tripsThisMonth: bookings.length,
     monthlyRevenue,
     billingAddress: parseBillingAddress(account),
   };
@@ -153,6 +189,7 @@ export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
@@ -160,35 +197,26 @@ export default function AccountsPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  useEffect(() => {
-    let mounted = true;
+  async function loadAccounts() {
+    setLoading(true);
+    setError('');
 
-    async function loadAccounts() {
-      try {
-        setLoading(true);
-        setError('');
+    try {
+      const data = await apiFetch<Account[]>('/accounts');
+      const next = Array.isArray(data) ? data : [];
 
-        const data = await apiFetch<Account[]>('/accounts');
-        if (!mounted) return;
-
-        const next = Array.isArray(data) ? data : [];
-        setAccounts(next);
-        setSelectedAccountId((current) => current ?? next[0]?.id ?? null);
-      } catch (err) {
-        console.error(err);
-        if (mounted) {
-          setError(err instanceof Error ? err.message : 'Failed to load accounts');
-        }
-      } finally {
-        if (mounted) setLoading(false);
-      }
+      setAccounts(next);
+      setSelectedAccountId((current) => current ?? next[0]?.id ?? null);
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to load accounts');
+    } finally {
+      setLoading(false);
     }
+  }
 
+  useEffect(() => {
     void loadAccounts();
-
-    return () => {
-      mounted = false;
-    };
   }, []);
 
   const enrichedAccounts = useMemo(
@@ -209,6 +237,8 @@ export default function AccountsPage() {
         account.contactName,
         account.email,
         account.phone,
+        account.postcode,
+        account.city,
       ]
         .filter(Boolean)
         .join(' ')
@@ -216,12 +246,6 @@ export default function AccountsPage() {
         .includes(q),
     );
   }, [enrichedAccounts, search]);
-
-  const selectedAccount = useMemo(
-    () =>
-      enrichedAccounts.find((account) => account.id === selectedAccountId) ?? null,
-    [enrichedAccounts, selectedAccountId],
-  );
 
   const stats = useMemo(() => {
     const active = enrichedAccounts.filter((a) => a.uiStatus === 'ACTIVE').length;
@@ -261,29 +285,26 @@ export default function AccountsPage() {
     setTimeout(() => setSuccess(''), 2500);
   }
 
-  async function submitAccount(e: React.FormEvent) {
+  async function submitAccount(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
     setSaving(true);
     setError('');
     setSuccess('');
 
     try {
-      const [address1 = '', address2 = '', city = '', postcode = ''] = form.billingAddress
-        .split(',')
-        .map((part) => part.trim());
-
       const payload = {
         name: form.name.trim(),
         code: form.code.trim() || null,
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
         contactName: form.contactName.trim() || null,
-        address1: address1 || null,
-        address2: address2 || null,
-        city: city || null,
-        postcode: postcode || null,
+        address1: form.address1.trim() || null,
+        address2: form.address2.trim() || null,
+        city: form.city.trim() || null,
+        postcode: form.postcode.trim() || null,
         vatNumber: form.vatNumber.trim() || null,
-        paymentTerms: Number(form.paymentTermsDays || 30),
+        paymentTerms: Number(form.paymentTerms || 30),
         creditLimit: Number(form.creditLimit || 0),
         status: form.status,
         notes: form.notes.trim() || null,
@@ -328,19 +349,22 @@ export default function AccountsPage() {
     }
   }
 
-  function startEdit(account: ReturnType<typeof toUiAccount>) {
+  function startEdit(account: UiAccount) {
     setEditingAccountId(account.id);
     setSelectedAccountId(account.id);
+
     setForm({
       name: account.name,
       code: account.code ?? '',
-      type: account.uiType,
       status: account.uiStatus,
       contactName: account.contactName ?? '',
       email: account.email ?? '',
       phone: account.phone ?? '',
-      billingAddress: account.billingAddress,
-      paymentTermsDays: String(account.paymentTermsDays),
+      address1: account.address1 ?? '',
+      address2: account.address2 ?? '',
+      city: account.city ?? '',
+      postcode: account.postcode ?? '',
+      paymentTerms: String(account.paymentTermsDays),
       creditLimit: String(account.creditLimitValue),
       vatNumber: account.vatNumber ?? '',
       notes: account.notes ?? '',
@@ -353,6 +377,7 @@ export default function AccountsPage() {
     const confirmed = window.confirm('Delete this account?');
     if (!confirmed) return;
 
+    setDeletingId(accountId);
     setError('');
     setSuccess('');
 
@@ -361,7 +386,7 @@ export default function AccountsPage() {
         method: 'DELETE',
       });
 
-      const remaining = accounts.filter((a) => a.id !== accountId);
+      const remaining = accounts.filter((account) => account.id !== accountId);
       setAccounts(remaining);
 
       if (selectedAccountId === accountId) {
@@ -376,6 +401,8 @@ export default function AccountsPage() {
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : 'Failed to delete account');
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -401,6 +428,14 @@ export default function AccountsPage() {
                 balances, monthly usage and account-level trading status.
               </p>
             </div>
+
+            <button
+              type="button"
+              onClick={() => void loadAccounts()}
+              className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20"
+            >
+              Refresh Accounts
+            </button>
           </div>
         </section>
 
@@ -417,36 +452,11 @@ export default function AccountsPage() {
         )}
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <StatCard
-            label="Total Accounts"
-            value={stats.total}
-            hint="All account customers"
-            tone="slate"
-          />
-          <StatCard
-            label="Active"
-            value={stats.active}
-            hint="Currently trading"
-            tone="emerald"
-          />
-          <StatCard
-            label="On Hold"
-            value={stats.onHold}
-            hint="Payment or ops hold"
-            tone="amber"
-          />
-          <StatCard
-            label="Monthly Revenue"
-            value={formatCurrency(stats.revenue)}
-            hint="Current account revenue"
-            tone="cyan"
-          />
-          <StatCard
-            label="Outstanding"
-            value={formatCurrency(stats.outstanding)}
-            hint="Open balance"
-            tone="violet"
-          />
+          <StatCard label="Total Accounts" value={stats.total} hint="All account customers" tone="slate" />
+          <StatCard label="Active" value={stats.active} hint="Currently trading" tone="emerald" />
+          <StatCard label="On Hold" value={stats.onHold} hint="Payment or ops hold" tone="amber" />
+          <StatCard label="Revenue" value={formatCurrency(stats.revenue)} hint="Linked invoice totals" tone="cyan" />
+          <StatCard label="Outstanding" value={formatCurrency(stats.outstanding)} hint="Open balance" tone="violet" />
         </section>
 
         <div className="grid gap-6 xl:grid-cols-[430px_1fr]">
@@ -473,158 +483,192 @@ export default function AccountsPage() {
             </div>
 
             <form onSubmit={submitAccount} className="space-y-5">
-              <div className="grid gap-4">
+              <Field
+                label="Account Name *"
+                input={
+                  <input
+                    value={form.name}
+                    onChange={(e) => setField('name', e.target.value)}
+                    placeholder="Northside Medical Centre"
+                    required
+                    className={inputClassName}
+                  />
+                }
+              />
+
+              <div className="grid gap-4 md:grid-cols-2">
                 <Field
-                  label="Account Name *"
+                  label="Account Code"
                   input={
                     <input
-                      value={form.name}
-                      onChange={(e) => setField('name', e.target.value)}
-                      placeholder="Northside Medical Centre"
-                      required
-                      className={inputClassName}
-                    />
-                  }
-                />
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field
-                    label="Account Code"
-                    input={
-                      <input
-                        value={form.code}
-                        onChange={(e) => setField('code', e.target.value)}
-                        placeholder="NSMC"
-                        className={inputClassName}
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Status"
-                    input={
-                      <select
-                        value={form.status}
-                        onChange={(e) =>
-                          setField('status', e.target.value as AccountStatus)
-                        }
-                        className={inputClassName}
-                      >
-                        <option value="ACTIVE">ACTIVE</option>
-                        <option value="ON_HOLD">ON_HOLD</option>
-                        <option value="CLOSED">CLOSED</option>
-                      </select>
-                    }
-                  />
-                </div>
-
-                <Field
-                  label="Contact Name"
-                  input={
-                    <input
-                      value={form.contactName}
-                      onChange={(e) => setField('contactName', e.target.value)}
-                      placeholder="Sarah Malik"
-                      className={inputClassName}
-                    />
-                  }
-                />
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field
-                    label="Email"
-                    input={
-                      <input
-                        type="email"
-                        value={form.email}
-                        onChange={(e) => setField('email', e.target.value)}
-                        placeholder="accounts@company.co.uk"
-                        className={inputClassName}
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Phone"
-                    input={
-                      <input
-                        value={form.phone}
-                        onChange={(e) => setField('phone', e.target.value)}
-                        placeholder="0207..."
-                        className={inputClassName}
-                      />
-                    }
-                  />
-                </div>
-
-                <Field
-                  label="Billing Address"
-                  input={
-                    <textarea
-                      rows={3}
-                      value={form.billingAddress}
-                      onChange={(e) => setField('billingAddress', e.target.value)}
-                      placeholder="Address line 1, Address line 2, City, Postcode"
-                      className={`${inputClassName} resize-none`}
-                    />
-                  }
-                />
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <Field
-                    label="Payment Terms (days)"
-                    input={
-                      <input
-                        type="number"
-                        min="0"
-                        value={form.paymentTermsDays}
-                        onChange={(e) =>
-                          setField('paymentTermsDays', e.target.value)
-                        }
-                        className={inputClassName}
-                      />
-                    }
-                  />
-
-                  <Field
-                    label="Credit Limit"
-                    input={
-                      <input
-                        type="number"
-                        min="0"
-                        value={form.creditLimit}
-                        onChange={(e) => setField('creditLimit', e.target.value)}
-                        className={inputClassName}
-                      />
-                    }
-                  />
-                </div>
-
-                <Field
-                  label="VAT Number"
-                  input={
-                    <input
-                      value={form.vatNumber}
-                      onChange={(e) => setField('vatNumber', e.target.value)}
-                      placeholder="GB123456789"
+                      value={form.code}
+                      onChange={(e) => setField('code', e.target.value)}
+                      placeholder="NSMC"
                       className={inputClassName}
                     />
                   }
                 />
 
                 <Field
-                  label="Notes"
+                  label="Status"
                   input={
-                    <textarea
-                      rows={4}
-                      value={form.notes}
-                      onChange={(e) => setField('notes', e.target.value)}
-                      placeholder="Invoice notes, contract notes, restrictions..."
-                      className={`${inputClassName} resize-none`}
+                    <select
+                      value={form.status}
+                      onChange={(e) =>
+                        setField('status', e.target.value as AccountStatus)
+                      }
+                      className={inputClassName}
+                    >
+                      <option value="ACTIVE">ACTIVE</option>
+                      <option value="ON_HOLD">ON_HOLD</option>
+                      <option value="CLOSED">CLOSED</option>
+                    </select>
+                  }
+                />
+              </div>
+
+              <Field
+                label="Contact Name"
+                input={
+                  <input
+                    value={form.contactName}
+                    onChange={(e) => setField('contactName', e.target.value)}
+                    placeholder="Sarah Malik"
+                    className={inputClassName}
+                  />
+                }
+              />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field
+                  label="Email"
+                  input={
+                    <input
+                      type="email"
+                      value={form.email}
+                      onChange={(e) => setField('email', e.target.value)}
+                      placeholder="accounts@company.co.uk"
+                      className={inputClassName}
+                    />
+                  }
+                />
+
+                <Field
+                  label="Phone"
+                  input={
+                    <input
+                      value={form.phone}
+                      onChange={(e) => setField('phone', e.target.value)}
+                      placeholder="0207..."
+                      className={inputClassName}
                     />
                   }
                 />
               </div>
+
+              <Field
+                label="Address Line 1"
+                input={
+                  <input
+                    value={form.address1}
+                    onChange={(e) => setField('address1', e.target.value)}
+                    placeholder="12 High Street"
+                    className={inputClassName}
+                  />
+                }
+              />
+
+              <Field
+                label="Address Line 2"
+                input={
+                  <input
+                    value={form.address2}
+                    onChange={(e) => setField('address2', e.target.value)}
+                    placeholder="Business Park"
+                    className={inputClassName}
+                  />
+                }
+              />
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field
+                  label="City"
+                  input={
+                    <input
+                      value={form.city}
+                      onChange={(e) => setField('city', e.target.value)}
+                      placeholder="Blandford Forum"
+                      className={inputClassName}
+                    />
+                  }
+                />
+
+                <Field
+                  label="Postcode"
+                  input={
+                    <input
+                      value={form.postcode}
+                      onChange={(e) => setField('postcode', e.target.value)}
+                      placeholder="DT11..."
+                      className={inputClassName}
+                    />
+                  }
+                />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field
+                  label="Payment Terms"
+                  input={
+                    <input
+                      type="number"
+                      min="0"
+                      value={form.paymentTerms}
+                      onChange={(e) => setField('paymentTerms', e.target.value)}
+                      className={inputClassName}
+                    />
+                  }
+                />
+
+                <Field
+                  label="Credit Limit"
+                  input={
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.creditLimit}
+                      onChange={(e) => setField('creditLimit', e.target.value)}
+                      className={inputClassName}
+                    />
+                  }
+                />
+              </div>
+
+              <Field
+                label="VAT Number"
+                input={
+                  <input
+                    value={form.vatNumber}
+                    onChange={(e) => setField('vatNumber', e.target.value)}
+                    placeholder="GB123456789"
+                    className={inputClassName}
+                  />
+                }
+              />
+
+              <Field
+                label="Notes"
+                input={
+                  <textarea
+                    rows={4}
+                    value={form.notes}
+                    onChange={(e) => setField('notes', e.target.value)}
+                    placeholder="Invoice notes, contract notes, restrictions..."
+                    className={`${inputClassName} resize-none`}
+                  />
+                }
+              />
 
               <button
                 type="submit"
@@ -694,26 +738,17 @@ export default function AccountsPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="text-xl font-bold">{account.name}</h3>
 
-                            <span
-                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${typeClasses(
-                                account.uiType,
-                              )}`}
-                            >
+                            <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${typeClasses(account.uiType)}`}>
                               {account.uiType}
                             </span>
 
-                            <span
-                              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClasses(
-                                account.uiStatus,
-                              )}`}
-                            >
+                            <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClasses(account.uiStatus)}`}>
                               {account.uiStatus.replace('_', ' ')}
                             </span>
                           </div>
 
                           <p className="mt-2 text-sm text-white/70">
-                            {account.contactName || 'No contact'} · {account.email || 'No email'} ·{' '}
-                            {account.phone || 'No phone'}
+                            {account.contactName || 'No contact'} · {account.email || 'No email'} · {account.phone || 'No phone'}
                           </p>
 
                           <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/50">
@@ -734,69 +769,37 @@ export default function AccountsPage() {
 
                           <button
                             type="button"
-                            onClick={() => deleteAccount(account.id)}
-                            className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-500"
+                            disabled={deletingId === account.id}
+                            onClick={() => void deleteAccount(account.id)}
+                            className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-500 disabled:opacity-50"
                           >
-                            Delete
+                            {deletingId === account.id ? 'Deleting...' : 'Delete'}
                           </button>
                         </div>
                       </div>
 
                       {isSelected ? (
                         <div className="mt-5 grid gap-4 border-t border-white/10 pt-5 xl:grid-cols-3">
-                          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                            <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
-                              Billing
-                            </h4>
+                          <InfoCard title="Billing">
+                            <DetailRow label="Current Balance" value={formatCurrency(account.currentBalance)} />
+                            <DetailRow label="Credit Limit" value={formatCurrency(account.creditLimitValue)} />
+                            <DetailRow label="Revenue" value={formatCurrency(account.monthlyRevenue)} />
+                            <DetailRow label="Payment Terms" value={`${account.paymentTermsDays} days`} />
+                          </InfoCard>
 
-                            <DetailRow
-                              label="Current Balance"
-                              value={formatCurrency(account.currentBalance)}
-                            />
-                            <DetailRow
-                              label="Credit Limit"
-                              value={formatCurrency(account.creditLimitValue)}
-                            />
-                            <DetailRow
-                              label="Revenue"
-                              value={formatCurrency(account.monthlyRevenue)}
-                            />
-                            <DetailRow
-                              label="Payment Terms"
-                              value={`${account.paymentTermsDays} days`}
-                            />
-                          </div>
-
-                          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                            <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
-                              Contact
-                            </h4>
-
+                          <InfoCard title="Contact">
                             <DetailRow label="Contact" value={account.contactName || '—'} />
                             <DetailRow label="Email" value={account.email || '—'} />
                             <DetailRow label="Phone" value={account.phone || '—'} />
-                            <DetailRow
-                              label="Address"
-                              value={account.billingAddress || '—'}
-                            />
-                          </div>
+                            <DetailRow label="Address" value={account.billingAddress || '—'} />
+                          </InfoCard>
 
-                          <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                            <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
-                              Usage
-                            </h4>
-
-                            <DetailRow
-                              label="Trips"
-                              value={String(account.tripsThisMonth)}
-                            />
-                            <DetailRow
-                              label="Invoices"
-                              value={String(account.invoiceCount)}
-                            />
+                          <InfoCard title="Usage">
+                            <DetailRow label="Trips" value={String(account.tripsThisMonth)} />
+                            <DetailRow label="Invoices" value={String(account.invoiceCount)} />
                             <DetailRow label="Status" value={account.uiStatus} />
                             <DetailRow label="Type" value={account.uiType} />
-                          </div>
+                          </InfoCard>
 
                           {account.notes ? (
                             <div className="xl:col-span-3 rounded-2xl border border-white/10 bg-black/20 p-4">
@@ -860,6 +863,23 @@ function Field({
       <span className="mb-2 block text-sm font-medium text-white/75">{label}</span>
       {input}
     </label>
+  );
+}
+
+function InfoCard({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+      <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
+        {title}
+      </h4>
+      {children}
+    </div>
   );
 }
 

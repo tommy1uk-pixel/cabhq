@@ -59,29 +59,20 @@ type CompanyDetail = {
   createdAt: string;
   renewalDate: string | null;
   paymentStatus: PaymentStatus;
-  monthlyRevenue: number;
-  unpaidInvoices: number;
   drivers: number;
   vehicles: number;
   activeUsers: number;
-  bookingsMonth: number;
-  apiCalls: number;
-  smsUsed: number;
-  emailsSent: number;
-  storageGb: number;
   usageHealth: UsageHealth;
   ownerName: string;
   ownerEmail: string;
   ownerPhone: string;
-  salesRep: string;
-  lastContactAt: string | null;
-  internalNotes: string;
   timezone: string;
   currency: string;
   dispatcherSeatLimit: number;
   trialEndsAt: string | null;
   subscriptionStartsAt: string | null;
   users: ApiCompanyUser[];
+  internalNotes: string;
 };
 
 type NewUserForm = {
@@ -90,153 +81,96 @@ type NewUserForm = {
   role: UserRole;
 };
 
-function formatCurrency(value: number) {
-  return `£${value.toLocaleString('en-GB', {
+const inputClass =
+  'w-full rounded-2xl border border-white/10 bg-[#07111f] px-4 py-3 text-white outline-none focus:border-cyan-500/50';
+
+const btnPrimary =
+  'rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-50';
+
+const btnOutline =
+  'rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-50';
+
+const btnDanger =
+  'rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50';
+
+const btnSuccess =
+  'rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50';
+
+function formatCurrency(v: number) {
+  return `£${v.toLocaleString('en-GB', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return '—';
-  const d = new Date(value);
+function formatDate(v?: string | null) {
+  if (!v) return '—';
+  const d = new Date(v);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  return d.toLocaleDateString('en-GB');
 }
 
-function formatDateTime(value?: string | null) {
-  if (!value) return '—';
-  const d = new Date(value);
+function formatDateTime(v?: string | null) {
+  if (!v) return '—';
+  const d = new Date(v);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return d.toLocaleString('en-GB');
 }
 
-function toDateInput(value?: string | null) {
-  if (!value) return '';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString().slice(0, 10);
-}
+function deriveUsageHealth(company: ApiCompany): UsageHealth {
+  const total =
+    company.driverLimit +
+    company.vehicleLimit +
+    company.dispatcherSeatLimit;
 
-function addDaysToToday(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function statusClass(status: CompanyStatus) {
-  if (status === 'ACTIVE') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
-  if (status === 'TRIAL') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
-  if (status === 'PENDING') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
-  return 'border-red-500/30 bg-red-500/10 text-red-300';
-}
-
-function planClass(plan: PlanType) {
-  if (plan === 'STARTER') return 'border-white/10 bg-white/5 text-white/75';
-  if (plan === 'GROWTH') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
-  if (plan === 'PRO') return 'border-violet-500/30 bg-violet-500/10 text-violet-300';
-  if (plan === 'ENTERPRISE') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
-  return 'border-white/10 bg-white/5 text-white/70';
-}
-
-function paymentClass(status: PaymentStatus) {
-  if (status === 'ACTIVE') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
-  if (status === 'TRIAL') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
-  if (status === 'PAST_DUE') return 'border-red-500/30 bg-red-500/10 text-red-300';
-  return 'border-white/10 bg-white/5 text-white/70';
-}
-
-function usageClass(health: UsageHealth) {
-  if (health === 'GOOD') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
-  if (health === 'HIGH') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
-  return 'border-red-500/30 bg-red-500/10 text-red-300';
-}
-
-function userStatusClass(status: string) {
-  return status === 'ACTIVE'
-    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-    : 'border-red-500/30 bg-red-500/10 text-red-300';
-}
-
-function userRoleClass(role: string) {
-  if (role === 'ADMIN') return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
-  if (role === 'OPERATOR') return 'border-violet-500/30 bg-violet-500/10 text-violet-300';
-  if (role === 'DRIVER') return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
-  return 'border-white/10 bg-white/5 text-white/70';
-}
-
-function deriveUsageHealth(apiCompany: ApiCompany): UsageHealth {
-  const capacityTotal =
-    (apiCompany.driverLimit ?? 0) +
-    (apiCompany.vehicleLimit ?? 0) +
-    (apiCompany.dispatcherSeatLimit ?? 0);
-
-  if (capacityTotal >= 100) return 'HIGH';
-  if (capacityTotal >= 40) return 'GOOD';
+  if (total >= 100) return 'HIGH';
+  if (total >= 40) return 'GOOD';
   return 'LIMITED';
 }
 
-function mapCompany(apiCompany: ApiCompany): CompanyDetail {
-  const status =
-    apiCompany.billingStatus === 'TRIAL'
-      ? 'TRIAL'
-      : ((apiCompany.status?.toUpperCase?.() as CompanyStatus) || 'PENDING');
-
+function mapCompany(c: ApiCompany): CompanyDetail {
   return {
-    id: apiCompany.id,
-    companyName: apiCompany.name || 'Untitled Company',
-    code: apiCompany.code || '—',
-    slug: apiCompany.slug || '—',
-    status,
-    plan: apiCompany.billingPlan || 'STARTER',
-    createdAt: apiCompany.createdAt,
-    renewalDate: apiCompany.subscriptionEndsAt ?? null,
-    paymentStatus: apiCompany.billingStatus || 'TRIAL',
-    monthlyRevenue: 0,
-    unpaidInvoices: 0,
-    drivers: apiCompany.driverLimit ?? 0,
-    vehicles: apiCompany.vehicleLimit ?? 0,
-    activeUsers: apiCompany.users?.filter((u) => u.status === 'ACTIVE').length ?? 0,
-    bookingsMonth: 0,
-    apiCalls: 0,
-    smsUsed: 0,
-    emailsSent: 0,
-    storageGb: 0,
-    usageHealth: deriveUsageHealth(apiCompany),
-    ownerName: apiCompany.contactName?.trim() || 'No contact assigned',
-    ownerEmail: apiCompany.contactEmail?.trim() || 'No email',
-    ownerPhone: apiCompany.contactPhone?.trim() || 'No phone',
-    salesRep: 'Unassigned',
-    lastContactAt: apiCompany.updatedAt,
-    internalNotes: apiCompany.internalNotes || '',
-    timezone: apiCompany.timezone || 'Europe/London',
-    currency: apiCompany.currency || 'GBP',
-    dispatcherSeatLimit: apiCompany.dispatcherSeatLimit ?? 0,
-    trialEndsAt: apiCompany.trialEndsAt ?? null,
-    subscriptionStartsAt: apiCompany.subscriptionStartsAt ?? null,
-    users: apiCompany.users ?? [],
+    id: c.id,
+    companyName: c.name,
+    code: c.code || '—',
+    slug: c.slug || '—',
+    status:
+      c.billingStatus === 'TRIAL'
+        ? 'TRIAL'
+        : ((c.status as CompanyStatus) || 'PENDING'),
+    plan: c.billingPlan,
+    createdAt: c.createdAt,
+    renewalDate: c.subscriptionEndsAt ?? null,
+    paymentStatus: c.billingStatus,
+    drivers: c.driverLimit,
+    vehicles: c.vehicleLimit,
+    activeUsers:
+      c.users?.filter((u) => u.status === 'ACTIVE').length ?? 0,
+    usageHealth: deriveUsageHealth(c),
+    ownerName: c.contactName || 'No contact assigned',
+    ownerEmail: c.contactEmail || 'No email',
+    ownerPhone: c.contactPhone || 'No phone',
+    timezone: c.timezone || 'Europe/London',
+    currency: c.currency || 'GBP',
+    dispatcherSeatLimit: c.dispatcherSeatLimit,
+    trialEndsAt: c.trialEndsAt ?? null,
+    subscriptionStartsAt: c.subscriptionStartsAt ?? null,
+    users: c.users ?? [],
+    internalNotes: c.internalNotes || '',
   };
 }
 
 export default function SuperAdminCompanyDetailPage() {
   const params = useParams();
-  const companyId = Array.isArray(params.companyId) ? params.companyId[0] : params.companyId;
+  const companyId = Array.isArray(params.companyId)
+    ? params.companyId[0]
+    : params.companyId;
 
   const [company, setCompany] = useState<CompanyDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [pageError, setPageError] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [notes, setNotes] = useState('');
-  const [saved, setSaved] = useState(false);
 
   const [newUser, setNewUser] = useState<NewUserForm>({
     email: '',
@@ -244,15 +178,7 @@ export default function SuperAdminCompanyDetailPage() {
     role: 'ADMIN',
   });
 
-  const [userActionError, setUserActionError] = useState('');
-  const [userActionSuccess, setUserActionSuccess] = useState('');
-  const [creatingUser, setCreatingUser] = useState(false);
-  const [statusUpdatingUserId, setStatusUpdatingUserId] = useState<string | null>(null);
-  const [passwordResetUserId, setPasswordResetUserId] = useState<string | null>(null);
-
-  const [quickActionError, setQuickActionError] = useState('');
-  const [quickActionSuccess, setQuickActionSuccess] = useState('');
-  const [quickActionLoading, setQuickActionLoading] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   async function loadCompany() {
     if (!companyId) return;
@@ -267,101 +193,52 @@ export default function SuperAdminCompanyDetailPage() {
   useEffect(() => {
     if (!companyId) return;
 
-    let active = true;
-
     async function run() {
       try {
         setLoading(true);
-        setPageError('');
-
-        const data = await apiFetch<ApiCompany>(`/companies/${companyId}`);
-
-        if (!active) return;
-
-        const mapped = mapCompany(data);
-        setCompany(mapped);
-        setNotes(mapped.internalNotes);
+        setError('');
+        await loadCompany();
       } catch (err) {
-        if (!active) return;
-        setPageError(err instanceof Error ? err.message : 'Failed to load company');
+        setError(err instanceof Error ? err.message : 'Load failed');
       } finally {
-        if (active) setLoading(false);
+        setLoading(false);
       }
     }
 
     void run();
-
-    return () => {
-      active = false;
-    };
   }, [companyId]);
 
-  const billingTotal = useMemo(() => {
-    if (!company) return 0;
-
-    return company.plan === 'STARTER'
-      ? 49
-      : company.plan === 'GROWTH'
-        ? 89
-        : company.plan === 'PRO'
-          ? 149
-          : 249;
-  }, [company]);
+  function toast(msg: string) {
+    setSuccess(msg);
+    setTimeout(() => setSuccess(''), 1500);
+  }
 
   async function saveNotes() {
-    if (!companyId) return;
-
     try {
-      setSaved(false);
-      setQuickActionError('');
-      setQuickActionSuccess('');
-      setQuickActionLoading('save-notes');
+      setBusy('notes');
 
-      await apiFetch<ApiCompany>(`/companies/${companyId}`, {
+      await apiFetch(`/companies/${companyId}`, {
         method: 'PATCH',
-        body: JSON.stringify({
-          internalNotes: notes,
-        }),
+        body: JSON.stringify({ internalNotes: notes }),
       });
 
       await loadCompany();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1200);
+      toast('Notes saved');
     } catch (err) {
-      setQuickActionError(err instanceof Error ? err.message : 'Failed to save notes');
+      setError(err instanceof Error ? err.message : 'Failed');
     } finally {
-      setQuickActionLoading(null);
+      setBusy(null);
     }
   }
 
-  async function createCompanyUser() {
-    if (!companyId) return;
-
-    if (!newUser.email.trim()) {
-      setUserActionError('User email is required');
-      return;
-    }
-
-    if (!newUser.password.trim() || newUser.password.trim().length < 8) {
-      setUserActionError('Password must be at least 8 characters');
-      return;
-    }
-
+  async function createUser() {
     try {
-      setCreatingUser(true);
-      setUserActionError('');
-      setUserActionSuccess('');
+      setBusy('create-user');
 
       await apiFetch(`/companies/${companyId}/users`, {
         method: 'POST',
-        body: JSON.stringify({
-          email: newUser.email.trim(),
-          password: newUser.password.trim(),
-          role: newUser.role,
-        }),
+        body: JSON.stringify(newUser),
       });
-
-      await loadCompany();
 
       setNewUser({
         email: '',
@@ -369,139 +246,59 @@ export default function SuperAdminCompanyDetailPage() {
         role: 'ADMIN',
       });
 
-      setUserActionSuccess('User created');
-      setTimeout(() => setUserActionSuccess(''), 1500);
+      await loadCompany();
+      toast('User created');
     } catch (err) {
-      setUserActionError(err instanceof Error ? err.message : 'Failed to create user');
+      setError(err instanceof Error ? err.message : 'Failed');
     } finally {
-      setCreatingUser(false);
+      setBusy(null);
     }
   }
 
-  async function updateUserStatus(userId: string, status: UserStatus) {
-    if (!companyId) return;
-
+  async function updateUserStatus(
+    userId: string,
+    status: UserStatus,
+  ) {
     try {
-      setStatusUpdatingUserId(userId);
-      setUserActionError('');
-      setUserActionSuccess('');
+      setBusy(userId);
 
-      await apiFetch(`/companies/${companyId}/users/${userId}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status }),
-      });
+      await apiFetch(
+        `/companies/${companyId}/users/${userId}/status`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ status }),
+        },
+      );
 
       await loadCompany();
-      setUserActionSuccess(`User marked ${status.toLowerCase()}`);
-      setTimeout(() => setUserActionSuccess(''), 1500);
+      toast('User updated');
     } catch (err) {
-      setUserActionError(
-        err instanceof Error ? err.message : 'Failed to update user status',
-      );
+      setError(err instanceof Error ? err.message : 'Failed');
     } finally {
-      setStatusUpdatingUserId(null);
+      setBusy(null);
     }
   }
 
-  async function resetUserPassword(userId: string, email: string) {
-    if (!companyId) return;
-
-    const password = window.prompt(`Enter a new password for ${email}`);
-    if (!password) return;
-
-    try {
-      setPasswordResetUserId(userId);
-      setUserActionError('');
-      setUserActionSuccess('');
-
-      await apiFetch(`/companies/${companyId}/users/${userId}/password`, {
-        method: 'PATCH',
-        body: JSON.stringify({ password }),
-      });
-
-      setUserActionSuccess('Password reset');
-      setTimeout(() => setUserActionSuccess(''), 1500);
-    } catch (err) {
-      setUserActionError(
-        err instanceof Error ? err.message : 'Failed to reset password',
-      );
-    } finally {
-      setPasswordResetUserId(null);
-    }
-  }
-
-  async function patchCompanyStatus(nextStatus: 'ACTIVE' | 'SUSPENDED' | 'PENDING') {
-    if (!companyId) return;
-
-    try {
-      setQuickActionLoading(`status-${nextStatus}`);
-      setQuickActionError('');
-      setQuickActionSuccess('');
-
-      await apiFetch(`/companies/${companyId}/status`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: nextStatus }),
-      });
-
-      await loadCompany();
-      setQuickActionSuccess(`Company marked ${nextStatus.toLowerCase()}`);
-      setTimeout(() => setQuickActionSuccess(''), 1500);
-    } catch (err) {
-      setQuickActionError(
-        err instanceof Error ? err.message : 'Failed to update company status',
-      );
-    } finally {
-      setQuickActionLoading(null);
-    }
-  }
-
-  async function extendTrial() {
-    if (!companyId) return;
-
-    const currentDate = toDateInput(company?.trialEndsAt);
-    const trialInput = window.prompt(
-      'Enter new trial end date (YYYY-MM-DD)',
-      currentDate || addDaysToToday(14),
-    );
-
-    if (!trialInput) return;
-
-    try {
-      setQuickActionLoading('extend-trial');
-      setQuickActionError('');
-      setQuickActionSuccess('');
-
-      await apiFetch(`/companies/${companyId}/extend-trial`, {
-        method: 'POST',
-        body: JSON.stringify({ trialEndsAt: trialInput }),
-      });
-
-      await loadCompany();
-      setQuickActionSuccess('Trial extended');
-      setTimeout(() => setQuickActionSuccess(''), 1500);
-    } catch (err) {
-      setQuickActionError(err instanceof Error ? err.message : 'Failed to extend trial');
-    } finally {
-      setQuickActionLoading(null);
-    }
-  }
+  const monthly = useMemo(() => {
+    if (!company) return 0;
+    if (company.plan === 'STARTER') return 49;
+    if (company.plan === 'GROWTH') return 89;
+    if (company.plan === 'PRO') return 149;
+    return 249;
+  }, [company]);
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#05070c] px-4 py-6 text-white md:px-6">
-        <div className="mx-auto max-w-[1850px] rounded-2xl border border-white/10 bg-[#0b1728] p-6 text-white/55">
-          Loading company...
-        </div>
+      <main className="min-h-screen bg-[#05070c] p-6 text-white">
+        Loading company...
       </main>
     );
   }
 
-  if (pageError || !company) {
+  if (!company) {
     return (
-      <main className="min-h-screen bg-[#05070c] px-4 py-6 text-white md:px-6">
-        <div className="mx-auto max-w-[1850px] rounded-2xl border border-red-500/20 bg-red-500/10 p-6 text-red-200">
-          {pageError || 'Company not found'}
-        </div>
+      <main className="min-h-screen bg-[#05070c] p-6 text-red-300">
+        {error || 'Company not found'}
       </main>
     );
   }
@@ -512,283 +309,190 @@ export default function SuperAdminCompanyDetailPage() {
         <SuperAdminPageHeader
           eyebrow="Company Detail"
           title={company.companyName}
-          description={`Company ID: ${company.id} · Created ${formatDate(company.createdAt)}`}
+          description={`Company ID: ${company.id}`}
           actions={
             <>
               <Link
                 href="/super-admin/companies"
-                className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
+                className={btnOutline}
               >
-                Back to Companies
+                Back
               </Link>
+
               <Link
                 href={`/super-admin/companies/${company.id}/edit`}
-                className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500"
+                className={btnPrimary}
               >
-                Edit Company
+                Edit
               </Link>
+
               <Link
                 href={`/super-admin/companies/${company.id}/billing`}
-                className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20"
+                className={btnOutline}
               >
-                Open Billing
+                Billing
               </Link>
             </>
           }
         />
 
-        <div className="mb-6 flex flex-wrap gap-2">
-          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(company.status)}`}>
-            {company.status}
-          </span>
-          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${planClass(company.plan)}`}>
-            {company.plan}
-          </span>
-          <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${paymentClass(company.paymentStatus)}`}>
-            {company.paymentStatus}
-          </span>
-        </div>
+        {(success || error) && (
+          <div className="mb-6 rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm">
+            {success || error}
+          </div>
+        )}
 
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
           <SuperAdminStatCard label="Drivers" value={company.drivers} />
           <SuperAdminStatCard label="Vehicles" value={company.vehicles} />
-          <SuperAdminStatCard label="Bookings Month" value={company.bookingsMonth} />
-          <SuperAdminStatCard label="Revenue Month" value={formatCurrency(company.monthlyRevenue)} />
-          <SuperAdminStatCard label="Unpaid Invoices" value={company.unpaidInvoices} />
-          <SuperAdminStatCard label="Active Users" value={company.activeUsers} />
+          <SuperAdminStatCard label="Users" value={company.activeUsers} />
+          <SuperAdminStatCard label="Plan" value={company.plan} />
+          <SuperAdminStatCard label="Monthly" value={formatCurrency(monthly)} />
+          <SuperAdminStatCard label="Usage" value={company.usageHealth} />
         </section>
 
-        <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
           <section className="space-y-6">
-            <SuperAdminPanel title="Company & Billing">
+            <SuperAdminPanel title="Company Information">
               <div className="space-y-3">
-                <SuperAdminDetailRow label="Company Name" value={company.companyName} />
+                <SuperAdminDetailRow label="Name" value={company.companyName} />
                 <SuperAdminDetailRow label="Code" value={company.code} />
                 <SuperAdminDetailRow label="Slug" value={company.slug} />
                 <SuperAdminDetailRow label="Owner" value={company.ownerName} />
-                <SuperAdminDetailRow label="Owner Email" value={company.ownerEmail} />
-                <SuperAdminDetailRow label="Owner Phone" value={company.ownerPhone} />
-                <SuperAdminDetailRow label="Current Plan" value={company.plan} />
-                <SuperAdminDetailRow label="Plan Amount" value={formatCurrency(billingTotal)} />
-                <SuperAdminDetailRow label="Billing Status" value={company.paymentStatus} />
-                <SuperAdminDetailRow label="Trial Ends" value={formatDate(company.trialEndsAt)} />
-                <SuperAdminDetailRow label="Subscription Starts" value={formatDate(company.subscriptionStartsAt)} />
-                <SuperAdminDetailRow label="Renewal Date" value={formatDate(company.renewalDate)} />
+                <SuperAdminDetailRow label="Email" value={company.ownerEmail} />
+                <SuperAdminDetailRow label="Phone" value={company.ownerPhone} />
                 <SuperAdminDetailRow label="Timezone" value={company.timezone} />
                 <SuperAdminDetailRow label="Currency" value={company.currency} />
+                <SuperAdminDetailRow label="Trial Ends" value={formatDate(company.trialEndsAt)} />
+                <SuperAdminDetailRow label="Renewal" value={formatDate(company.renewalDate)} />
               </div>
             </SuperAdminPanel>
 
             <SuperAdminPanel title="User Management">
-              <div className="space-y-6">
-                <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
-                  <div className="mb-4 text-lg font-semibold text-white">Create User</div>
+              <div className="mb-4 grid gap-4 md:grid-cols-3">
+                <input
+                  className={inputClass}
+                  placeholder="Email"
+                  value={newUser.email}
+                  onChange={(e) =>
+                    setNewUser((p) => ({
+                      ...p,
+                      email: e.target.value,
+                    }))
+                  }
+                />
 
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <input
-                      value={newUser.email}
-                      onChange={(e) => setNewUser((prev) => ({ ...prev, email: e.target.value }))}
-                      placeholder="user@company.com"
-                      className={inputClassName}
-                    />
+                <select
+                  className={inputClass}
+                  value={newUser.role}
+                  onChange={(e) =>
+                    setNewUser((p) => ({
+                      ...p,
+                      role: e.target.value as UserRole,
+                    }))
+                  }
+                >
+                  <option>ADMIN</option>
+                  <option>OPERATOR</option>
+                  <option>DRIVER</option>
+                  <option>SUPER_ADMIN</option>
+                </select>
 
-                    <select
-                      value={newUser.role}
-                      onChange={(e) =>
-                        setNewUser((prev) => ({
-                          ...prev,
-                          role: e.target.value as UserRole,
-                        }))
-                      }
-                      className={inputClassName}
-                    >
-                      <option value="ADMIN">ADMIN</option>
-                      <option value="OPERATOR">OPERATOR</option>
-                      <option value="DRIVER">DRIVER</option>
-                      <option value="SUPER_ADMIN">SUPER_ADMIN</option>
-                    </select>
+                <input
+                  type="password"
+                  className={inputClass}
+                  placeholder="Password"
+                  value={newUser.password}
+                  onChange={(e) =>
+                    setNewUser((p) => ({
+                      ...p,
+                      password: e.target.value,
+                    }))
+                  }
+                />
+              </div>
 
-                    <input
-                      type="password"
-                      value={newUser.password}
-                      onChange={(e) => setNewUser((prev) => ({ ...prev, password: e.target.value }))}
-                      placeholder="Temporary password"
-                      className={inputClassName}
-                    />
+              <button
+                onClick={createUser}
+                disabled={busy === 'create-user'}
+                className={btnPrimary}
+              >
+                Create User
+              </button>
+
+              <div className="mt-6 space-y-3">
+                {company.users.map((user) => (
+                  <div
+                    key={user.id}
+                    className="rounded-2xl border border-white/10 bg-[#0b1728] p-4"
+                  >
+                    <div className="font-semibold">{user.email}</div>
+                    <div className="mt-1 text-xs text-white/50">
+                      {user.role} · {user.status} · {formatDateTime(user.createdAt)}
+                    </div>
+
+                    <div className="mt-4 flex gap-2">
+                      {user.status === 'ACTIVE' ? (
+                        <button
+                          onClick={() =>
+                            updateUserStatus(user.id, 'SUSPENDED')
+                          }
+                          className={btnDanger}
+                        >
+                          Suspend
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() =>
+                            updateUserStatus(user.id, 'ACTIVE')
+                          }
+                          className={btnSuccess}
+                        >
+                          Activate
+                        </button>
+                      )}
+                    </div>
                   </div>
-
-                  <div className="mt-4 flex flex-wrap items-center gap-3">
-                    <button
-                      onClick={createCompanyUser}
-                      disabled={creatingUser}
-                      className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-50"
-                    >
-                      {creatingUser ? 'Creating...' : 'Create User'}
-                    </button>
-
-                    {userActionSuccess ? (
-                      <span className="text-sm text-emerald-300">{userActionSuccess}</span>
-                    ) : null}
-
-                    {userActionError ? (
-                      <span className="text-sm text-red-300">{userActionError}</span>
-                    ) : null}
-                  </div>
-                </div>
-
-                {company.users.length === 0 ? (
-                  <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4 text-sm text-white/55">
-                    No users found.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {company.users.map((user) => (
-                      <div key={user.id} className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
-                        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="font-semibold text-white">{user.email}</div>
-                              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${userRoleClass(user.role)}`}>
-                                {user.role}
-                              </span>
-                              <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${userStatusClass(user.status)}`}>
-                                {user.status}
-                              </span>
-                            </div>
-
-                            <div className="mt-2 text-xs text-white/45">
-                              Created {formatDateTime(user.createdAt)}
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2">
-                            {user.status === 'ACTIVE' ? (
-                              <button
-                                onClick={() => updateUserStatus(user.id, 'SUSPENDED')}
-                                disabled={statusUpdatingUserId === user.id}
-                                className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50"
-                              >
-                                {statusUpdatingUserId === user.id ? 'Updating...' : 'Suspend'}
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => updateUserStatus(user.id, 'ACTIVE')}
-                                disabled={statusUpdatingUserId === user.id}
-                                className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
-                              >
-                                {statusUpdatingUserId === user.id ? 'Updating...' : 'Activate'}
-                              </button>
-                            )}
-
-                            <button
-                              onClick={() => resetUserPassword(user.id, user.email)}
-                              disabled={passwordResetUserId === user.id}
-                              className="rounded-xl border border-white/10 px-3 py-2 text-sm font-semibold text-white hover:bg-white/10 disabled:opacity-50"
-                            >
-                              {passwordResetUserId === user.id ? 'Resetting...' : 'Reset Password'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                ))}
               </div>
             </SuperAdminPanel>
 
-            <SuperAdminPanel title="Usage">
-              <div className="mb-4">
-                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${usageClass(company.usageHealth)}`}>
-                  {company.usageHealth} USAGE HEALTH
-                </span>
-              </div>
-              <div className="space-y-3">
-                <SuperAdminDetailRow label="Driver Limit" value={company.drivers.toLocaleString('en-GB')} />
-                <SuperAdminDetailRow label="Vehicle Limit" value={company.vehicles.toLocaleString('en-GB')} />
-                <SuperAdminDetailRow label="Dispatcher Seats" value={company.dispatcherSeatLimit.toLocaleString('en-GB')} />
-                <SuperAdminDetailRow label="API Calls" value={company.apiCalls.toLocaleString('en-GB')} />
-                <SuperAdminDetailRow label="SMS Used" value={company.smsUsed.toLocaleString('en-GB')} />
-                <SuperAdminDetailRow label="Emails Sent" value={company.emailsSent.toLocaleString('en-GB')} />
-                <SuperAdminDetailRow label="Storage" value={`${company.storageGb.toFixed(1)} GB`} />
-                <SuperAdminDetailRow label="Last Contact" value={formatDateTime(company.lastContactAt)} />
-                <SuperAdminDetailRow label="Sales Rep" value={company.salesRep} />
-              </div>
-            </SuperAdminPanel>
-
-            <SuperAdminPanel title="Internal CRM Notes">
+            <SuperAdminPanel title="Internal Notes">
               <textarea
                 rows={8}
+                className={inputClass}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                className="w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-white outline-none focus:border-cyan-500/50"
               />
-              <div className="mt-4 flex items-center gap-3">
+
+              <div className="mt-4">
                 <button
                   onClick={saveNotes}
-                  disabled={quickActionLoading === 'save-notes'}
-                  className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:opacity-50"
+                  disabled={busy === 'notes'}
+                  className={btnPrimary}
                 >
-                  {quickActionLoading === 'save-notes' ? 'Saving...' : 'Save Notes'}
+                  Save Notes
                 </button>
-                {saved ? <span className="text-sm text-emerald-300">Saved</span> : null}
               </div>
             </SuperAdminPanel>
           </section>
 
           <section className="space-y-6">
-            <SuperAdminPanel title="Quick Actions">
-              <div className="grid gap-3">
-                <button className="rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500">
-                  Login as Company Admin
-                </button>
-
-                <Link
-                  href="/dashboard"
-                  className="rounded-2xl border border-white/10 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-white/10"
-                >
-                  Open Company Dashboard
-                </Link>
-
-                <button
-                  onClick={extendTrial}
-                  disabled={quickActionLoading === 'extend-trial'}
-                  className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
-                >
-                  {quickActionLoading === 'extend-trial' ? 'Updating...' : 'Extend Trial'}
-                </button>
-
-                <button
-                  onClick={() => patchCompanyStatus('ACTIVE')}
-                  disabled={quickActionLoading === 'status-ACTIVE'}
-                  className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-                >
-                  {quickActionLoading === 'status-ACTIVE' ? 'Updating...' : 'Mark Active'}
-                </button>
-
-                <button
-                  onClick={() => patchCompanyStatus('PENDING')}
-                  disabled={quickActionLoading === 'status-PENDING'}
-                  className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
-                >
-                  {quickActionLoading === 'status-PENDING' ? 'Updating...' : 'Mark Pending'}
-                </button>
-
-                <button
-                  onClick={() => patchCompanyStatus('SUSPENDED')}
-                  disabled={quickActionLoading === 'status-SUSPENDED'}
-                  className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50"
-                >
-                  {quickActionLoading === 'status-SUSPENDED' ? 'Updating...' : 'Disable Company'}
-                </button>
+            <SuperAdminPanel title="Usage">
+              <div className="space-y-3">
+                <SuperAdminDetailRow
+                  label="Driver Limit"
+                  value={String(company.drivers)}
+                />
+                <SuperAdminDetailRow
+                  label="Vehicle Limit"
+                  value={String(company.vehicles)}
+                />
+                <SuperAdminDetailRow
+                  label="Dispatcher Seats"
+                  value={String(company.dispatcherSeatLimit)}
+                />
               </div>
-
-              {quickActionSuccess ? (
-                <div className="mt-4 text-sm text-emerald-300">{quickActionSuccess}</div>
-              ) : null}
-
-              {quickActionError ? (
-                <div className="mt-4 text-sm text-red-300">{quickActionError}</div>
-              ) : null}
             </SuperAdminPanel>
           </section>
         </div>
@@ -796,6 +500,3 @@ export default function SuperAdminCompanyDetailPage() {
     </main>
   );
 }
-
-const inputClassName =
-  'w-full rounded-2xl border border-white/10 bg-[#07111f] px-4 py-3 text-white outline-none focus:border-cyan-500/50';

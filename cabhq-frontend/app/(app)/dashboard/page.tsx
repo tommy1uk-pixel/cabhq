@@ -50,7 +50,11 @@ const quickLinks = [
 ];
 
 export default function DashboardPage() {
-  const user = getStoredUser();
+  const [user, setUser] = useState<ReturnType<typeof getStoredUser> | null>(null);
+
+useEffect(() => {
+  setUser(getStoredUser());
+}, []);
 
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
