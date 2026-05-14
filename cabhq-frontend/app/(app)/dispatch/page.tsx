@@ -44,6 +44,11 @@ type Vehicle = {
   model?: string | null;
 } | null;
 
+type DriverDispatchState = {
+  assignable: boolean;
+  blockedReasons: string[];
+};
+
 type Driver = {
   id: string;
   fullName?: string;
@@ -57,6 +62,7 @@ type Driver = {
   speed?: number | null;
   lastLocationAt?: string | null;
   vehicle?: Vehicle;
+  dispatch?: DriverDispatchState;
 };
 
 type DriverSuggestion = {
@@ -330,6 +336,20 @@ function isLive(status?: string) {
   return !isCompleted(status);
 }
 
+function isDriverDispatchReady(driver: Driver) {
+  const status = (driver.status || '').toUpperCase();
+
+  if (driver.dispatch?.assignable === false) {
+    return false;
+  }
+
+  return (
+    driver.isAvailable === true ||
+    driver.isOnDuty === true ||
+    ['ONLINE', 'AVAILABLE', 'ON_DUTY'].includes(status)
+  );
+}
+
 export default function DispatchPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -375,10 +395,10 @@ export default function DispatchPage() {
 
       setDriverIconFactory(() => (driver: Driver) => {
         const status = (driver.status || '').toUpperCase();
-        const available = driver.isAvailable || status === 'AVAILABLE';
+        const available = isDriverDispatchReady(driver);
         const busy =
           status === 'BUSY' || status === 'ON_JOB' || status === 'EN_ROUTE';
-        const blocked = status === 'OFF_DUTY';
+        const blocked = !available && !busy;
 
         const color = blocked
           ? '#ef4444'
@@ -896,77 +916,77 @@ export default function DispatchPage() {
   }
 
   useEffect(() => {
-  let cancelled = false;
+    let cancelled = false;
 
-  async function calculateQuote() {
-    if (!form.pickupAddress.trim() || !form.dropoffAddress.trim()) {
-      setPricingResult(null);
-      return;
-    }
-
-    try {
-      setPricingLoading(true);
-
-      const pickupTime =
-        form.whenType === 'SCHEDULED' && form.pickupAt
-          ? new Date(form.pickupAt).toISOString()
-          : new Date().toISOString();
-
-      const quote = await apiFetch<PricingQuote>('/pricing/quote', {
-        method: 'POST',
-        body: JSON.stringify({
-          pickup: form.pickupAddress,
-          dropoff: form.dropoffAddress,
-          pickupLat: form.pickupLatitude,
-          pickupLng: form.pickupLongitude,
-          dropoffLat: form.dropoffLatitude,
-          dropoffLng: form.dropoffLongitude,
-          pickupTime,
-          passengerCount: form.passengerCount,
-          isPreBooked: form.whenType === 'SCHEDULED',
-        }),
-      });
-
-      if (cancelled) return;
-
-      setPricingResult(quote);
-
-      setForm((prev) => ({
-        ...prev,
-        quotedPrice: quote.quotedPrice.toFixed(2),
-      }));
-    } catch (error) {
-      console.error('Quote failed:', error);
-
-      if (!cancelled) {
+    async function calculateQuote() {
+      if (!form.pickupAddress.trim() || !form.dropoffAddress.trim()) {
         setPricingResult(null);
+        return;
       }
-    } finally {
-      if (!cancelled) {
-        setPricingLoading(false);
+
+      try {
+        setPricingLoading(true);
+
+        const pickupTime =
+          form.whenType === 'SCHEDULED' && form.pickupAt
+            ? new Date(form.pickupAt).toISOString()
+            : new Date().toISOString();
+
+        const quote = await apiFetch<PricingQuote>('/pricing/quote', {
+          method: 'POST',
+          body: JSON.stringify({
+            pickup: form.pickupAddress,
+            dropoff: form.dropoffAddress,
+            pickupLat: form.pickupLatitude,
+            pickupLng: form.pickupLongitude,
+            dropoffLat: form.dropoffLatitude,
+            dropoffLng: form.dropoffLongitude,
+            pickupTime,
+            passengerCount: form.passengerCount,
+            isPreBooked: form.whenType === 'SCHEDULED',
+          }),
+        });
+
+        if (cancelled) return;
+
+        setPricingResult(quote);
+
+        setForm((prev) => ({
+          ...prev,
+          quotedPrice: quote.quotedPrice.toFixed(2),
+        }));
+      } catch (error) {
+        console.error('Quote failed:', error);
+
+        if (!cancelled) {
+          setPricingResult(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setPricingLoading(false);
+        }
       }
     }
-  }
 
-  const timer = window.setTimeout(() => {
-    void calculateQuote();
-  }, 600);
+    const timer = window.setTimeout(() => {
+      void calculateQuote();
+    }, 600);
 
-  return () => {
-    cancelled = true;
-    window.clearTimeout(timer);
-  };
-}, [
-  form.pickupAddress,
-  form.dropoffAddress,
-  form.pickupLatitude,
-  form.pickupLongitude,
-  form.dropoffLatitude,
-  form.dropoffLongitude,
-  form.whenType,
-  form.pickupAt,
-  form.passengerCount,
-]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    form.pickupAddress,
+    form.dropoffAddress,
+    form.pickupLatitude,
+    form.pickupLongitude,
+    form.dropoffLatitude,
+    form.dropoffLongitude,
+    form.whenType,
+    form.pickupAt,
+    form.passengerCount,
+  ]);
 
   async function createBooking(autoDispatchAfterCreate = false) {
     try {
@@ -1078,11 +1098,7 @@ export default function DispatchPage() {
         (booking) => (booking.status || '').toUpperCase() === 'COMPLETED',
       ).length,
       drivers: drivers.length,
-      available: drivers.filter(
-        (driver) =>
-          driver.isAvailable ||
-          (driver.status || '').toUpperCase() === 'AVAILABLE',
-      ).length,
+      available: drivers.filter(isDriverDispatchReady).length,
       liveGps: liveDrivers.length,
       accountLinked: bookings.filter((booking) =>
         Boolean(booking.accountId || booking.account),
@@ -1922,12 +1938,7 @@ function BookingDrawer({
   onUpdateStatus: (bookingId: string, status: string) => void;
   onCancelBooking: (bookingId: string) => void;
 }) {
-  const availableDrivers = drivers.filter(
-    (driver) =>
-      driver.isAvailable ||
-      (driver.status || '').toUpperCase() === 'AVAILABLE',
-  );
-
+  const availableDrivers = drivers.filter(isDriverDispatchReady);
   const isFinalStatus = isCompleted(booking.status);
 
   return (
