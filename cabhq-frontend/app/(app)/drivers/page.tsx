@@ -76,6 +76,7 @@ type DriverComplianceState = {
 type Driver = {
   id: string;
   name: string;
+  username?: string | null;
   phone?: string | null;
   email?: string | null;
   pin?: string | null;
@@ -98,6 +99,7 @@ type Driver = {
 
 type DriverFormState = {
   name: string;
+  username: string;
   phone: string;
   email: string;
   pin: string;
@@ -122,6 +124,7 @@ type DriverDocumentFormState = {
 
 const initialDriverForm: DriverFormState = {
   name: '',
+  username: '',
   phone: '',
   email: '',
   pin: '',
@@ -237,6 +240,7 @@ function DriversPageContent() {
     return drivers.filter((driver) =>
       [
         driver.name,
+        driver.username,
         driver.phone,
         driver.email,
         driver.pin,
@@ -346,6 +350,7 @@ function DriversPageContent() {
     setSelectedDriverId(driver.id);
     setForm({
       name: driver.name ?? '',
+      username: driver.username ?? '',
       phone: driver.phone ?? '',
       email: driver.email ?? '',
       pin: driver.pin ?? '',
@@ -366,6 +371,7 @@ function DriversPageContent() {
 
       const payload = {
         name: form.name,
+        username: form.username || null,
         phone: form.phone || null,
         email: form.email || null,
         pin: form.pin || null,
@@ -399,7 +405,7 @@ function DriversPageContent() {
         resetForm();
       } catch (error) {
         console.error(error);
-        alert(editingDriverId ? 'Failed to update driver' : 'Failed to create driver');
+        alert(error instanceof Error ? error.message : editingDriverId ? 'Failed to update driver' : 'Failed to create driver');
       } finally {
         setSaving(false);
       }
@@ -719,6 +725,19 @@ function DriversPageContent() {
                 />
 
                 <Field
+                  label="Username *"
+                  input={
+                    <input
+                      value={form.username}
+                      onChange={(e) => setField('username', e.target.value.toLowerCase())}
+                      placeholder="e.g. tommy"
+                      required
+                      className={inputClassName}
+                    />
+                  }
+                />
+
+                <Field
                   label="Status"
                   input={
                     <select
@@ -864,8 +883,8 @@ function DriversPageContent() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search drivers..."
-                  className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50 sm:w-[240px]"
+                  placeholder="Search drivers, username, PIN..."
+                  className="w-full rounded-xl border border-white/10 bg-[#0b1728] px-4 py-2.5 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50 sm:w-[260px]"
                 />
               </div>
             </div>
@@ -922,6 +941,10 @@ function DriversPageContent() {
                               </span>
                             )}
                           </div>
+
+                          <p className="mt-1 text-sm text-cyan-300">
+                            Username: {driver.username ? `@${driver.username}` : '—'}
+                          </p>
 
                           <p className="mt-2 text-sm text-white/70">
                             {[driver.phone, driver.email].filter(Boolean).join(' · ') ||
@@ -1022,6 +1045,7 @@ function DriversPageContent() {
                               </h4>
 
                               <DetailRow label="Name" value={driver.name} />
+                              <DetailRow label="Username" value={driver.username ? `@${driver.username}` : '—'} />
                               <DetailRow label="Phone" value={driver.phone || '—'} />
                               <DetailRow label="Email" value={driver.email || '—'} />
                               <DetailRow label="PIN" value={driver.pin || '—'} />
@@ -1576,6 +1600,9 @@ function DriversPageContent() {
                   Driver Focus · {selectedDriver.name}
                 </h2>
                 <p className="mt-1 text-sm text-white/60">
+                  {selectedDriver.username
+                    ? `Username @${selectedDriver.username} · `
+                    : ''}
                   Quick dispatch, shift and compliance summary for the selected driver
                 </p>
               </div>
