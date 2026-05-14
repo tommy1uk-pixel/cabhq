@@ -21,6 +21,7 @@ type UploadedMulterFile = {
 type CreateDriverInput = {
   companyId: string;
   name: string;
+  username?: string | null;
   phone?: string | null;
   email?: string | null;
   pin: string;
@@ -34,6 +35,7 @@ type UpdateDriverInput = {
   driverId: string;
   companyId: string;
   name?: string;
+  username?: string | null;
   phone?: string | null;
   email?: string | null;
   pin?: string | null;
@@ -89,6 +91,41 @@ export class DriversService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
   ) {}
+
+  private normaliseUsername(value?: string | null) {
+    const username = value?.trim().toLowerCase() || '';
+
+    if (!username) return null;
+
+    if (!/^[a-z0-9._-]{3,30}$/.test(username)) {
+      throw new BadRequestException(
+        'Username must be 3-30 characters and can only contain letters, numbers, dots, dashes or underscores',
+      );
+    }
+
+    return username;
+  }
+
+  private async ensureUsernameAvailable(
+    companyId: string,
+    username: string,
+    ignoreDriverId?: string,
+  ) {
+    const existing = await this.prisma.driver.findFirst({
+      where: {
+        companyId,
+        username,
+        ...(ignoreDriverId ? { id: { not: ignoreDriverId } } : {}),
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (existing) {
+      throw new BadRequestException('Username already exists for this company');
+    }
+  }
 
   private getDocumentStatus(expiryDate?: Date | null) {
     if (!expiryDate) {
@@ -206,6 +243,7 @@ export class DriversService {
 
     return {
       ...driver,
+      username: driver.username ?? null,
       badgeExpiry: driver.badgeExpiry ? driver.badgeExpiry.toISOString() : null,
       dbsExpiry: driver.dbsExpiry ? driver.dbsExpiry.toISOString() : null,
       licenceExpiry: driver.licenceExpiry
@@ -414,15 +452,20 @@ export class DriversService {
 
   async create(input: CreateDriverInput) {
     const name = input.name.trim();
+    const username = this.normaliseUsername(input.username);
     const pin = input.pin.trim();
 
     if (!name) throw new BadRequestException('Driver name is required');
+    if (!username) throw new BadRequestException('Driver username is required');
     if (!pin) throw new BadRequestException('Driver PIN is required');
+
+    await this.ensureUsernameAvailable(input.companyId, username);
 
     const driver = await this.prisma.driver.create({
       data: {
         companyId: input.companyId,
         name,
+        username,
         phone: input.phone?.trim() || null,
         email: input.email?.trim() || null,
         pin,
@@ -448,6 +491,7 @@ export class DriversService {
 
     const data: {
       name?: string;
+      username?: string | null;
       phone?: string | null;
       email?: string | null;
       pin?: string;
@@ -466,6 +510,22 @@ export class DriversService {
       }
 
       data.name = trimmedName;
+    }
+
+    if (input.username !== undefined) {
+      const username = this.normaliseUsername(input.username);
+
+      if (!username) {
+        throw new BadRequestException('Driver username cannot be empty');
+      }
+
+      await this.ensureUsernameAvailable(
+        input.companyId,
+        username,
+        existing.id,
+      );
+
+      data.username = username;
     }
 
     if (input.phone !== undefined) {

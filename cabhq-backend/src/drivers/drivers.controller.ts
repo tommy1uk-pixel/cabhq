@@ -41,6 +41,7 @@ type UploadedMulterFile = {
 
 type CreateDriverBody = {
   name: string;
+  username?: string | null;
   phone?: string | null;
   email?: string | null;
   pin: string;
@@ -52,6 +53,7 @@ type CreateDriverBody = {
 
 type UpdateDriverBody = {
   name?: string;
+  username?: string | null;
   phone?: string | null;
   email?: string | null;
   pin?: string | null;
@@ -110,6 +112,7 @@ export class DriversController {
     return this.driversService.create({
       companyId: req.user.companyId,
       name: body.name,
+      username: body.username ?? null,
       phone: body.phone ?? null,
       email: body.email ?? null,
       pin: body.pin,
@@ -130,6 +133,7 @@ export class DriversController {
       driverId: id,
       companyId: req.user.companyId,
       name: body.name,
+      username: body.username,
       phone: body.phone,
       email: body.email,
       pin: body.pin,
