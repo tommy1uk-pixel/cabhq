@@ -8,16 +8,19 @@ import { JwtService } from '@nestjs/jwt';
 
 type DriverAppJwtPayload = {
   sub: string;
-  driverId: string;
+  driverId?: string;
   companyId: string;
   role: string;
   type: string;
+  username?: string | null;
   iat?: number;
   exp?: number;
 };
 
 type DriverAppRequest = Request & {
-  user?: DriverAppJwtPayload;
+  user?: DriverAppJwtPayload & {
+    driverId: string;
+  };
   headers: {
     authorization?: string;
   };
@@ -49,11 +52,25 @@ export class DriverAppAuthGuard implements CanActivate {
         },
       );
 
-      if (payload.role !== 'DRIVER' || payload.type !== 'driver_app') {
+      const isDriverToken =
+        payload.role === 'DRIVER' &&
+        (payload.type === 'DRIVER' || payload.type === 'driver_app');
+
+      if (!isDriverToken) {
         throw new UnauthorizedException('Invalid driver app token');
       }
 
-      request.user = payload;
+      const driverId = payload.driverId || payload.sub;
+
+      if (!driverId) {
+        throw new UnauthorizedException('Driver ID missing from token');
+      }
+
+      request.user = {
+        ...payload,
+        driverId,
+      };
+
       return true;
     } catch {
       throw new UnauthorizedException('Invalid or expired token');
