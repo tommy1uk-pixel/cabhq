@@ -5,43 +5,59 @@ import { RealtimeGateway } from './realtime.gateway';
 export class RealtimeService {
   constructor(private readonly gateway: RealtimeGateway) {}
 
-  bookingCreated(companyId: string, booking: unknown) {
-    this.gateway.emitToCompany(companyId, 'booking:created', {
-      type: 'booking:created',
-      booking,
+  private emit(companyId: string, event: string, payload: unknown) {
+    this.gateway.emitToCompany(companyId, event, {
+      type: event,
+      ...((payload as object) || {}),
       ts: new Date().toISOString(),
+    });
+  }
+
+  bookingCreated(companyId: string, booking: unknown) {
+    this.emit(companyId, 'booking:created', {
+      booking,
     });
   }
 
   bookingUpdated(companyId: string, booking: unknown) {
-    this.gateway.emitToCompany(companyId, 'booking:updated', {
-      type: 'booking:updated',
+    this.emit(companyId, 'booking:updated', {
       booking,
-      ts: new Date().toISOString(),
     });
   }
 
   bookingAssigned(companyId: string, booking: unknown) {
-    this.gateway.emitToCompany(companyId, 'booking:assigned', {
-      type: 'booking:assigned',
+    this.emit(companyId, 'booking:assigned', {
       booking,
-      ts: new Date().toISOString(),
     });
   }
 
   bookingStatusChanged(companyId: string, booking: unknown) {
-    this.gateway.emitToCompany(companyId, 'booking:status_changed', {
-      type: 'booking:status_changed',
+    this.emit(companyId, 'booking:status_changed', {
       booking,
-      ts: new Date().toISOString(),
     });
   }
 
   bookingOfferCreated(companyId: string, booking: unknown) {
-    this.gateway.emitToCompany(companyId, 'booking:offer_created', {
-      type: 'booking:offer_created',
+    this.emit(companyId, 'booking:offer_created', {
       booking,
-      ts: new Date().toISOString(),
+    });
+  }
+
+  bookingOfferAccepted(companyId: string, booking: unknown) {
+    this.emit(companyId, 'booking:offer_accepted', {
+      booking,
+    });
+  }
+
+  bookingOfferRejected(companyId: string, booking: unknown) {
+    this.emit(companyId, 'booking:offer_rejected', {
+      booking,
+    });
+  }
+
+  bookingOfferExpired(companyId: string, booking: unknown) {
+    this.emit(companyId, 'booking:offer_expired', {
+      booking,
     });
   }
 
@@ -54,11 +70,7 @@ export class RealtimeService {
       reasons: string[];
     },
   ) {
-    this.gateway.emitToCompany(companyId, 'booking:offer_skipped', {
-      type: 'booking:offer_skipped',
-      ...payload,
-      ts: new Date().toISOString(),
-    });
+    this.emit(companyId, 'booking:offer_skipped', payload);
   }
 
   bookingNoDriver(
@@ -68,18 +80,31 @@ export class RealtimeService {
       reason: string;
     },
   ) {
-    this.gateway.emitToCompany(companyId, 'booking:no_driver', {
-      type: 'booking:no_driver',
-      ...payload,
-      ts: new Date().toISOString(),
-    });
+    this.emit(companyId, 'booking:no_driver', payload);
+  }
+
+  autoDispatchStarted(
+    companyId: string,
+    payload: {
+      bookingId: string;
+    },
+  ) {
+    this.emit(companyId, 'autodispatch:started', payload);
+  }
+
+  autoDispatchCompleted(
+    companyId: string,
+    payload: {
+      bookingId: string;
+      driverId: string;
+    },
+  ) {
+    this.emit(companyId, 'autodispatch:completed', payload);
   }
 
   driverUpdated(companyId: string, driver: unknown) {
-    this.gateway.emitToCompany(companyId, 'driver:updated', {
-      type: 'driver:updated',
+    this.emit(companyId, 'driver:updated', {
       driver,
-      ts: new Date().toISOString(),
     });
   }
 
@@ -94,10 +119,10 @@ export class RealtimeService {
       lastLocationAt?: string | null;
     },
   ) {
-    this.gateway.emitToCompany(companyId, 'driver:location', {
-      type: 'driver:location',
-      ...payload,
-      ts: new Date().toISOString(),
-    });
+    this.emit(companyId, 'driver:location', payload);
+  }
+
+  dispatchBoardRefresh(companyId: string) {
+    this.emit(companyId, 'dispatch:refresh', {});
   }
 }

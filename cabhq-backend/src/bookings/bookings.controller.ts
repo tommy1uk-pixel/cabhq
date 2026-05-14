@@ -11,6 +11,7 @@ import {
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { BookingsService } from './bookings.service';
 import { AutoDispatchService } from '../dispatch/auto-dispatch.service';
+import { CreateBookingDto } from './dto/create-booking.dto';
 
 type AuthRequest = {
   user: {
@@ -19,33 +20,6 @@ type AuthRequest = {
     email?: string;
     role?: string;
   };
-};
-
-type CreateBookingBody = {
-  pickup?: string;
-  dropoff?: string;
-  pickupAddress?: string;
-  dropoffAddress?: string;
-  pickupLat?: number | null;
-  pickupLng?: number | null;
-  dropoffLat?: number | null;
-  dropoffLng?: number | null;
-  pickupLatitude?: number | null;
-  pickupLongitude?: number | null;
-  dropoffLatitude?: number | null;
-  dropoffLongitude?: number | null;
-  pickupTime?: string;
-  pickupAt?: string;
-  pricingMode?: string | null;
-  quotedPrice?: number | null;
-  calculatedFare?: number | null;
-  distanceMiles?: number | null;
-  durationMinutes?: number | null;
-  autoDispatch?: boolean;
-  customerName?: string | null;
-  customerPhone?: string | null;
-  passengerCount?: number | null;
-  notes?: string | null;
 };
 
 type AssignDriverBody = {
@@ -58,6 +32,32 @@ type CancelBookingBody = {
 
 type UpdateBookingStatusBody = {
   status: string;
+};
+
+type UpdateBookingBody = {
+  pickup?: string;
+  dropoff?: string;
+  pickupAddress?: string;
+  dropoffAddress?: string;
+  pickupTime?: string;
+  pickupAt?: string;
+
+  customerName?: string | null;
+  customerPhone?: string | null;
+
+  bookerName?: string | null;
+  bookerPhone?: string | null;
+  bookerEmail?: string | null;
+
+  passengerName?: string | null;
+  passengerPhone?: string | null;
+  passengerNotes?: string | null;
+
+  passengerCount?: number | null;
+  notes?: string | null;
+
+  quotedPrice?: number | null;
+  pricingMode?: string | null;
 };
 
 @Controller('bookings')
@@ -78,27 +78,103 @@ export class BookingsController {
     return this.bookingsService.dispatchBoard(req.user.companyId);
   }
 
+  @Get(':id/timeline')
+  async timeline(@Req() req: AuthRequest, @Param('id') bookingId: string) {
+    return this.bookingsService.timeline({
+      bookingId,
+      companyId: req.user.companyId,
+    });
+  }
+
   @Post()
-  async create(@Req() req: AuthRequest, @Body() body: CreateBookingBody) {
+  async create(@Req() req: AuthRequest, @Body() body: CreateBookingDto) {
+    const bookerName =
+      body.bookerName?.trim() || body.customerName?.trim() || null;
+
+    const bookerPhone =
+      body.bookerPhone?.trim() || body.customerPhone?.trim() || null;
+
+    const isThirdPartyBooking = body.isThirdPartyBooking ?? false;
+
+    const passengerName = isThirdPartyBooking
+      ? body.passengerName?.trim() || null
+      : body.passengerName?.trim() || bookerName;
+
+    const passengerPhone = isThirdPartyBooking
+      ? body.passengerPhone?.trim() || null
+      : body.passengerPhone?.trim() || bookerPhone;
+
     return this.bookingsService.create({
       companyId: req.user.companyId,
-      pickup: body.pickupAddress ?? body.pickup ?? '',
-      dropoff: body.dropoffAddress ?? body.dropoff ?? '',
+
+      pickup: body.pickupAddress?.trim() || body.pickup?.trim() || '',
+      dropoff: body.dropoffAddress?.trim() || body.dropoff?.trim() || '',
+
       pickupLat: body.pickupLat ?? body.pickupLatitude ?? null,
       pickupLng: body.pickupLng ?? body.pickupLongitude ?? null,
       dropoffLat: body.dropoffLat ?? body.dropoffLatitude ?? null,
       dropoffLng: body.dropoffLng ?? body.dropoffLongitude ?? null,
-      pickupTime: body.pickupAt ?? body.pickupTime ?? '',
+
+      pickupTime: body.pickupAt || body.pickupTime || '',
+
       pricingMode: body.pricingMode ?? null,
       quotedPrice: body.quotedPrice ?? null,
       calculatedFare: body.calculatedFare ?? null,
       distanceMiles: body.distanceMiles ?? null,
       durationMinutes: body.durationMinutes ?? null,
+
       autoDispatch: body.autoDispatch ?? false,
-      customerName: body.customerName ?? null,
-      customerPhone: body.customerPhone ?? null,
+
+      customerName: body.customerName?.trim() || bookerName,
+      customerPhone: body.customerPhone?.trim() || bookerPhone,
+
       passengerCount: body.passengerCount ?? null,
-      notes: body.notes ?? null,
+      notes: body.notes?.trim() || null,
+
+      accountId: body.accountId?.trim() || null,
+
+      isThirdPartyBooking,
+
+      bookerName,
+      bookerPhone,
+      bookerEmail: body.bookerEmail?.trim() || null,
+
+      passengerName,
+      passengerPhone,
+      passengerNotes: body.passengerNotes?.trim() || null,
+    });
+  }
+
+  @Patch(':id')
+  async updateBooking(
+    @Req() req: AuthRequest,
+    @Param('id') bookingId: string,
+    @Body() body: UpdateBookingBody,
+  ) {
+    return this.bookingsService.updateBooking({
+      bookingId,
+      companyId: req.user.companyId,
+
+      pickup: body.pickupAddress ?? body.pickup,
+      dropoff: body.dropoffAddress ?? body.dropoff,
+      pickupTime: body.pickupAt ?? body.pickupTime,
+
+      customerName: body.customerName,
+      customerPhone: body.customerPhone,
+
+      bookerName: body.bookerName,
+      bookerPhone: body.bookerPhone,
+      bookerEmail: body.bookerEmail,
+
+      passengerName: body.passengerName,
+      passengerPhone: body.passengerPhone,
+      passengerNotes: body.passengerNotes,
+
+      passengerCount: body.passengerCount,
+      notes: body.notes,
+
+      quotedPrice: body.quotedPrice,
+      pricingMode: body.pricingMode,
     });
   }
 
@@ -144,6 +220,32 @@ export class BookingsController {
     return this.autoDispatchService.startForBooking(
       bookingId,
       req.user.companyId,
+    );
+  }
+
+  @Post(':id/offer/accept')
+  async acceptOffer(
+    @Req() req: AuthRequest,
+    @Param('id') bookingId: string,
+    @Body() body: AssignDriverBody,
+  ) {
+    return this.autoDispatchService.acceptOffer(
+      bookingId,
+      req.user.companyId,
+      body.driverId,
+    );
+  }
+
+  @Post(':id/offer/reject')
+  async rejectOffer(
+    @Req() req: AuthRequest,
+    @Param('id') bookingId: string,
+    @Body() body: AssignDriverBody,
+  ) {
+    return this.autoDispatchService.rejectOffer(
+      bookingId,
+      req.user.companyId,
+      body.driverId,
     );
   }
 

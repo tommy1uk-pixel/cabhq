@@ -39,6 +39,47 @@ type UploadedMulterFile = {
   path: string;
 };
 
+type CreateDriverBody = {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  pin: string;
+  licenceNumber?: string | null;
+  badgeExpiry?: string | null;
+  dbsExpiry?: string | null;
+  licenceExpiry?: string | null;
+};
+
+type UpdateDriverBody = {
+  name?: string;
+  phone?: string | null;
+  email?: string | null;
+  pin?: string | null;
+  status?: string;
+  licenceNumber?: string | null;
+  badgeExpiry?: string | null;
+  dbsExpiry?: string | null;
+  licenceExpiry?: string | null;
+};
+
+type UpdateDriverLocationBody = {
+  latitude: number;
+  longitude: number;
+  heading?: number | null;
+  speed?: number | null;
+};
+
+type UploadDriverDocumentBody = {
+  documentType: string;
+  title?: string;
+  issueDate?: string;
+  expiryDate?: string;
+  notes?: string;
+  dbsUpdateServiceEnabled?: string;
+  dbsUpdateServiceReference?: string;
+  dbsUpdateServiceCheckedAt?: string;
+};
+
 function ensureDriverUploadPath(driverId: string) {
   const uploadPath = join(process.cwd(), 'uploads', 'drivers', driverId);
 
@@ -65,20 +106,7 @@ export class DriversController {
   }
 
   @Post()
-  async create(
-    @Req() req: AuthRequest,
-    @Body()
-    body: {
-      name: string;
-      phone?: string | null;
-      email?: string | null;
-      pin: string;
-      licenceNumber?: string | null;
-      badgeExpiry?: string | null;
-      dbsExpiry?: string | null;
-      licenceExpiry?: string | null;
-    },
-  ) {
+  async create(@Req() req: AuthRequest, @Body() body: CreateDriverBody) {
     return this.driversService.create({
       companyId: req.user.companyId,
       name: body.name,
@@ -96,18 +124,7 @@ export class DriversController {
   async update(
     @Req() req: AuthRequest,
     @Param('id') id: string,
-    @Body()
-    body: {
-      name?: string;
-      phone?: string | null;
-      email?: string | null;
-      pin?: string | null;
-      status?: string;
-      licenceNumber?: string | null;
-      badgeExpiry?: string | null;
-      dbsExpiry?: string | null;
-      licenceExpiry?: string | null;
-    },
+    @Body() body: UpdateDriverBody,
   ) {
     return this.driversService.update({
       driverId: id,
@@ -141,13 +158,7 @@ export class DriversController {
   async updateLocation(
     @Req() req: AuthRequest,
     @Param('id') id: string,
-    @Body()
-    body: {
-      latitude: number;
-      longitude: number;
-      heading?: number | null;
-      speed?: number | null;
-    },
+    @Body() body: UpdateDriverLocationBody,
   ) {
     return this.driversService.updateLocation({
       driverId: id,
@@ -193,11 +204,12 @@ export class DriversController {
           _file,
           cb,
         ) => {
-          const driverId = req.params.id;
-          cb(null, ensureDriverUploadPath(driverId));
+          cb(null, ensureDriverUploadPath(req.params.id));
         },
         filename: (_req, file, cb) => {
-          const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+          const uniqueSuffix = `${Date.now()}-${Math.round(
+            Math.random() * 1e9,
+          )}`;
           cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
         },
       }),
@@ -210,17 +222,7 @@ export class DriversController {
     @Req() req: AuthRequest,
     @Param('id') id: string,
     @UploadedFile() file: UploadedMulterFile,
-    @Body()
-    body: {
-      documentType: string;
-      title?: string;
-      issueDate?: string;
-      expiryDate?: string;
-      notes?: string;
-      dbsUpdateServiceEnabled?: string;
-      dbsUpdateServiceReference?: string;
-      dbsUpdateServiceCheckedAt?: string;
-    },
+    @Body() body: UploadDriverDocumentBody,
   ) {
     return this.driversService.uploadDocument({
       driverId: id,

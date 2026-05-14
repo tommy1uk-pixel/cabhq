@@ -1,7 +1,7 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
-  BadRequestException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,31 +13,43 @@ import { CreateCompanyUserDto } from './dto/create-company-user.dto';
 export class CompaniesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private companySelect() {
+    return {
+      id: true,
+      name: true,
+      code: true,
+      slug: true,
+      status: true,
+      contactName: true,
+      contactEmail: true,
+      contactPhone: true,
+      timezone: true,
+      currency: true,
+      driverLimit: true,
+      vehicleLimit: true,
+      dispatcherSeatLimit: true,
+      billingPlan: true,
+      billingStatus: true,
+      trialEndsAt: true,
+      subscriptionStartsAt: true,
+      subscriptionEndsAt: true,
+      internalNotes: true,
+      createdAt: true,
+      updatedAt: true,
+    };
+  }
+
+  private getPlanPrice(plan: string) {
+    if (plan === 'STARTER') return 49;
+    if (plan === 'GROWTH') return 89;
+    if (plan === 'PRO') return 149;
+    return 249;
+  }
+
   async findAll() {
     return this.prisma.company.findMany({
       orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        name: true,
-        code: true,
-        slug: true,
-        status: true,
-        contactName: true,
-        contactEmail: true,
-        contactPhone: true,
-        timezone: true,
-        currency: true,
-        driverLimit: true,
-        vehicleLimit: true,
-        dispatcherSeatLimit: true,
-        billingPlan: true,
-        billingStatus: true,
-        trialEndsAt: true,
-        subscriptionStartsAt: true,
-        subscriptionEndsAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: this.companySelect(),
     });
   }
 
@@ -45,26 +57,7 @@ export class CompaniesService {
     const company = await this.prisma.company.findUnique({
       where: { id },
       select: {
-        id: true,
-        name: true,
-        code: true,
-        slug: true,
-        status: true,
-        contactName: true,
-        contactEmail: true,
-        contactPhone: true,
-        timezone: true,
-        currency: true,
-        driverLimit: true,
-        vehicleLimit: true,
-        dispatcherSeatLimit: true,
-        billingPlan: true,
-        billingStatus: true,
-        trialEndsAt: true,
-        subscriptionStartsAt: true,
-        subscriptionEndsAt: true,
-        createdAt: true,
-        updatedAt: true,
+        ...this.companySelect(),
         users: {
           orderBy: { createdAt: 'desc' },
           select: {
@@ -83,6 +76,89 @@ export class CompaniesService {
     }
 
     return company;
+  }
+
+  async findBilling(id: string) {
+    const company = await this.prisma.company.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        billingPlan: true,
+        billingStatus: true,
+        trialEndsAt: true,
+        subscriptionStartsAt: true,
+        subscriptionEndsAt: true,
+        currency: true,
+        createdAt: true,
+        invoices: {
+          select: {
+            id: true,
+            status: true,
+            balanceDue: true,
+          },
+        },
+      },
+    });
+
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    const unpaidInvoices = company.invoices.filter((invoice) =>
+      ['DRAFT', 'SENT', 'PART_PAID', 'OVERDUE'].includes(invoice.status),
+    ).length;
+
+    return {
+      companyId: company.id,
+      companyName: company.name,
+      billingPlan: company.billingPlan,
+      billingStatus: company.billingStatus,
+      trialEndsAt: company.trialEndsAt,
+      subscriptionStartsAt: company.subscriptionStartsAt,
+      subscriptionEndsAt: company.subscriptionEndsAt,
+      monthlyPrice: this.getPlanPrice(company.billingPlan),
+      unpaidInvoices,
+      currency: company.currency ?? 'GBP',
+      createdAt: company.createdAt,
+    };
+  }
+
+  async findInvoices(id: string) {
+    const company = await this.prisma.company.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        currency: true,
+      },
+    });
+
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    const invoices = await this.prisma.invoice.findMany({
+      where: { companyId: id },
+      orderBy: [{ issueDate: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        companyId: true,
+        invoiceNumber: true,
+        status: true,
+        total: true,
+        paidAmount: true,
+        balanceDue: true,
+        dueDate: true,
+        createdAt: true,
+      },
+    });
+
+    return invoices.map((invoice) => ({
+      ...invoice,
+      amount: invoice.total,
+      currency: company.currency ?? 'GBP',
+      paidAt: invoice.status === 'PAID' ? invoice.createdAt : null,
+    }));
   }
 
   async create(dto: CreateCompanyDto) {
@@ -116,6 +192,17 @@ export class CompaniesService {
         }
       }
 
+      if (dto.adminEmail?.trim()) {
+        const existingUser = await tx.user.findUnique({
+          where: { email: dto.adminEmail.trim().toLowerCase() },
+          select: { id: true },
+        });
+
+        if (existingUser) {
+          throw new BadRequestException('Admin email already exists');
+        }
+      }
+
       const company = await tx.company.create({
         data: {
           name: dto.name.trim(),
@@ -139,49 +226,22 @@ export class CompaniesService {
           subscriptionEndsAt: dto.subscriptionEndsAt
             ? new Date(dto.subscriptionEndsAt)
             : null,
+          internalNotes: dto.internalNotes?.trim() || null,
         },
-        select: {
-          id: true,
-          name: true,
-          code: true,
-          slug: true,
-          status: true,
-          contactName: true,
-          contactEmail: true,
-          contactPhone: true,
-          timezone: true,
-          currency: true,
-          driverLimit: true,
-          vehicleLimit: true,
-          dispatcherSeatLimit: true,
-          billingPlan: true,
-          billingStatus: true,
-          trialEndsAt: true,
-          subscriptionStartsAt: true,
-          subscriptionEndsAt: true,
-          createdAt: true,
-          updatedAt: true,
-        },
+        select: this.companySelect(),
       });
 
       if (dto.adminEmail?.trim() && dto.adminPassword?.trim()) {
-        const email = dto.adminEmail.trim().toLowerCase();
-
-        const existing = await tx.user.findUnique({
-          where: { email },
-          select: { id: true },
-        });
-
-        if (existing) {
-          throw new BadRequestException('Admin email already exists');
+        if (dto.adminPassword.trim().length < 8) {
+          throw new BadRequestException(
+            'Admin password must be at least 8 characters',
+          );
         }
-
-        const hashedPassword = await bcrypt.hash(dto.adminPassword, 10);
 
         await tx.user.create({
           data: {
-            email,
-            password: hashedPassword,
+            email: dto.adminEmail.trim().toLowerCase(),
+            password: await bcrypt.hash(dto.adminPassword.trim(), 10),
             role: 'ADMIN',
             status: 'ACTIVE',
             companyId: company.id,
@@ -203,12 +263,18 @@ export class CompaniesService {
       throw new NotFoundException('Company not found');
     }
 
-    const code = dto.code?.trim();
-    const slug = dto.slug?.trim();
+    const code =
+      dto.code === undefined ? undefined : dto.code?.trim() || null;
+
+    const slug =
+      dto.slug === undefined ? undefined : dto.slug?.trim() || null;
 
     if (code) {
       const conflict = await this.prisma.company.findFirst({
-        where: { code, NOT: { id } },
+        where: {
+          code,
+          NOT: { id },
+        },
         select: { id: true },
       });
 
@@ -219,7 +285,10 @@ export class CompaniesService {
 
     if (slug) {
       const conflict = await this.prisma.company.findFirst({
-        where: { slug, NOT: { id } },
+        where: {
+          slug,
+          NOT: { id },
+        },
         select: { id: true },
       });
 
@@ -231,13 +300,22 @@ export class CompaniesService {
     return this.prisma.company.update({
       where: { id },
       data: {
-        name: dto.name,
-        code: code ?? dto.code,
-        slug: slug ?? dto.slug,
+        name: dto.name === undefined ? undefined : dto.name.trim(),
+        code,
+        slug,
         status: dto.status,
-        contactName: dto.contactName,
-        contactEmail: dto.contactEmail,
-        contactPhone: dto.contactPhone,
+        contactName:
+          dto.contactName === undefined
+            ? undefined
+            : dto.contactName?.trim() || null,
+        contactEmail:
+          dto.contactEmail === undefined
+            ? undefined
+            : dto.contactEmail?.trim() || null,
+        contactPhone:
+          dto.contactPhone === undefined
+            ? undefined
+            : dto.contactPhone?.trim() || null,
         timezone: dto.timezone,
         currency: dto.currency,
         driverLimit: dto.driverLimit,
@@ -263,29 +341,36 @@ export class CompaniesService {
             : dto.subscriptionEndsAt
               ? new Date(dto.subscriptionEndsAt)
               : null,
+        internalNotes:
+          dto.internalNotes === undefined
+            ? undefined
+            : dto.internalNotes?.trim() || null,
       },
-      select: {
-        id: true,
-        name: true,
-        code: true,
-        slug: true,
-        status: true,
-        contactName: true,
-        contactEmail: true,
-        contactPhone: true,
-        timezone: true,
-        currency: true,
-        driverLimit: true,
-        vehicleLimit: true,
-        dispatcherSeatLimit: true,
-        billingPlan: true,
-        billingStatus: true,
-        trialEndsAt: true,
-        subscriptionStartsAt: true,
-        subscriptionEndsAt: true,
-        createdAt: true,
-        updatedAt: true,
+      select: this.companySelect(),
+    });
+  }
+
+  async extendTrial(companyId: string, trialEndsAt: string) {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: { id: true },
+    });
+
+    if (!company) {
+      throw new NotFoundException('Company not found');
+    }
+
+    if (!trialEndsAt) {
+      throw new BadRequestException('Trial end date required');
+    }
+
+    return this.prisma.company.update({
+      where: { id: companyId },
+      data: {
+        billingStatus: 'TRIAL',
+        trialEndsAt: new Date(trialEndsAt),
       },
+      select: this.companySelect(),
     });
   }
 
@@ -324,12 +409,10 @@ export class CompaniesService {
       throw new BadRequestException('User email already exists');
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-
     return this.prisma.user.create({
       data: {
         email,
-        password: hashedPassword,
+        password: await bcrypt.hash(password, 10),
         role,
         status: 'ACTIVE',
         companyId,
@@ -344,18 +427,25 @@ export class CompaniesService {
     });
   }
 
-  async updateCompanyUserStatus(companyId: string, userId: string, status: string) {
+  async updateCompanyUserStatus(
+    companyId: string,
+    userId: string,
+    status: string,
+  ) {
+    if (!['ACTIVE', 'SUSPENDED'].includes(status)) {
+      throw new BadRequestException('Invalid status');
+    }
+
     const user = await this.prisma.user.findFirst({
-      where: { id: userId, companyId },
+      where: {
+        id: userId,
+        companyId,
+      },
       select: { id: true },
     });
 
     if (!user) {
       throw new NotFoundException('User not found');
-    }
-
-    if (!['ACTIVE', 'SUSPENDED'].includes(status)) {
-      throw new BadRequestException('Invalid status');
     }
 
     return this.prisma.user.update({
@@ -371,9 +461,16 @@ export class CompaniesService {
     });
   }
 
-  async resetCompanyUserPassword(companyId: string, userId: string, password: string) {
+  async resetCompanyUserPassword(
+    companyId: string,
+    userId: string,
+    password: string,
+  ) {
     const user = await this.prisma.user.findFirst({
-      where: { id: userId, companyId },
+      where: {
+        id: userId,
+        companyId,
+      },
       select: { id: true },
     });
 
@@ -385,11 +482,11 @@ export class CompaniesService {
       throw new BadRequestException('Password must be at least 8 characters');
     }
 
-    const hashedPassword = await bcrypt.hash(password.trim(), 10);
-
     await this.prisma.user.update({
       where: { id: userId },
-      data: { password: hashedPassword },
+      data: {
+        password: await bcrypt.hash(password.trim(), 10),
+      },
     });
 
     return { success: true };

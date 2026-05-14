@@ -27,6 +27,33 @@ type CreateBookingInput = {
   passengerCount?: number | null;
   notes?: string | null;
   accountId?: string | null;
+  isThirdPartyBooking?: boolean;
+  bookerName?: string | null;
+  bookerPhone?: string | null;
+  bookerEmail?: string | null;
+  passengerName?: string | null;
+  passengerPhone?: string | null;
+  passengerNotes?: string | null;
+};
+
+type UpdateBookingInput = {
+  bookingId: string;
+  companyId: string;
+  pickup?: string;
+  dropoff?: string;
+  pickupTime?: string;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  bookerName?: string | null;
+  bookerPhone?: string | null;
+  bookerEmail?: string | null;
+  passengerName?: string | null;
+  passengerPhone?: string | null;
+  passengerNotes?: string | null;
+  passengerCount?: number | null;
+  notes?: string | null;
+  quotedPrice?: number | null;
+  pricingMode?: string | null;
 };
 
 type AssignDriverInput = {
@@ -35,11 +62,7 @@ type AssignDriverInput = {
   driverId: string;
 };
 
-type ReassignDriverInput = {
-  bookingId: string;
-  companyId: string;
-  driverId: string;
-};
+type ReassignDriverInput = AssignDriverInput;
 
 type UnassignDriverInput = {
   bookingId: string;
@@ -69,21 +92,7 @@ export class BookingsService {
   async list(companyId: string) {
     return this.prisma.booking.findMany({
       where: { companyId },
-      include: {
-        driver: true,
-        company: true,
-        account: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
-            status: true,
-          },
-        },
-        events: {
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        },
-      },
+      include: this.bookingInclude(),
       orderBy: [{ pickupTime: 'asc' }, { createdAt: 'desc' }],
     });
   }
@@ -91,25 +100,11 @@ export class BookingsService {
   async dispatchBoard(companyId: string) {
     const bookings = await this.prisma.booking.findMany({
       where: { companyId },
-      include: {
-        driver: true,
-        company: true,
-        account: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
-            status: true,
-          },
-        },
-        events: {
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        },
-      },
+      include: this.bookingInclude(),
       orderBy: [{ pickupTime: 'asc' }, { createdAt: 'desc' }],
     });
 
-    const enriched = await Promise.all(
+    return Promise.all(
       bookings.map(async (booking) => {
         const suggestedDrivers =
           await this.autoDispatchService.getSuggestedDriversForBooking(
@@ -131,8 +126,25 @@ export class BookingsService {
         };
       }),
     );
+  }
 
-    return enriched;
+  async timeline(input: { bookingId: string; companyId: string }) {
+    const booking = await this.prisma.booking.findFirst({
+      where: {
+        id: input.bookingId,
+        companyId: input.companyId,
+      },
+      select: { id: true },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    return this.prisma.bookingEvent.findMany({
+      where: { bookingId: input.bookingId },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
   }
 
   async create(input: CreateBookingInput) {
@@ -149,6 +161,7 @@ export class BookingsService {
     }
 
     const pickupTime = new Date(input.pickupTime);
+
     if (Number.isNaN(pickupTime.getTime())) {
       throw new BadRequestException('Pickup time is invalid');
     }
@@ -174,7 +187,9 @@ export class BookingsService {
       }
 
       if (account.status === 'CLOSED') {
-        throw new BadRequestException('Cannot create booking for a closed account');
+        throw new BadRequestException(
+          'Cannot create booking for a closed account',
+        );
       }
 
       accountId = account.id;
@@ -182,6 +197,21 @@ export class BookingsService {
     }
 
     const reference = this.generateBookingReference();
+    const isThirdPartyBooking = input.isThirdPartyBooking ?? false;
+
+    const bookerName =
+      input.bookerName?.trim() || input.customerName?.trim() || null;
+
+    const bookerPhone =
+      input.bookerPhone?.trim() || input.customerPhone?.trim() || null;
+
+    const passengerName = isThirdPartyBooking
+      ? input.passengerName?.trim() || null
+      : input.passengerName?.trim() || bookerName;
+
+    const passengerPhone = isThirdPartyBooking
+      ? input.passengerPhone?.trim() || null
+      : input.passengerPhone?.trim() || bookerPhone;
 
     const booking = await this.prisma.booking.create({
       data: {
@@ -201,8 +231,15 @@ export class BookingsService {
         calculatedFare: input.calculatedFare ?? null,
         distanceMiles: input.distanceMiles ?? null,
         durationMinutes: input.durationMinutes ?? null,
-        customerName: input.customerName?.trim() || null,
-        customerPhone: input.customerPhone?.trim() || null,
+        customerName: bookerName,
+        customerPhone: bookerPhone,
+        isThirdPartyBooking,
+        bookerName,
+        bookerPhone,
+        bookerEmail: input.bookerEmail?.trim() || null,
+        passengerName,
+        passengerPhone,
+        passengerNotes: input.passengerNotes?.trim() || null,
         passengerCount: input.passengerCount ?? null,
         notes: input.notes?.trim() || null,
       },
@@ -225,17 +262,24 @@ export class BookingsService {
       );
     }
 
-    if (
-      input.customerName?.trim() ||
-      input.customerPhone?.trim() ||
-      input.passengerCount != null
-    ) {
+    if (bookerName || bookerPhone || input.passengerCount != null) {
       await this.appendTimeline(
         booking.id,
         this.timelineMessage.customerCaptured({
-          customerName: input.customerName?.trim() || null,
-          customerPhone: input.customerPhone?.trim() || null,
+          customerName: bookerName,
+          customerPhone: bookerPhone,
           passengerCount: input.passengerCount ?? null,
+        }),
+      );
+    }
+
+    if (isThirdPartyBooking || passengerName || passengerPhone) {
+      await this.appendTimeline(
+        booking.id,
+        this.timelineMessage.passengerCaptured({
+          isThirdPartyBooking,
+          passengerName,
+          passengerPhone,
         }),
       );
     }
@@ -244,6 +288,13 @@ export class BookingsService {
       await this.appendTimeline(
         booking.id,
         `BOOKING NOTES · ${input.notes.trim()}`,
+      );
+    }
+
+    if (input.passengerNotes?.trim()) {
+      await this.appendTimeline(
+        booking.id,
+        `PASSENGER NOTES · ${input.passengerNotes.trim()}`,
       );
     }
 
@@ -273,6 +324,157 @@ export class BookingsService {
         refreshed.companyId,
       );
     }
+
+    return refreshed;
+  }
+
+  async updateBooking(input: UpdateBookingInput) {
+    const booking = await this.mustFindBooking(input.bookingId, input.companyId);
+
+    if (['COMPLETED', 'CANCELLED'].includes(booking.status)) {
+      throw new BadRequestException(
+        'Cannot edit a completed or cancelled booking',
+      );
+    }
+
+    const updateData: Record<string, unknown> = {};
+    const changes: string[] = [];
+
+    if (input.pickup !== undefined) {
+      const value = input.pickup.trim();
+
+      if (!value) throw new BadRequestException('Pickup is required');
+
+      if (value !== booking.pickup) {
+        updateData.pickup = value;
+        changes.push(`pickup changed from "${booking.pickup}" to "${value}"`);
+      }
+    }
+
+    if (input.dropoff !== undefined) {
+      const value = input.dropoff.trim();
+
+      if (!value) throw new BadRequestException('Dropoff is required');
+
+      if (value !== booking.dropoff) {
+        updateData.dropoff = value;
+        changes.push(`dropoff changed from "${booking.dropoff}" to "${value}"`);
+      }
+    }
+
+    if (input.pickupTime !== undefined) {
+      if (!input.pickupTime?.trim()) {
+        throw new BadRequestException('Pickup time is required');
+      }
+
+      const pickupTime = new Date(input.pickupTime);
+
+      if (Number.isNaN(pickupTime.getTime())) {
+        throw new BadRequestException('Pickup time is invalid');
+      }
+
+      if (pickupTime.getTime() !== booking.pickupTime.getTime()) {
+        updateData.pickupTime = pickupTime;
+        changes.push(
+          `pickup time changed from ${booking.pickupTime.toLocaleString(
+            'en-GB',
+          )} to ${pickupTime.toLocaleString('en-GB')}`,
+        );
+      }
+    }
+
+    const stringFields: Array<{
+      key:
+        | 'customerName'
+        | 'customerPhone'
+        | 'bookerName'
+        | 'bookerPhone'
+        | 'bookerEmail'
+        | 'passengerName'
+        | 'passengerPhone'
+        | 'passengerNotes'
+        | 'notes'
+        | 'pricingMode';
+      label: string;
+    }> = [
+      { key: 'customerName', label: 'customer name' },
+      { key: 'customerPhone', label: 'customer phone' },
+      { key: 'bookerName', label: 'booker name' },
+      { key: 'bookerPhone', label: 'booker phone' },
+      { key: 'bookerEmail', label: 'booker email' },
+      { key: 'passengerName', label: 'passenger name' },
+      { key: 'passengerPhone', label: 'passenger phone' },
+      { key: 'passengerNotes', label: 'passenger notes' },
+      { key: 'notes', label: 'booking notes' },
+      { key: 'pricingMode', label: 'pricing mode' },
+    ];
+
+    for (const field of stringFields) {
+      const incoming = input[field.key];
+
+      if (incoming === undefined) continue;
+
+      const value = incoming?.trim() || null;
+      const current = booking[field.key] ?? null;
+
+      if (value !== current) {
+        updateData[field.key] = value;
+        changes.push(
+          `${field.label} changed from "${current ?? 'blank'}" to "${
+            value ?? 'blank'
+          }"`,
+        );
+      }
+    }
+
+    if (input.passengerCount !== undefined) {
+      const value = input.passengerCount ?? null;
+      const current = booking.passengerCount ?? null;
+
+      if (value !== current) {
+        updateData.passengerCount = value;
+        changes.push(
+          `passenger count changed from "${current ?? 'blank'}" to "${
+            value ?? 'blank'
+          }"`,
+        );
+      }
+    }
+
+    if (input.quotedPrice !== undefined) {
+      const value = input.quotedPrice ?? null;
+      const current = booking.quotedPrice ?? null;
+
+      if (value !== current) {
+        updateData.quotedPrice = value;
+        changes.push(
+          `quoted price changed from "${current ?? 'blank'}" to "${
+            value ?? 'blank'
+          }"`,
+        );
+      }
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return this.findBookingWithRelations(booking.id, booking.companyId);
+    }
+
+    await this.prisma.booking.update({
+      where: { id: booking.id },
+      data: updateData,
+    });
+
+    await this.appendTimeline(
+      booking.id,
+      this.timelineMessage.bookingEdited(changes),
+    );
+
+    const refreshed = await this.findBookingWithRelations(
+      booking.id,
+      booking.companyId,
+    );
+
+    this.realtime.bookingUpdated(refreshed.companyId, refreshed);
 
     return refreshed;
   }
@@ -336,64 +538,7 @@ export class BookingsService {
   }
 
   async reassignDriver(input: ReassignDriverInput) {
-    const booking = await this.mustFindBooking(input.bookingId, input.companyId);
-    const newDriver = await this.mustFindDispatchableDriver(
-      input.driverId,
-      input.companyId,
-    );
-    const previousDriverId = booking.driverId ?? null;
-    const previousDriverName = booking.driver?.name ?? null;
-
-    if (['COMPLETED', 'CANCELLED'].includes(booking.status)) {
-      throw new BadRequestException(
-        'Cannot reassign a completed or cancelled booking',
-      );
-    }
-
-    if (previousDriverId === newDriver.id) {
-      throw new BadRequestException('Booking is already assigned to this driver');
-    }
-
-    await this.autoDispatchService.cancelActiveOffer(booking.id);
-
-    await this.prisma.booking.update({
-      where: { id: booking.id },
-      data: {
-        driverId: newDriver.id,
-        status: 'ACCEPTED',
-      },
-    });
-
-    await this.prisma.driver.update({
-      where: { id: newDriver.id },
-      data: {
-        status: 'BUSY',
-      },
-    });
-
-    if (previousDriverId) {
-      await this.releaseDriverIfSafe(previousDriverId);
-    }
-
-    await this.appendTimeline(
-      booking.id,
-      this.timelineMessage.driverReassigned({
-        fromDriverId: previousDriverId,
-        fromDriverName: previousDriverName,
-        toDriverId: newDriver.id,
-        toDriverName: newDriver.name,
-      }),
-    );
-
-    const refreshed = await this.findBookingWithRelations(
-      booking.id,
-      booking.companyId,
-    );
-
-    this.realtime.bookingAssigned(refreshed.companyId, refreshed);
-    this.realtime.bookingUpdated(refreshed.companyId, refreshed);
-
-    return refreshed;
+    return this.assignDriver(input);
   }
 
   async unassignDriver(input: UnassignDriverInput) {
@@ -505,9 +650,7 @@ export class BookingsService {
 
     await this.prisma.booking.update({
       where: { id: booking.id },
-      data: {
-        status: input.status,
-      },
+      data: { status: input.status },
     });
 
     await this.appendTimeline(
@@ -530,6 +673,28 @@ export class BookingsService {
     return refreshed;
   }
 
+  private bookingInclude() {
+    return {
+      driver: {
+        include: {
+          vehicle: true,
+        },
+      },
+      company: true,
+      account: {
+        select: {
+          id: true,
+          name: true,
+          code: true,
+          status: true,
+        },
+      },
+      events: {
+        orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
+      },
+    };
+  }
+
   private async releaseDriverIfSafe(driverId: string) {
     const activeBooking = await this.prisma.booking.findFirst({
       where: {
@@ -540,24 +705,17 @@ export class BookingsService {
       },
     });
 
-    if (activeBooking) {
-      return;
-    }
+    if (activeBooking) return;
 
     await this.prisma.driver.update({
       where: { id: driverId },
-      data: {
-        status: 'AVAILABLE',
-      },
+      data: { status: 'AVAILABLE' },
     });
   }
 
   private async mustFindBooking(bookingId: string, companyId: string) {
     const booking = await this.prisma.booking.findFirst({
-      where: {
-        id: bookingId,
-        companyId,
-      },
+      where: { id: bookingId, companyId },
       include: {
         driver: true,
         account: {
@@ -578,15 +736,60 @@ export class BookingsService {
     return booking;
   }
 
+  private async mustFindDispatchableDriver(driverId: string, companyId: string) {
+    const driver = await this.prisma.driver.findFirst({
+      where: { id: driverId, companyId },
+      include: { documents: true },
+    });
+
+    if (!driver) {
+      throw new NotFoundException('Driver not found');
+    }
+
+    const blockedReasons: string[] = [];
+
+    if (this.isExpired(driver.badgeExpiry)) {
+      blockedReasons.push('Taxi badge has expired');
+    }
+
+    if (this.isExpired(driver.dbsExpiry)) {
+      blockedReasons.push('DBS has expired');
+    }
+
+    if (this.isExpired(driver.licenceExpiry)) {
+      blockedReasons.push('Licence has expired');
+    }
+
+    for (const document of driver.documents ?? []) {
+      if (this.isExpired(document.expiryDate)) {
+        blockedReasons.push(`Document expired: ${document.title}`);
+      }
+    }
+
+    const vehicleDispatch = await this.getVehicleDispatchForDriver(
+      driver.id,
+      companyId,
+    );
+
+    blockedReasons.push(
+      ...vehicleDispatch.blockedReasons.map(
+        (reason) => `Assigned vehicle: ${reason}`,
+      ),
+    );
+
+    if (blockedReasons.length > 0) {
+      throw new BadRequestException(
+        `Driver is not dispatchable: ${blockedReasons.join(' | ')}`,
+      );
+    }
+
+    return driver;
+  }
+
   private async getVehicleDispatchForDriver(driverId: string, companyId: string) {
     const vehicle = await this.prisma.vehicle.findFirst({
-      where: {
-        companyId,
-        driverId,
-      },
-      include: {
-        documents: true,
-      },
+      where: { companyId, driverId },
+      include: { documents: true },
     });
 
     if (!vehicle) {
@@ -647,61 +850,6 @@ export class BookingsService {
     return target.getTime() < today.getTime();
   }
 
-  private async mustFindDispatchableDriver(driverId: string, companyId: string) {
-    const driver = await this.prisma.driver.findFirst({
-      where: {
-        id: driverId,
-        companyId,
-      },
-      include: {
-        documents: true,
-      },
-    });
-
-    if (!driver) {
-      throw new NotFoundException('Driver not found');
-    }
-
-    const blockedReasons: string[] = [];
-
-    if (this.isExpired(driver.badgeExpiry)) {
-      blockedReasons.push('Taxi badge has expired');
-    }
-
-    if (this.isExpired(driver.dbsExpiry)) {
-      blockedReasons.push('DBS has expired');
-    }
-
-    if (this.isExpired(driver.licenceExpiry)) {
-      blockedReasons.push('Licence has expired');
-    }
-
-    for (const document of driver.documents ?? []) {
-      if (this.isExpired(document.expiryDate)) {
-        blockedReasons.push(`Document expired: ${document.title}`);
-      }
-    }
-
-    const vehicleDispatch = await this.getVehicleDispatchForDriver(
-      driver.id,
-      companyId,
-    );
-
-    blockedReasons.push(
-      ...vehicleDispatch.blockedReasons.map(
-        (reason) => `Assigned vehicle: ${reason}`,
-      ),
-    );
-
-    if (blockedReasons.length > 0) {
-      throw new BadRequestException(
-        `Driver is not dispatchable: ${blockedReasons.join(' | ')}`,
-      );
-    }
-
-    return driver;
-  }
-
   private async appendTimeline(bookingId: string, message: string) {
     await this.prisma.bookingEvent.create({
       data: {
@@ -713,25 +861,8 @@ export class BookingsService {
 
   private async findBookingWithRelations(bookingId: string, companyId: string) {
     return this.prisma.booking.findFirstOrThrow({
-      where: {
-        id: bookingId,
-        companyId,
-      },
-      include: {
-        driver: true,
-        company: true,
-        account: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
-            status: true,
-          },
-        },
-        events: {
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        },
-      },
+      where: { id: bookingId, companyId },
+      include: this.bookingInclude(),
     });
   }
 
@@ -752,17 +883,32 @@ export class BookingsService {
       dropoff: string;
       pickupTime: Date;
     }) =>
-      `BOOKING CREATED · ${data.reference} · ${data.pickup} → ${data.dropoff} · ${new Date(data.pickupTime).toLocaleString('en-GB')}`,
+      `BOOKING CREATED · ${data.reference} · ${data.pickup} → ${data.dropoff} · ${new Date(
+        data.pickupTime,
+      ).toLocaleString('en-GB')}`,
 
     customerCaptured: (data: {
       customerName: string | null;
       customerPhone: string | null;
       passengerCount: number | null;
     }) =>
-      `CUSTOMER CAPTURED${
-        data.customerName ? ` · ${data.customerName}` : ''
-      }${data.customerPhone ? ` · ${data.customerPhone}` : ''}${
-        data.passengerCount != null ? ` · ${data.passengerCount} passenger(s)` : ''
+      `CUSTOMER CAPTURED${data.customerName ? ` · ${data.customerName}` : ''}${
+        data.customerPhone ? ` · ${data.customerPhone}` : ''
+      }${
+        data.passengerCount != null
+          ? ` · ${data.passengerCount} passenger(s)`
+          : ''
+      }`,
+
+    passengerCaptured: (data: {
+      isThirdPartyBooking: boolean;
+      passengerName: string | null;
+      passengerPhone: string | null;
+    }) =>
+      `PASSENGER CAPTURED${
+        data.isThirdPartyBooking ? ' · THIRD PARTY BOOKING' : ''
+      }${data.passengerName ? ` · ${data.passengerName}` : ''}${
+        data.passengerPhone ? ` · ${data.passengerPhone}` : ''
       }`,
 
     pricingCaptured: (data: {
@@ -771,9 +917,15 @@ export class BookingsService {
       distanceMiles: number | null;
       durationMinutes: number | null;
     }) =>
-      `PRICING CAPTURED · ${data.pricingMode} · £${data.quotedPrice.toFixed(2)}${
-        data.distanceMiles != null ? ` · ${data.distanceMiles.toFixed(2)} mi` : ''
-      }${data.durationMinutes != null ? ` · ${data.durationMinutes} mins` : ''}`,
+      `PRICING CAPTURED · ${data.pricingMode} · £${data.quotedPrice.toFixed(
+        2,
+      )}${
+        data.distanceMiles != null
+          ? ` · ${data.distanceMiles.toFixed(2)} mi`
+          : ''
+      }${
+        data.durationMinutes != null ? ` · ${data.durationMinutes} mins` : ''
+      }`,
 
     driverAssigned: (data: {
       driverName: string;
@@ -782,21 +934,16 @@ export class BookingsService {
       previousDriverName: string | null;
     }) =>
       data.previousDriverId
-        ? `DRIVER ASSIGNED · ${data.driverName} [${data.driverId}] · replaced ${data.previousDriverName ?? 'previous driver'} [${data.previousDriverId}]`
+        ? `DRIVER ASSIGNED · ${data.driverName} [${data.driverId}] · replaced ${
+            data.previousDriverName ?? 'previous driver'
+          } [${data.previousDriverId}]`
         : `DRIVER ASSIGNED · ${data.driverName} [${data.driverId}]`,
-
-    driverReassigned: (data: {
-      fromDriverId: string | null;
-      fromDriverName: string | null;
-      toDriverId: string;
-      toDriverName: string;
-    }) =>
-      `DRIVER REASSIGNED · ${data.fromDriverName ?? 'Unassigned'} [${data.fromDriverId ?? 'N/A'}] → ${data.toDriverName} [${data.toDriverId}]`,
 
     driverUnassigned: (data: {
       driverId: string;
       driverName: string | null;
-    }) => `DRIVER UNASSIGNED · ${data.driverName ?? 'Driver'} [${data.driverId}]`,
+    }) =>
+      `DRIVER UNASSIGNED · ${data.driverName ?? 'Driver'} [${data.driverId}]`,
 
     bookingCancelled: (reason: string | null) =>
       reason?.trim()
@@ -805,5 +952,8 @@ export class BookingsService {
 
     statusChanged: (fromStatus: string, toStatus: string) =>
       `STATUS CHANGED · ${fromStatus} → ${toStatus}`,
+
+    bookingEdited: (changes: string[]) =>
+      `BOOKING EDITED · ${changes.join(' · ')}`,
   };
 }

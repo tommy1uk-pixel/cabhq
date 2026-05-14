@@ -21,6 +21,8 @@ export class CreateCompanyDto {
   subscriptionStartsAt?: string;
   subscriptionEndsAt?: string;
 
+  internalNotes?: string | null;
+
   adminName?: string;
   adminEmail?: string;
   adminPassword?: string;

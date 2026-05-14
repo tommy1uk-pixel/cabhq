@@ -26,6 +26,41 @@ enum BillingStatus {
   CANCELLED
 }
 
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  OPERATOR
+  DRIVER
+}
+
+enum DriverDocumentType {
+  DRIVING_LICENCE
+  DBS_CHECK
+  TAXI_BADGE
+  MEDICAL_CERTIFICATE
+  RIGHT_TO_WORK
+  INSURANCE
+  OTHER
+}
+
+enum VehicleDocumentType {
+  MOT_CERTIFICATE
+  INSURANCE
+  VEHICLE_INSPECTION
+  VEHICLE_LICENCE
+  LOG_BOOK
+  SERVICE_RECORD
+  TAX
+  OTHER
+}
+
+enum ComplianceDocumentStatus {
+  VALID
+  EXPIRING
+  EXPIRED
+  NO_EXPIRY
+}
+
 model Company {
   id        String   @id @default(uuid())
   createdAt DateTime @default(now())
@@ -55,6 +90,8 @@ model Company {
   subscriptionStartsAt DateTime?
   subscriptionEndsAt   DateTime?
 
+  internalNotes String?
+
   bookings    Booking[]
   drivers     Driver[]
   shifts      DriverShift[]
@@ -75,16 +112,21 @@ model User {
   status    String   @default("ACTIVE")
   createdAt DateTime @default(now())
   companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([status])
 }
 
 model Driver {
-  id             String    @id @default(uuid())
+  id             String   @id @default(uuid())
   name           String
+  username       String?
   phone          String?
   email          String?
   pin            String
-  status         String    @default("AVAILABLE")
+  status         String   @default("AVAILABLE")
   latitude       Float?
   longitude      Float?
   heading        Float?
@@ -94,14 +136,19 @@ model Driver {
   badgeExpiry    DateTime?
   dbsExpiry      DateTime?
   licenceExpiry  DateTime?
-  createdAt      DateTime  @default(now())
+  createdAt      DateTime @default(now())
   companyId      String
 
+  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   bookings  Booking[]
-  company   Company          @relation(fields: [companyId], references: [id])
   documents DriverDocument[]
   shifts    DriverShift[]
   vehicle   Vehicle?
+
+  @@unique([companyId, username])
+  @@index([companyId])
+  @@index([status])
+  @@index([name])
 }
 
 model DriverDocument {
@@ -131,17 +178,17 @@ model DriverDocument {
 }
 
 model Vehicle {
-  id                   String    @id @default(uuid())
+  id                   String   @id @default(uuid())
   reg                  String
   make                 String?
   model                String?
   colour               String?
-  capacity             Int?      @default(4)
-  status               String    @default("ACTIVE")
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  capacity             Int?     @default(4)
+  status               String   @default("ACTIVE")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
   companyId            String
-  driverId             String?   @unique
+  driverId             String?  @unique
   inspectionExpiry     DateTime?
   insuranceExpiry      DateTime?
   motExpiry            DateTime?
@@ -152,8 +199,8 @@ model Vehicle {
   vehicleLicenceExpiry DateTime?
   vin                  String?
 
-  company   Company           @relation(fields: [companyId], references: [id])
-  driver    Driver?           @relation(fields: [driverId], references: [id])
+  company   Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  driver    Driver?           @relation(fields: [driverId], references: [id], onDelete: SetNull)
   documents VehicleDocument[]
 
   @@index([companyId])
@@ -185,32 +232,49 @@ model VehicleDocument {
 }
 
 model Booking {
-  id              String   @id @default(uuid())
-  reference       String
-  pickup          String
-  dropoff         String
-  pickupLat       Float?
-  pickupLng       Float?
-  dropoffLat      Float?
-  dropoffLng      Float?
-  customerName    String?
-  customerPhone   String?
-  passengerCount  Int?
-  notes           String?
-  status          String
-  pickupTime      DateTime
+  id        String @id @default(uuid())
+  reference String
+
+  pickup     String
+  dropoff    String
+  pickupLat  Float?
+  pickupLng  Float?
+  dropoffLat Float?
+  dropoffLng Float?
+
+  customerName  String?
+  customerPhone String?
+
+  isThirdPartyBooking Boolean @default(false)
+
+  bookerName  String?
+  bookerPhone String?
+  bookerEmail String?
+
+  passengerName  String?
+  passengerPhone String?
+  passengerNotes String?
+
+  passengerCount Int?
+  notes          String?
+
+  status     String
+  pickupTime DateTime
+
   pricingMode     String?
   quotedPrice     Float?
   calculatedFare  Float?
   distanceMiles   Float?
   durationMinutes Float?
-  createdAt       DateTime @default(now())
-  companyId       String
-  driverId        String?
-  accountId       String?
 
-  company Company        @relation(fields: [companyId], references: [id])
-  driver  Driver?        @relation(fields: [driverId], references: [id])
+  createdAt DateTime @default(now())
+
+  companyId String
+  driverId  String?
+  accountId String?
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  driver  Driver?        @relation(fields: [driverId], references: [id], onDelete: SetNull)
   account Account?       @relation(fields: [accountId], references: [id], onDelete: SetNull)
   events  BookingEvent[]
 
@@ -219,6 +283,8 @@ model Booking {
   @@index([accountId])
   @@index([status])
   @@index([pickupTime])
+  @@index([bookerPhone])
+  @@index([passengerPhone])
 }
 
 model BookingEvent {
@@ -241,13 +307,13 @@ model RoutePrice {
   createdAt  DateTime @default(now())
   companyId  String
 
-  company Company @relation(fields: [companyId], references: [id])
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
 }
 
 model DriverShift {
-  id          String    @id @default(uuid())
+  id          String   @id @default(uuid())
   driverId    String
   companyId   String
   startedAt   DateTime
@@ -255,10 +321,10 @@ model DriverShift {
   startStatus String?
   endStatus   String?
   notes       String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id])
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   driver  Driver  @relation(fields: [driverId], references: [id], onDelete: Cascade)
 
   @@index([driverId])
@@ -314,8 +380,8 @@ model Account {
   postcode String?
 
   vatNumber    String?
-  paymentTerms Int     @default(30)
-  creditLimit  Float?  @default(0)
+  paymentTerms Int    @default(30)
+  creditLimit  Float? @default(0)
 
   status String  @default("ACTIVE")
   notes  String?
@@ -390,39 +456,4 @@ model Payment {
   @@index([accountId])
   @@index([status])
   @@index([paymentDate])
-}
-
-enum Role {
-  SUPER_ADMIN
-  ADMIN
-  OPERATOR
-  DRIVER
-}
-
-enum DriverDocumentType {
-  DRIVING_LICENCE
-  DBS_CHECK
-  TAXI_BADGE
-  MEDICAL_CERTIFICATE
-  RIGHT_TO_WORK
-  INSURANCE
-  OTHER
-}
-
-enum VehicleDocumentType {
-  MOT_CERTIFICATE
-  INSURANCE
-  VEHICLE_INSPECTION
-  VEHICLE_LICENCE
-  LOG_BOOK
-  SERVICE_RECORD
-  TAX
-  OTHER
-}
-
-enum ComplianceDocumentStatus {
-  VALID
-  EXPIRING
-  EXPIRED
-  NO_EXPIRY
 }

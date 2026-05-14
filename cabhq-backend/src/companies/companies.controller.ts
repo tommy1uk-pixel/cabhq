@@ -1,5 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { CompaniesService } from './companies.service';
+
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { CreateCompanyUserDto } from './dto/create-company-user.dto';
@@ -7,48 +15,147 @@ import { ResetCompanyUserPasswordDto } from './dto/reset-company-user-password.d
 
 @Controller('companies')
 export class CompaniesController {
-  constructor(private readonly companiesService: CompaniesService) {}
+  constructor(
+    private readonly companiesService: CompaniesService,
+  ) {}
+
+  /* =====================================================
+     COMPANIES
+  ===================================================== */
 
   @Get()
-  findAll() {
+  async findAll() {
     return this.companiesService.findAll();
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  async findOne(@Param('id') id: string) {
     return this.companiesService.findOne(id);
   }
 
   @Post()
-  create(@Body() dto: CreateCompanyDto) {
+  async create(
+    @Body() dto: CreateCompanyDto,
+  ) {
     return this.companiesService.create(dto);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateCompanyDto) {
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateCompanyDto,
+  ) {
     return this.companiesService.update(id, dto);
   }
 
+  /* =====================================================
+     STATUS
+  ===================================================== */
+
   @Patch(':id/status')
-  updateStatus(
+  async updateStatus(
     @Param('id') id: string,
-    @Body() body: { status: 'PENDING' | 'ACTIVE' | 'SUSPENDED' },
+    @Body()
+    body: {
+      status:
+        | 'PENDING'
+        | 'ACTIVE'
+        | 'SUSPENDED';
+    },
   ) {
     return this.companiesService.update(id, {
       status: body.status,
     });
   }
 
+  /* =====================================================
+     BILLING
+  ===================================================== */
+
+  @Get(':id/billing')
+  async findBilling(
+    @Param('id') id: string,
+  ) {
+    return this.companiesService.findBilling(id);
+  }
+
+  @Patch(':id/billing')
+  async updateBilling(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      billingPlan?:
+        | 'STARTER'
+        | 'GROWTH'
+        | 'PRO'
+        | 'ENTERPRISE';
+
+      billingStatus?:
+        | 'ACTIVE'
+        | 'TRIAL'
+        | 'PAST_DUE'
+        | 'CANCELLED';
+
+      trialEndsAt?: string | null;
+
+      subscriptionStartsAt?: string | null;
+
+      subscriptionEndsAt?: string | null;
+    },
+  ) {
+    return this.companiesService.update(id, body);
+  }
+
+  @Post(':id/extend-trial')
+  async extendTrial(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      trialEndsAt: string;
+    },
+  ) {
+    return this.companiesService.update(id, {
+      billingStatus: 'TRIAL',
+      trialEndsAt: body.trialEndsAt,
+    });
+  }
+
+  /* =====================================================
+     INVOICES
+  ===================================================== */
+
+  @Get(':id/invoices')
+  async findInvoices(
+    @Param('id') id: string,
+  ) {
+    return this.companiesService.findInvoices(id);
+  }
+
+  /* =====================================================
+     COMPANY USERS
+  ===================================================== */
+
   @Post(':id/users')
-  createUser(@Param('id') id: string, @Body() dto: CreateCompanyUserDto) {
-    return this.companiesService.createCompanyUser(id, dto);
+  async createUser(
+    @Param('id') id: string,
+    @Body() dto: CreateCompanyUserDto,
+  ) {
+    return this.companiesService.createCompanyUser(
+      id,
+      dto,
+    );
   }
 
   @Patch(':id/users/:userId/status')
-  updateUserStatus(
+  async updateUserStatus(
     @Param('id') id: string,
     @Param('userId') userId: string,
-    @Body() body: { status: 'ACTIVE' | 'SUSPENDED' },
+    @Body()
+    body: {
+      status:
+        | 'ACTIVE'
+        | 'SUSPENDED';
+    },
   ) {
     return this.companiesService.updateCompanyUserStatus(
       id,
@@ -58,10 +165,11 @@ export class CompaniesController {
   }
 
   @Patch(':id/users/:userId/password')
-  resetUserPassword(
+  async resetUserPassword(
     @Param('id') id: string,
     @Param('userId') userId: string,
-    @Body() dto: ResetCompanyUserPasswordDto,
+    @Body()
+    dto: ResetCompanyUserPasswordDto,
   ) {
     return this.companiesService.resetCompanyUserPassword(
       id,

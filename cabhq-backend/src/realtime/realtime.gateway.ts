@@ -26,6 +26,8 @@ type SocketUser = {
     origin: true,
     credentials: true,
   },
+  pingInterval: 10000,
+  pingTimeout: 20000,
 })
 export class RealtimeGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -48,6 +50,7 @@ export class RealtimeGateway
         this.extractBearer(client.handshake.headers.authorization);
 
       if (!token) {
+        this.logger.warn(`Socket rejected ${client.id} missing token`);
         client.disconnect();
         return;
       }
@@ -56,32 +59,46 @@ export class RealtimeGateway
 
       client.data.user = payload;
 
-      if (payload.sub) {
-        await client.join(`user:${payload.sub}`);
+      const userId = payload.sub ?? null;
+      const companyId = payload.companyId ?? null;
+
+      if (userId) {
+        await client.join(`user:${userId}`);
       }
 
-      if (payload.companyId) {
-        await client.join(`company:${payload.companyId}`);
+      if (companyId) {
+        await client.join(`company:${companyId}`);
       }
 
       client.emit('system:connected', {
         ok: true,
+        userId,
+        companyId,
+        socketId: client.id,
         ts: new Date().toISOString(),
-        companyId: payload.companyId ?? null,
-        userId: payload.sub ?? null,
       });
 
       this.logger.log(
-        `Socket connected ${client.id} company=${payload.companyId ?? 'none'} user=${payload.sub ?? 'none'}`,
+        `Socket connected ${client.id} company=${companyId ?? 'none'} user=${userId ?? 'none'}`,
       );
     } catch (error) {
-      this.logger.warn(`Socket auth failed ${client.id}`);
+      this.logger.warn(
+        `Socket auth failed ${client.id} ${
+          error instanceof Error ? error.message : ''
+        }`,
+      );
+
       client.disconnect();
     }
   }
 
   handleDisconnect(client: Socket) {
-    this.logger.log(`Socket disconnected ${client.id}`);
+    const userId = client.data?.user?.sub ?? 'unknown';
+    const companyId = client.data?.user?.companyId ?? 'unknown';
+
+    this.logger.log(
+      `Socket disconnected ${client.id} company=${companyId} user=${userId}`,
+    );
   }
 
   @SubscribeMessage('company:join')
@@ -89,19 +106,46 @@ export class RealtimeGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() body: { companyId?: string },
   ) {
-    const socketCompanyId = client.data?.user?.companyId;
+    try {
+      const socketCompanyId = client.data?.user?.companyId;
 
-    if (!socketCompanyId || body?.companyId !== socketCompanyId) {
-      client.emit('system:error', {
-        message: 'Unauthorised company room join',
+      if (!socketCompanyId) {
+        client.emit('system:error', {
+          message: 'No company assigned to socket',
+        });
+
+        return;
+      }
+
+      if (body?.companyId !== socketCompanyId) {
+        client.emit('system:error', {
+          message: 'Unauthorised company room join',
+        });
+
+        return;
+      }
+
+      await client.join(`company:${socketCompanyId}`);
+
+      client.emit('company:joined', {
+        ok: true,
+        companyId: socketCompanyId,
+        ts: new Date().toISOString(),
       });
-      return;
+
+      this.logger.log(
+        `Socket ${client.id} joined company room ${socketCompanyId}`,
+      );
+    } catch (error) {
+      client.emit('system:error', {
+        message: 'Failed to join company room',
+      });
     }
+  }
 
-    await client.join(`company:${socketCompanyId}`);
-
-    client.emit('company:joined', {
-      companyId: socketCompanyId,
+  @SubscribeMessage('ping')
+  handlePing(@ConnectedSocket() client: Socket) {
+    client.emit('pong', {
       ts: new Date().toISOString(),
     });
   }
@@ -112,6 +156,10 @@ export class RealtimeGateway
 
   emitToUser(userId: string, event: string, payload: unknown) {
     this.server.to(`user:${userId}`).emit(event, payload);
+  }
+
+  emitToSocket(socketId: string, event: string, payload: unknown) {
+    this.server.to(socketId).emit(event, payload);
   }
 
   private extractBearer(authorization?: string | string[]) {

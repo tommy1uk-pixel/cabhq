@@ -48,6 +48,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       companyId: user.companyId,
+      type: 'USER',
     });
 
     return {
@@ -57,6 +58,7 @@ export class AuthService {
         email: user.email,
         role: user.role,
         companyId: user.companyId,
+        type: 'USER',
         company: user.company
           ? {
               id: user.company.id,
@@ -67,9 +69,107 @@ export class AuthService {
     };
   }
 
-  async me(userId: string) {
+  async driverLogin(companyId: string, username: string, pin: string) {
+    if (!companyId?.trim()) {
+      throw new UnauthorizedException('Company required');
+    }
+
+    if (!username?.trim()) {
+      throw new UnauthorizedException('Username required');
+    }
+
+    if (!pin?.trim()) {
+      throw new UnauthorizedException('PIN required');
+    }
+
+    const driver = await this.prisma.driver.findFirst({
+      where: {
+        companyId: companyId.trim(),
+        username: username.trim().toLowerCase(),
+      },
+      include: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        vehicle: true,
+      },
+    });
+
+    if (!driver) {
+      throw new UnauthorizedException('Invalid driver login');
+    }
+
+    if (driver.pin !== pin.trim()) {
+      throw new UnauthorizedException('Invalid driver login');
+    }
+
+    if (['INACTIVE', 'SUSPENDED'].includes(driver.status)) {
+      throw new UnauthorizedException('Driver suspended');
+    }
+
+    const token = await this.jwt.signAsync({
+      sub: driver.id,
+      role: 'DRIVER',
+      companyId: driver.companyId,
+      type: 'DRIVER',
+      username: driver.username,
+    });
+
+    return {
+      token,
+      driver: {
+        id: driver.id,
+        name: driver.name,
+        username: driver.username,
+        phone: driver.phone,
+        email: driver.email,
+        status: driver.status,
+        companyId: driver.companyId,
+        type: 'DRIVER',
+        company: driver.company,
+        vehicle: driver.vehicle,
+      },
+    };
+  }
+
+  async me(id: string, role?: string) {
+    if (role === 'DRIVER') {
+      const driver = await this.prisma.driver.findUnique({
+        where: { id },
+        include: {
+          company: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          vehicle: true,
+        },
+      });
+
+      if (!driver) {
+        throw new NotFoundException('Driver not found');
+      }
+
+      return {
+        id: driver.id,
+        name: driver.name,
+        username: driver.username,
+        phone: driver.phone,
+        email: driver.email,
+        role: 'DRIVER',
+        companyId: driver.companyId,
+        type: 'DRIVER',
+        company: driver.company,
+        vehicle: driver.vehicle,
+      };
+    }
+
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { id },
       include: {
         company: {
           select: {
@@ -89,6 +189,7 @@ export class AuthService {
       email: user.email,
       role: user.role,
       companyId: user.companyId,
+      type: 'USER',
       company: user.company
         ? {
             id: user.company.id,

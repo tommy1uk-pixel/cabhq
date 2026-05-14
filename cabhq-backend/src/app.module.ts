@@ -14,10 +14,11 @@ import { PricingModule } from './pricing/pricing.module';
 import { LocationsModule } from './locations/locations.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { DriverAppModule } from './driver-app/driver-app.module';
-
 import { SettingsModule } from './settings/settings.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { PaymentsModule } from './payments/payments.module';
+import { AccountsModule } from './accounts/accounts.module';
+import { MapboxModule } from './mapbox/mapbox.module';
 
 @Module({
   imports: [
@@ -32,10 +33,11 @@ import { PaymentsModule } from './payments/payments.module';
     LocationsModule,
     RealtimeModule,
     DriverAppModule,
-
     SettingsModule,
     InvoicesModule,
     PaymentsModule,
+    AccountsModule,
+    MapboxModule,
   ],
   controllers: [AppController],
   providers: [AppService],

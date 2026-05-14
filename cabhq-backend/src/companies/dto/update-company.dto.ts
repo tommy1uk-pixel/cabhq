@@ -20,4 +20,6 @@ export class UpdateCompanyDto {
   trialEndsAt?: string | null;
   subscriptionStartsAt?: string | null;
   subscriptionEndsAt?: string | null;
+
+  internalNotes?: string | null;
 }

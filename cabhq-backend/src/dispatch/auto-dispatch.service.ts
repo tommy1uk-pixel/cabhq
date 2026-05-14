@@ -43,10 +43,7 @@ export class AutoDispatchService {
     this.clearOfferTimer(bookingId);
 
     const booking = await this.prisma.booking.findFirst({
-      where: {
-        id: bookingId,
-        companyId,
-      },
+      where: { id: bookingId, companyId },
       include: {
         driver: true,
         company: true,
@@ -64,17 +61,22 @@ export class AutoDispatchService {
       return this.findBookingWithRelations(booking.id, booking.companyId);
     }
 
+    if (!['BOOKED', 'NO_DRIVER', 'OFFERED'].includes(booking.status)) {
+      throw new BadRequestException(
+        'Auto dispatch can only run on BOOKED, OFFERED or NO_DRIVER bookings',
+      );
+    }
+
     if (booking.driverId) {
       await this.releaseDriverIfSafe(booking.driverId);
     }
 
-    if (!['NO_DRIVER', 'BOOKED', 'OFFERED'].includes(booking.status)) {
-      throw new BadRequestException(
-        'Auto-dispatch can only run on BOOKED, OFFERED or NO_DRIVER bookings',
-      );
-    }
+    this.realtime.autoDispatchStarted?.(booking.companyId, {
+      bookingId: booking.id,
+    });
 
     const offeredDriverIds = this.extractOfferedDriverIds(booking.events ?? []);
+
     const rankedDrivers = await this.findRankedEligibleDrivers(
       booking.companyId,
       booking.pickupLat ?? null,
@@ -103,6 +105,11 @@ export class AutoDispatchService {
         booking.companyId,
       );
 
+      this.realtime.bookingNoDriver?.(refreshed.companyId, {
+        bookingId: refreshed.id,
+        reason: 'No eligible drivers available',
+      });
+
       this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
       this.realtime.bookingUpdated(refreshed.companyId, refreshed);
 
@@ -117,43 +124,48 @@ export class AutoDispatchService {
       },
     });
 
+    const offeredDriver = await this.prisma.driver.update({
+      where: { id: nextDriver.id },
+      data: {
+        status: 'OFFERED',
+      },
+    });
+
     await this.appendTimeline(
       booking.id,
-      `AUTO DISPATCH OFFERED · ${nextDriver.name} [${nextDriver.id}] · score ${nextDriver.score}${
+      `AUTO DISPATCH OFFERED · ${nextDriver.name} [${
+        nextDriver.id
+      }] · score ${nextDriver.score}${
         nextDriver.distanceMiles === Number.MAX_SAFE_INTEGER
           ? ' · distance unknown'
           : ` · ${nextDriver.distanceMiles.toFixed(2)} miles away`
       } · ${
         nextDriver.scoreBreakdown.length > 0
           ? nextDriver.scoreBreakdown.join(' | ')
-          : 'Auto-dispatch scoring applied'
+          : 'Auto scoring applied'
       }`,
     );
 
-    const updated = await this.findBookingWithRelations(
+    const refreshed = await this.findBookingWithRelations(
       booking.id,
       booking.companyId,
     );
 
-    this.realtime.bookingOfferCreated(updated.companyId, updated);
-    this.realtime.bookingUpdated(updated.companyId, updated);
+    this.realtime.bookingOfferCreated(refreshed.companyId, refreshed);
+    this.realtime.bookingUpdated(refreshed.companyId, refreshed);
+    this.realtime.driverUpdated(offeredDriver.companyId, offeredDriver);
 
-    this.startOfferTimer(updated.id, updated.companyId, nextDriver.id);
+    this.startOfferTimer(refreshed.id, refreshed.companyId, nextDriver.id);
 
-    return updated;
+    return refreshed;
   }
 
   async acceptOffer(bookingId: string, companyId: string, driverId: string) {
     this.clearOfferTimer(bookingId);
 
     const booking = await this.prisma.booking.findFirst({
-      where: {
-        id: bookingId,
-        companyId,
-      },
-      include: {
-        driver: true,
-      },
+      where: { id: bookingId, companyId },
+      include: { driver: true },
     });
 
     if (!booking) {
@@ -168,10 +180,11 @@ export class AutoDispatchService {
       throw new BadRequestException('Offer is not assigned to this driver');
     }
 
-    const driverDispatch = await this.isDriverDispatchable(driverId, companyId);
-    if (!driverDispatch.assignable) {
+    const dispatch = await this.isDriverDispatchable(driverId, companyId);
+
+    if (!dispatch.assignable) {
       throw new BadRequestException(
-        `Driver is no longer dispatchable: ${driverDispatch.blockedReasons.join(' | ')}`,
+        `Driver no longer dispatchable: ${dispatch.blockedReasons.join(' | ')}`,
       );
     }
 
@@ -194,29 +207,31 @@ export class AutoDispatchService {
       `OFFER ACCEPTED · ${driver.name} [${driver.id}]`,
     );
 
-    const updated = await this.findBookingWithRelations(
+    const refreshed = await this.findBookingWithRelations(
       booking.id,
       booking.companyId,
     );
 
-    this.realtime.bookingAssigned(updated.companyId, updated);
-    this.realtime.bookingStatusChanged(updated.companyId, updated);
+    this.realtime.bookingOfferAccepted?.(refreshed.companyId, refreshed);
+    this.realtime.bookingAssigned(refreshed.companyId, refreshed);
+    this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
+    this.realtime.bookingUpdated(refreshed.companyId, refreshed);
     this.realtime.driverUpdated(driver.companyId, driver);
 
-    return updated;
+    this.realtime.autoDispatchCompleted?.(refreshed.companyId, {
+      bookingId: refreshed.id,
+      driverId: driver.id,
+    });
+
+    return refreshed;
   }
 
   async rejectOffer(bookingId: string, companyId: string, driverId: string) {
     this.clearOfferTimer(bookingId);
 
     const booking = await this.prisma.booking.findFirst({
-      where: {
-        id: bookingId,
-        companyId,
-      },
-      include: {
-        driver: true,
-      },
+      where: { id: bookingId, companyId },
+      include: { driver: true },
     });
 
     if (!booking) {
@@ -246,6 +261,15 @@ export class AutoDispatchService {
 
     await this.releaseDriverIfSafe(driverId);
 
+    const refreshed = await this.findBookingWithRelations(
+      booking.id,
+      booking.companyId,
+    );
+
+    this.realtime.bookingOfferRejected?.(refreshed.companyId, refreshed);
+    this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
+    this.realtime.bookingUpdated(refreshed.companyId, refreshed);
+
     return this.startForBooking(booking.id, booking.companyId);
   }
 
@@ -258,34 +282,34 @@ export class AutoDispatchService {
 
     if (!booking) return;
 
-    if (booking.status === 'OFFERED') {
-      const currentDriverId = booking.driverId ?? null;
+    if (booking.status !== 'OFFERED') return;
 
-      await this.prisma.booking.update({
-        where: { id: booking.id },
-        data: {
-          status: 'BOOKED',
-          driverId: null,
-        },
-      });
+    const currentDriverId = booking.driverId ?? null;
 
-      await this.appendTimeline(
-        booking.id,
-        'OFFER CANCELLED · dispatcher override',
-      );
+    await this.prisma.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: 'BOOKED',
+        driverId: null,
+      },
+    });
 
-      if (currentDriverId) {
-        await this.releaseDriverIfSafe(currentDriverId);
-      }
+    await this.appendTimeline(
+      booking.id,
+      'OFFER CANCELLED · dispatcher override',
+    );
 
-      const refreshed = await this.findBookingWithRelations(
-        booking.id,
-        booking.companyId,
-      );
-
-      this.realtime.bookingUpdated(refreshed.companyId, refreshed);
-      this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
+    if (currentDriverId) {
+      await this.releaseDriverIfSafe(currentDriverId);
     }
+
+    const refreshed = await this.findBookingWithRelations(
+      booking.id,
+      booking.companyId,
+    );
+
+    this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
+    this.realtime.bookingUpdated(refreshed.companyId, refreshed);
   }
 
   async getSuggestedDriversForBooking(
@@ -294,10 +318,7 @@ export class AutoDispatchService {
     limit = 3,
   ) {
     const booking = await this.prisma.booking.findFirst({
-      where: {
-        id: bookingId,
-        companyId,
-      },
+      where: { id: bookingId, companyId },
       include: {
         events: {
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -310,6 +331,7 @@ export class AutoDispatchService {
     }
 
     const offeredDriverIds = this.extractOfferedDriverIds(booking.events ?? []);
+
     const rankedDrivers = await this.findRankedEligibleDrivers(
       booking.companyId,
       booking.pickupLat ?? null,
@@ -332,19 +354,18 @@ export class AutoDispatchService {
     }));
   }
 
-  private startOfferTimer(bookingId: string, companyId: string, driverId: string) {
+  private startOfferTimer(
+    bookingId: string,
+    companyId: string,
+    driverId: string,
+  ) {
     this.clearOfferTimer(bookingId);
 
     const timer = setTimeout(async () => {
       try {
         const booking = await this.prisma.booking.findFirst({
-          where: {
-            id: bookingId,
-            companyId,
-          },
-          include: {
-            driver: true,
-          },
+          where: { id: bookingId, companyId },
+          include: { driver: true },
         });
 
         if (!booking) return;
@@ -353,7 +374,9 @@ export class AutoDispatchService {
 
         await this.appendTimeline(
           booking.id,
-          `OFFER EXPIRED · ${booking.driver?.name ?? 'Driver'} [${driverId}]`,
+          `OFFER EXPIRED · ${
+            booking.driver?.name ?? 'Driver'
+          } [${driverId}]`,
         );
 
         await this.prisma.booking.update({
@@ -365,6 +388,15 @@ export class AutoDispatchService {
         });
 
         await this.releaseDriverIfSafe(driverId);
+
+        const refreshed = await this.findBookingWithRelations(
+          booking.id,
+          booking.companyId,
+        );
+
+        this.realtime.bookingOfferExpired?.(refreshed.companyId, refreshed);
+        this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
+        this.realtime.bookingUpdated(refreshed.companyId, refreshed);
 
         await this.startForBooking(booking.id, booking.companyId);
       } catch (error) {
@@ -382,6 +414,7 @@ export class AutoDispatchService {
 
   private clearOfferTimer(bookingId: string) {
     const existing = this.timers.get(bookingId);
+
     if (existing) {
       clearTimeout(existing);
       this.timers.delete(bookingId);
@@ -408,13 +441,8 @@ export class AutoDispatchService {
 
   private async isDriverDispatchable(driverId: string, companyId: string) {
     const driver = await this.prisma.driver.findFirst({
-      where: {
-        id: driverId,
-        companyId,
-      },
-      include: {
-        documents: true,
-      },
+      where: { id: driverId, companyId },
+      include: { documents: true },
     });
 
     if (!driver) {
@@ -427,15 +455,15 @@ export class AutoDispatchService {
     const blockedReasons: string[] = [];
 
     if (this.isExpired(driver.badgeExpiry)) {
-      blockedReasons.push('Taxi badge has expired');
+      blockedReasons.push('Taxi badge expired');
     }
 
     if (this.isExpired(driver.dbsExpiry)) {
-      blockedReasons.push('DBS has expired');
+      blockedReasons.push('DBS expired');
     }
 
     if (this.isExpired(driver.licenceExpiry)) {
-      blockedReasons.push('Licence has expired');
+      blockedReasons.push('Licence expired');
     }
 
     for (const document of driver.documents ?? []) {
@@ -465,7 +493,7 @@ export class AutoDispatchService {
         blockedReasons.push('Vehicle is marked INACTIVE');
       }
 
-      const coreChecks = [
+      const vehicleCoreChecks = [
         { label: 'MOT', expiry: vehicle.motExpiry },
         { label: 'Insurance', expiry: vehicle.insuranceExpiry },
         { label: 'Inspection', expiry: vehicle.inspectionExpiry },
@@ -473,7 +501,7 @@ export class AutoDispatchService {
         { label: 'Tax', expiry: vehicle.taxExpiry },
       ];
 
-      for (const item of coreChecks) {
+      for (const item of vehicleCoreChecks) {
         if (this.isExpired(item.expiry)) {
           blockedReasons.push(`${item.label} has expired`);
         }
@@ -513,12 +541,8 @@ export class AutoDispatchService {
     excludeDriverIds: string[],
   ): Promise<EligibleDriver[]> {
     const drivers = await this.prisma.driver.findMany({
-      where: {
-        companyId,
-      },
-      include: {
-        documents: true,
-      },
+      where: { companyId },
+      include: { documents: true },
       orderBy: [{ lastLocationAt: 'desc' }, { createdAt: 'asc' }],
     });
 
@@ -529,11 +553,12 @@ export class AutoDispatchService {
         continue;
       }
 
-      if (!['AVAILABLE', 'ON_DUTY', 'ONLINE'].includes(driver.status)) {
+      if (!['AVAILABLE', 'ONLINE', 'ON_DUTY'].includes(driver.status)) {
         continue;
       }
 
       const dispatch = await this.isDriverDispatchable(driver.id, companyId);
+
       if (!dispatch.assignable) {
         continue;
       }
@@ -667,12 +692,17 @@ export class AutoDispatchService {
       scoreBreakdown.push('-10 DIST_UNKNOWN');
     }
 
-    return { score, scoreBreakdown };
+    return {
+      score,
+      scoreBreakdown,
+    };
   }
 
   private getMinutesSince(value: Date | null) {
     if (!value) return Number.MAX_SAFE_INTEGER;
+
     const diffMs = Date.now() - new Date(value).getTime();
+
     return diffMs / 1000 / 60;
   }
 
@@ -687,10 +717,7 @@ export class AutoDispatchService {
 
   private async findBookingWithRelations(bookingId: string, companyId: string) {
     return this.prisma.booking.findFirstOrThrow({
-      where: {
-        id: bookingId,
-        companyId,
-      },
+      where: { id: bookingId, companyId },
       include: {
         driver: true,
         company: true,
@@ -715,12 +742,14 @@ export class AutoDispatchService {
       return;
     }
 
-    await this.prisma.driver.update({
+    const driver = await this.prisma.driver.update({
       where: { id: driverId },
       data: {
         status: 'AVAILABLE',
       },
     });
+
+    this.realtime.driverUpdated(driver.companyId, driver);
   }
 
   private haversineMiles(

@@ -113,13 +113,8 @@ export class DriversService {
       (startTarget - startToday) / (1000 * 60 * 60 * 24),
     );
 
-    if (diffDays < 0) {
-      return 'EXPIRED';
-    }
-
-    if (diffDays <= this.expiryWarningDays) {
-      return 'EXPIRING';
-    }
+    if (diffDays < 0) return 'EXPIRED';
+    if (diffDays <= this.expiryWarningDays) return 'EXPIRING';
 
     return 'VALID';
   }
@@ -188,7 +183,6 @@ export class DriversService {
     ];
 
     const blocked = blockedReasons.length > 0;
-
     const activeShift = driver.shifts?.[0] ?? null;
 
     const shift = activeShift
@@ -276,14 +270,24 @@ export class DriversService {
       },
     });
 
-    const map = new Map<string, { assignable: boolean; blockedReasons: string[] }>();
+    const map = new Map<
+      string,
+      { assignable: boolean; blockedReasons: string[] }
+    >();
 
     for (const vehicle of vehicles) {
+      const blockedReasons: string[] = [];
+
+      if (vehicle.status === 'OFF_ROAD') {
+        blockedReasons.push('Vehicle is marked OFF_ROAD');
+      }
+
+      if (vehicle.status === 'INACTIVE') {
+        blockedReasons.push('Vehicle is marked INACTIVE');
+      }
+
       const coreStatuses = [
-        {
-          label: 'MOT',
-          status: this.getDocumentStatus(vehicle.motExpiry),
-        },
+        { label: 'MOT', status: this.getDocumentStatus(vehicle.motExpiry) },
         {
           label: 'Insurance',
           status: this.getDocumentStatus(vehicle.insuranceExpiry),
@@ -296,21 +300,8 @@ export class DriversService {
           label: 'Vehicle licence',
           status: this.getDocumentStatus(vehicle.vehicleLicenceExpiry),
         },
-        {
-          label: 'Tax',
-          status: this.getDocumentStatus(vehicle.taxExpiry),
-        },
+        { label: 'Tax', status: this.getDocumentStatus(vehicle.taxExpiry) },
       ];
-
-      const blockedReasons: string[] = [];
-
-      if (vehicle.status === 'OFF_ROAD') {
-        blockedReasons.push('Vehicle is marked OFF_ROAD');
-      }
-
-      if (vehicle.status === 'INACTIVE') {
-        blockedReasons.push('Vehicle is marked INACTIVE');
-      }
 
       for (const item of coreStatuses) {
         if (item.status === 'EXPIRED') {
@@ -320,6 +311,7 @@ export class DriversService {
 
       for (const document of vehicle.documents ?? []) {
         const documentStatus = this.getDocumentStatus(document.expiryDate);
+
         if (documentStatus === 'EXPIRED') {
           blockedReasons.push(`Document expired: ${document.title}`);
         }
@@ -337,20 +329,7 @@ export class DriversService {
   async list(companyId: string) {
     const drivers = await this.prisma.driver.findMany({
       where: { companyId },
-      include: {
-        documents: {
-          orderBy: {
-            createdAt: 'desc',
-          },
-        },
-        vehicle: true,
-        shifts: {
-          where: { endedAt: null },
-          orderBy: { startedAt: 'desc' },
-          take: 1,
-        },
-      },
-      orderBy: { name: 'asc' },
+      select: { id: true },
     });
 
     await Promise.all(
@@ -363,9 +342,7 @@ export class DriversService {
       where: { companyId },
       include: {
         documents: {
-          orderBy: {
-            createdAt: 'desc',
-          },
+          orderBy: { createdAt: 'desc' },
         },
         vehicle: true,
         shifts: {
@@ -396,30 +373,7 @@ export class DriversService {
   }
 
   async findOne(driverId: string, companyId: string) {
-    const driver = await this.prisma.driver.findFirst({
-      where: {
-        id: driverId,
-        companyId,
-      },
-      include: {
-        documents: {
-          orderBy: {
-            createdAt: 'desc',
-          },
-        },
-        vehicle: true,
-        shifts: {
-          where: { endedAt: null },
-          orderBy: { startedAt: 'desc' },
-          take: 1,
-        },
-      },
-    });
-
-    if (!driver) {
-      throw new NotFoundException('Driver not found');
-    }
-
+    await this.getDriverOrThrow(driverId, companyId);
     await this.refreshDriverDocumentStatuses(driverId);
 
     const vehicleDispatchMap = await this.getVehicleDispatchMap(companyId);
@@ -431,9 +385,7 @@ export class DriversService {
       },
       include: {
         documents: {
-          orderBy: {
-            createdAt: 'desc',
-          },
+          orderBy: { createdAt: 'desc' },
         },
         vehicle: true,
         shifts: {
@@ -464,13 +416,8 @@ export class DriversService {
     const name = input.name.trim();
     const pin = input.pin.trim();
 
-    if (!name) {
-      throw new BadRequestException('Driver name is required');
-    }
-
-    if (!pin) {
-      throw new BadRequestException('Driver PIN is required');
-    }
+    if (!name) throw new BadRequestException('Driver name is required');
+    if (!pin) throw new BadRequestException('Driver PIN is required');
 
     const driver = await this.prisma.driver.create({
       data: {
@@ -494,16 +441,10 @@ export class DriversService {
   }
 
   async update(input: UpdateDriverInput) {
-    const existing = await this.prisma.driver.findFirst({
-      where: {
-        id: input.driverId,
-        companyId: input.companyId,
-      },
-    });
-
-    if (!existing) {
-      throw new NotFoundException('Driver not found');
-    }
+    const existing = await this.getDriverOrThrow(
+      input.driverId,
+      input.companyId,
+    );
 
     const data: {
       name?: string;
@@ -562,7 +503,9 @@ export class DriversService {
     }
 
     if (input.licenceExpiry !== undefined) {
-      data.licenceExpiry = input.licenceExpiry ? new Date(input.licenceExpiry) : null;
+      data.licenceExpiry = input.licenceExpiry
+        ? new Date(input.licenceExpiry)
+        : null;
     }
 
     await this.prisma.driver.update({
@@ -577,16 +520,10 @@ export class DriversService {
   }
 
   async updateStatus(input: UpdateDriverStatusInput) {
-    const existing = await this.prisma.driver.findFirst({
-      where: {
-        id: input.driverId,
-        companyId: input.companyId,
-      },
-    });
-
-    if (!existing) {
-      throw new NotFoundException('Driver not found');
-    }
+    const existing = await this.getDriverOrThrow(
+      input.driverId,
+      input.companyId,
+    );
 
     await this.prisma.driver.update({
       where: { id: existing.id },
@@ -595,6 +532,62 @@ export class DriversService {
 
     const mapped = await this.findOne(existing.id, existing.companyId);
     this.realtime.driverUpdated(existing.companyId, mapped);
+
+    return mapped;
+  }
+
+  async updateLocation(input: UpdateDriverLocationInput) {
+    const existing = await this.getDriverOrThrow(
+      input.driverId,
+      input.companyId,
+    );
+
+    if (typeof input.latitude !== 'number' || Number.isNaN(input.latitude)) {
+      throw new BadRequestException('Latitude is required');
+    }
+
+    if (typeof input.longitude !== 'number' || Number.isNaN(input.longitude)) {
+      throw new BadRequestException('Longitude is required');
+    }
+
+    if (input.latitude < -90 || input.latitude > 90) {
+      throw new BadRequestException('Latitude is invalid');
+    }
+
+    if (input.longitude < -180 || input.longitude > 180) {
+      throw new BadRequestException('Longitude is invalid');
+    }
+
+    const updated = await this.prisma.driver.update({
+      where: { id: existing.id },
+      data: {
+        latitude: input.latitude,
+        longitude: input.longitude,
+        heading: input.heading ?? null,
+        speed: input.speed ?? null,
+        lastLocationAt: new Date(),
+      },
+      include: {
+        vehicle: true,
+      },
+    });
+
+    const lastLocationAt =
+      updated.lastLocationAt?.toISOString() ?? new Date().toISOString();
+
+    this.realtime.driverLocation(updated.companyId, {
+      driverId: updated.id,
+      latitude: updated.latitude ?? input.latitude,
+      longitude: updated.longitude ?? input.longitude,
+      heading: updated.heading ?? null,
+      speed: updated.speed ?? null,
+      lastLocationAt,
+    });
+
+    const mapped = await this.findOne(updated.id, updated.companyId);
+    this.realtime.driverUpdated(updated.companyId, mapped);
+
+    await this.runGeofenceAutomation(updated.id, updated.companyId);
 
     return mapped;
   }
@@ -824,17 +817,7 @@ export class DriversService {
   }
 
   async listDocuments(driverId: string, companyId: string) {
-    const driver = await this.prisma.driver.findFirst({
-      where: {
-        id: driverId,
-        companyId,
-      },
-    });
-
-    if (!driver) {
-      throw new NotFoundException('Driver not found');
-    }
-
+    await this.getDriverOrThrow(driverId, companyId);
     await this.refreshDriverDocumentStatuses(driverId);
 
     return this.prisma.driverDocument.findMany({
@@ -848,16 +831,7 @@ export class DriversService {
   }
 
   async uploadDocument(input: UploadDriverDocumentInput) {
-    const driver = await this.prisma.driver.findFirst({
-      where: {
-        id: input.driverId,
-        companyId: input.companyId,
-      },
-    });
-
-    if (!driver) {
-      throw new NotFoundException('Driver not found');
-    }
+    await this.getDriverOrThrow(input.driverId, input.companyId);
 
     if (!input.file) {
       throw new BadRequestException('File is required');
@@ -917,16 +891,7 @@ export class DriversService {
   }
 
   async deleteDocument(input: DeleteDriverDocumentInput) {
-    const driver = await this.prisma.driver.findFirst({
-      where: {
-        id: input.driverId,
-        companyId: input.companyId,
-      },
-    });
-
-    if (!driver) {
-      throw new NotFoundException('Driver not found');
-    }
+    await this.getDriverOrThrow(input.driverId, input.companyId);
 
     const document = await this.prisma.driverDocument.findFirst({
       where: {
@@ -957,47 +922,6 @@ export class DriversService {
     return { success: true };
   }
 
-  async updateLocation(input: UpdateDriverLocationInput) {
-    const existing = await this.prisma.driver.findFirst({
-      where: {
-        id: input.driverId,
-        companyId: input.companyId,
-      },
-    });
-
-    if (!existing) {
-      throw new NotFoundException('Driver not found');
-    }
-
-    const updated = await this.prisma.driver.update({
-      where: { id: existing.id },
-      data: {
-        latitude: input.latitude,
-        longitude: input.longitude,
-        heading: input.heading ?? null,
-        speed: input.speed ?? null,
-        lastLocationAt: new Date(),
-      },
-    });
-
-    this.realtime.driverLocation(updated.companyId, {
-      driverId: updated.id,
-      latitude: updated.latitude ?? input.latitude,
-      longitude: updated.longitude ?? input.longitude,
-      heading: updated.heading ?? null,
-      speed: updated.speed ?? null,
-      lastLocationAt:
-        updated.lastLocationAt?.toISOString() ?? new Date().toISOString(),
-    });
-
-    const mapped = await this.findOne(updated.id, updated.companyId);
-    this.realtime.driverUpdated(updated.companyId, mapped);
-
-    await this.runGeofenceAutomation(updated.id, updated.companyId);
-
-    return mapped;
-  }
-
   private async runGeofenceAutomation(driverId: string, companyId: string) {
     const activeBooking = await this.prisma.booking.findFirst({
       where: {
@@ -1010,6 +934,14 @@ export class DriversService {
       include: {
         driver: true,
         company: true,
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            status: true,
+          },
+        },
         events: {
           orderBy: { createdAt: 'desc' },
         },
@@ -1017,16 +949,12 @@ export class DriversService {
       orderBy: { pickupTime: 'asc' },
     });
 
-    if (!activeBooking || !activeBooking.driver) {
-      return;
-    }
+    if (!activeBooking || !activeBooking.driver) return;
 
     const driverLat = activeBooking.driver.latitude;
     const driverLng = activeBooking.driver.longitude;
 
-    if (driverLat == null || driverLng == null) {
-      return;
-    }
+    if (driverLat == null || driverLng == null) return;
 
     const pickupDistance =
       activeBooking.pickupLat != null && activeBooking.pickupLng != null
@@ -1071,7 +999,10 @@ export class DriversService {
         activeBooking.id,
         companyId,
       );
+
       this.realtime.bookingStatusChanged(companyId, refreshed);
+      this.realtime.bookingUpdated(companyId, refreshed);
+
       return;
     }
 
@@ -1105,6 +1036,8 @@ export class DriversService {
       );
 
       this.realtime.bookingStatusChanged(companyId, refreshed);
+      this.realtime.bookingUpdated(companyId, refreshed);
+
       const mapped = await this.findOne(freedDriver.id, companyId);
       this.realtime.driverUpdated(companyId, mapped);
     }
@@ -1119,6 +1052,14 @@ export class DriversService {
       include: {
         driver: true,
         company: true,
+        account: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            status: true,
+          },
+        },
         events: {
           orderBy: { createdAt: 'desc' },
         },
