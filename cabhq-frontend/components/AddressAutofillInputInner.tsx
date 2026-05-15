@@ -17,11 +17,13 @@ type Suggestion = {
   latitude?: number | null;
   longitude?: number | null;
   type?: string;
+  source?: 'ideal-postcodes' | 'backend-mapbox';
+  retrieveUrl?: string | null;
 };
 
 type RetrievedAddress = {
-  id: string;
-  address: string;
+  id?: string;
+  address?: string;
   line1?: string | null;
   line2?: string | null;
   line3?: string | null;
@@ -32,6 +34,36 @@ type RetrievedAddress = {
   longitude?: number | null;
 };
 
+type IdealAutocompleteHit = {
+  suggestion?: string;
+  urls?: {
+    udprn?: string;
+  };
+  udprn?: number | string;
+};
+
+type IdealAutocompleteResponse = {
+  result?: {
+    hits?: IdealAutocompleteHit[];
+  };
+};
+
+type IdealAddressResult = {
+  line_1?: string | null;
+  line_2?: string | null;
+  line_3?: string | null;
+  post_town?: string | null;
+  county?: string | null;
+  postcode?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  formatted_address?: string[];
+};
+
+type IdealRetrieveResponse = {
+  result?: IdealAddressResult;
+};
+
 type AddressAutofillInputInnerProps = {
   label: string;
   value: string;
@@ -40,6 +72,139 @@ type AddressAutofillInputInnerProps = {
   onChangeValue: (value: string) => void;
   onSelectAddress: (address: SelectedAddress) => void;
 };
+
+const IDEAL_POSTCODES_API_KEY =
+  process.env.NEXT_PUBLIC_IDEAL_POSTCODES_API_KEY || '';
+
+function normalisePostcodeQuery(query: string) {
+  return query.trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+function formatIdealAddress(address: IdealAddressResult) {
+  const formatted = Array.isArray(address.formatted_address)
+    ? address.formatted_address.filter(Boolean)
+    : [];
+
+  if (formatted.length > 0) {
+    return formatted.join(', ');
+  }
+
+  return [
+    address.line_1,
+    address.line_2,
+    address.line_3,
+    address.post_town,
+    address.county,
+    address.postcode,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+async function searchIdealPostcodes(query: string): Promise<Suggestion[]> {
+  if (!IDEAL_POSTCODES_API_KEY) {
+    return [];
+  }
+
+  const url = new URL('https://api.ideal-postcodes.co.uk/v1/autocomplete/addresses');
+  url.searchParams.set('api_key', IDEAL_POSTCODES_API_KEY);
+  url.searchParams.set('query', normalisePostcodeQuery(query));
+  url.searchParams.set('limit', '10');
+
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    throw new Error(`Ideal Postcodes search failed (${response.status})`);
+  }
+
+  const data = (await response.json()) as IdealAutocompleteResponse;
+  const hits = data.result?.hits ?? [];
+
+  return hits
+    .map((hit, index): Suggestion | null => {
+      const address = hit.suggestion?.trim();
+      const retrieveUrl = hit.urls?.udprn ?? null;
+      const fallbackId = hit.udprn ? String(hit.udprn) : String(index);
+
+      if (!address) return null;
+
+      return {
+        id: retrieveUrl || fallbackId,
+        address,
+        latitude: null,
+        longitude: null,
+        type: 'address',
+        source: 'ideal-postcodes',
+        retrieveUrl,
+      };
+    })
+    .filter(Boolean) as Suggestion[];
+}
+
+async function retrieveIdealAddress(item: Suggestion): Promise<RetrievedAddress | null> {
+  if (!IDEAL_POSTCODES_API_KEY || item.source !== 'ideal-postcodes') {
+    return null;
+  }
+
+  if (!item.retrieveUrl) {
+    return null;
+  }
+
+  const url = item.retrieveUrl.startsWith('http')
+    ? new URL(item.retrieveUrl)
+    : new URL(`https://api.ideal-postcodes.co.uk${item.retrieveUrl}`);
+
+  url.searchParams.set('api_key', IDEAL_POSTCODES_API_KEY);
+
+  const response = await fetch(url.toString());
+
+  if (!response.ok) {
+    throw new Error(`Ideal Postcodes retrieve failed (${response.status})`);
+  }
+
+  const data = (await response.json()) as IdealRetrieveResponse;
+  const result = data.result;
+
+  if (!result) {
+    return null;
+  }
+
+  const address = formatIdealAddress(result) || item.address;
+
+  return {
+    id: item.id,
+    address,
+    line1: result.line_1 ?? null,
+    line2: result.line_2 ?? null,
+    line3: result.line_3 ?? null,
+    town: result.post_town ?? null,
+    county: result.county ?? null,
+    postcode: result.postcode ?? null,
+    latitude: result.latitude ?? null,
+    longitude: result.longitude ?? null,
+  };
+}
+
+async function searchBackendMapbox(query: string): Promise<Suggestion[]> {
+  const data = await apiFetch<Suggestion[]>(
+    `/mapbox/search?q=${encodeURIComponent(query)}`,
+  );
+
+  const items = Array.isArray(data) ? data : [];
+
+  return items.map((item) => ({
+    ...item,
+    source: 'backend-mapbox',
+  }));
+}
+
+async function retrieveBackendMapbox(item: Suggestion): Promise<RetrievedAddress | null> {
+  const selected = await apiFetch<RetrievedAddress>(
+    `/mapbox/retrieve?id=${encodeURIComponent(item.id)}`,
+  );
+
+  return selected ?? null;
+}
 
 export default function AddressAutofillInputInner({
   label,
@@ -91,11 +256,21 @@ export default function AddressAutofillInputInner({
         setLoading(true);
         setError('');
 
-        const data = await apiFetch<Suggestion[]>(
-          `/mapbox/search?q=${encodeURIComponent(query)}`,
-        );
+        let nextItems: Suggestion[] = [];
 
-        const nextItems = Array.isArray(data) ? data : [];
+        try {
+          nextItems = await searchIdealPostcodes(query);
+        } catch (idealError) {
+          console.warn('Ideal Postcodes lookup failed, falling back to backend Mapbox:', idealError);
+        }
+
+        if (nextItems.length === 0) {
+          try {
+            nextItems = await searchBackendMapbox(query);
+          } catch (mapboxError) {
+            console.warn('Backend Mapbox lookup failed:', mapboxError);
+          }
+        }
 
         setItems(nextItems);
         setOpen(nextItems.length > 0);
@@ -113,7 +288,7 @@ export default function AddressAutofillInputInner({
       } finally {
         setLoading(false);
       }
-    }, 250);
+    }, 300);
 
     return () => {
       window.clearTimeout(timer);
@@ -128,9 +303,11 @@ export default function AddressAutofillInputInner({
       let selected: RetrievedAddress | null = null;
 
       try {
-        selected = await apiFetch<RetrievedAddress>(
-          `/mapbox/retrieve?id=${encodeURIComponent(item.id)}`,
-        );
+        if (item.source === 'ideal-postcodes') {
+          selected = await retrieveIdealAddress(item);
+        } else {
+          selected = await retrieveBackendMapbox(item);
+        }
       } catch (err) {
         console.warn('Address retrieve failed, using suggestion fallback:', err);
       }
@@ -236,7 +413,7 @@ export default function AddressAutofillInputInner({
 
             return (
               <button
-                key={item.id}
+                key={`${item.source}-${item.id}-${index}`}
                 type="button"
                 onMouseDown={(event) => {
                   event.preventDefault();
@@ -254,7 +431,9 @@ export default function AddressAutofillInputInner({
                 <div className="mt-1 text-xs text-cyan-300/80">
                   {item.latitude != null && item.longitude != null
                     ? `${item.latitude.toFixed(5)}, ${item.longitude.toFixed(5)}`
-                    : 'Click to load full address'}
+                    : item.source === 'ideal-postcodes'
+                      ? 'UK address result'
+                      : 'Click to load full address'}
                 </div>
               </button>
             );
