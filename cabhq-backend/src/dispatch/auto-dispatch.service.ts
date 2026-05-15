@@ -28,10 +28,16 @@ type EligibleDriver = {
   } | null;
 };
 
+type DispatchCheck = {
+  assignable: boolean;
+  blockedReasons: string[];
+};
+
 @Injectable()
 export class AutoDispatchService {
   private readonly logger = new Logger(AutoDispatchService.name);
   private readonly offerTimeoutMs = 20_000;
+  private readonly maxOfferRounds = 25;
   private readonly timers = new Map<string, NodeJS.Timeout>();
 
   constructor(
@@ -57,7 +63,7 @@ export class AutoDispatchService {
       throw new NotFoundException('Booking not found');
     }
 
-    if (['COMPLETED', 'CANCELLED'].includes(booking.status)) {
+    if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(booking.status)) {
       return this.findBookingWithRelations(booking.id, booking.companyId);
     }
 
@@ -67,15 +73,35 @@ export class AutoDispatchService {
       );
     }
 
-    if (booking.driverId) {
-      await this.releaseDriverIfSafe(booking.driverId);
+    const currentDriverId = booking.driverId ?? null;
+
+    if (currentDriverId) {
+      await this.clearBookingDriverAndRelease({
+        bookingId: booking.id,
+        companyId: booking.companyId,
+        driverId: currentDriverId,
+        nextBookingStatus: 'BOOKED',
+      });
     }
 
     this.realtime.autoDispatchStarted?.(booking.companyId, {
       bookingId: booking.id,
     });
 
-    const offeredDriverIds = this.extractOfferedDriverIds(booking.events ?? []);
+    const refreshedEvents = await this.prisma.bookingEvent.findMany({
+      where: { bookingId: booking.id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+
+    const offeredDriverIds = this.extractOfferedDriverIds(refreshedEvents ?? []);
+
+    if (offeredDriverIds.length >= this.maxOfferRounds) {
+      return this.markNoDriver(
+        booking.id,
+        booking.companyId,
+        `Auto dispatch stopped after ${this.maxOfferRounds} offers`,
+      );
+    }
 
     const rankedDrivers = await this.findRankedEligibleDrivers(
       booking.companyId,
@@ -87,33 +113,11 @@ export class AutoDispatchService {
     const nextDriver = rankedDrivers[0] ?? null;
 
     if (!nextDriver) {
-      await this.prisma.booking.update({
-        where: { id: booking.id },
-        data: {
-          status: 'NO_DRIVER',
-          driverId: null,
-        },
-      });
-
-      await this.appendTimeline(
-        booking.id,
-        'AUTO DISPATCH FAILED · no eligible drivers available',
-      );
-
-      const refreshed = await this.findBookingWithRelations(
+      return this.markNoDriver(
         booking.id,
         booking.companyId,
+        'No eligible drivers available',
       );
-
-      this.realtime.bookingNoDriver?.(refreshed.companyId, {
-        bookingId: refreshed.id,
-        reason: 'No eligible drivers available',
-      });
-
-      this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
-      this.realtime.bookingUpdated(refreshed.companyId, refreshed);
-
-      return refreshed;
     }
 
     await this.prisma.booking.update({
@@ -133,9 +137,9 @@ export class AutoDispatchService {
 
     await this.appendTimeline(
       booking.id,
-      `AUTO DISPATCH OFFERED · ${nextDriver.name} [${
-        nextDriver.id
-      }] · score ${nextDriver.score}${
+      `AUTO DISPATCH OFFERED · ${nextDriver.name} [${nextDriver.id}] · score ${
+        nextDriver.score
+      }${
         nextDriver.distanceMiles === Number.MAX_SAFE_INTEGER
           ? ' · distance unknown'
           : ` · ${nextDriver.distanceMiles.toFixed(2)} miles away`
@@ -180,9 +184,18 @@ export class AutoDispatchService {
       throw new BadRequestException('Offer is not assigned to this driver');
     }
 
-    const dispatch = await this.isDriverDispatchable(driverId, companyId);
+    const dispatch = await this.isDriverDispatchable(driverId, companyId, {
+      allowCurrentOfferedBookingId: booking.id,
+    });
 
     if (!dispatch.assignable) {
+      await this.appendTimeline(
+        booking.id,
+        `OFFER ACCEPT FAILED · driver no longer dispatchable · ${dispatch.blockedReasons.join(
+          ' | ',
+        )}`,
+      );
+
       throw new BadRequestException(
         `Driver no longer dispatchable: ${dispatch.blockedReasons.join(' | ')}`,
       );
@@ -251,15 +264,12 @@ export class AutoDispatchService {
       `OFFER REJECTED · ${booking.driver?.name ?? 'Driver'} [${driverId}]`,
     );
 
-    await this.prisma.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: 'BOOKED',
-        driverId: null,
-      },
+    await this.clearBookingDriverAndRelease({
+      bookingId: booking.id,
+      companyId: booking.companyId,
+      driverId,
+      nextBookingStatus: 'BOOKED',
     });
-
-    await this.releaseDriverIfSafe(driverId);
 
     const refreshed = await this.findBookingWithRelations(
       booking.id,
@@ -281,7 +291,6 @@ export class AutoDispatchService {
     });
 
     if (!booking) return;
-
     if (booking.status !== 'OFFERED') return;
 
     const currentDriverId = booking.driverId ?? null;
@@ -379,15 +388,12 @@ export class AutoDispatchService {
           } [${driverId}]`,
         );
 
-        await this.prisma.booking.update({
-          where: { id: booking.id },
-          data: {
-            status: 'BOOKED',
-            driverId: null,
-          },
+        await this.clearBookingDriverAndRelease({
+          bookingId: booking.id,
+          companyId: booking.companyId,
+          driverId,
+          nextBookingStatus: 'BOOKED',
         });
-
-        await this.releaseDriverIfSafe(driverId);
 
         const refreshed = await this.findBookingWithRelations(
           booking.id,
@@ -439,7 +445,13 @@ export class AutoDispatchService {
     return Array.from(ids);
   }
 
-  private async isDriverDispatchable(driverId: string, companyId: string) {
+  private async isDriverDispatchable(
+    driverId: string,
+    companyId: string,
+    options?: {
+      allowCurrentOfferedBookingId?: string;
+    },
+  ): Promise<DispatchCheck> {
     const driver = await this.prisma.driver.findFirst({
       where: { id: driverId, companyId },
       include: { documents: true },
@@ -453,6 +465,36 @@ export class AutoDispatchService {
     }
 
     const blockedReasons: string[] = [];
+
+    if (!['AVAILABLE', 'ONLINE', 'ON_DUTY', 'OFFERED'].includes(driver.status)) {
+      blockedReasons.push(`Driver status is ${driver.status}`);
+    }
+
+    const activeBooking = await this.prisma.booking.findFirst({
+      where: {
+        companyId,
+        driverId: driver.id,
+        status: {
+          in: ['OFFERED', 'ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'],
+        },
+        NOT: options?.allowCurrentOfferedBookingId
+          ? {
+              id: options.allowCurrentOfferedBookingId,
+            }
+          : undefined,
+      },
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+      },
+    });
+
+    if (activeBooking) {
+      blockedReasons.push(
+        `Driver already has active job ${activeBooking.reference ?? activeBooking.id} (${activeBooking.status})`,
+      );
+    }
 
     if (this.isExpired(driver.badgeExpiry)) {
       blockedReasons.push('Taxi badge expired');
@@ -635,61 +677,61 @@ export class AutoDispatchService {
     const scoreBreakdown: string[] = [];
 
     if (input.status === 'AVAILABLE') {
-      score += 50;
-      scoreBreakdown.push('+50 AVAILABLE');
+      score += 60;
+      scoreBreakdown.push('+60 AVAILABLE');
     } else if (input.status === 'ON_DUTY') {
-      score += 40;
-      scoreBreakdown.push('+40 ON_DUTY');
+      score += 50;
+      scoreBreakdown.push('+50 ON_DUTY');
     } else if (input.status === 'ONLINE') {
-      score += 30;
-      scoreBreakdown.push('+30 ONLINE');
+      score += 45;
+      scoreBreakdown.push('+45 ONLINE');
     }
 
     if (input.hasCoordinates) {
-      score += 20;
-      scoreBreakdown.push('+20 GPS_PRESENT');
+      score += 25;
+      scoreBreakdown.push('+25 GPS_PRESENT');
     } else {
-      score -= 25;
-      scoreBreakdown.push('-25 NO_GPS');
+      score -= 50;
+      scoreBreakdown.push('-50 NO_GPS');
     }
 
     const minutesSinceGps = this.getMinutesSince(input.lastLocationAt);
 
     if (minutesSinceGps <= 2) {
-      score += 25;
-      scoreBreakdown.push('+25 GPS_<=2M');
+      score += 30;
+      scoreBreakdown.push('+30 GPS_<=2M');
     } else if (minutesSinceGps <= 5) {
-      score += 15;
-      scoreBreakdown.push('+15 GPS_<=5M');
+      score += 20;
+      scoreBreakdown.push('+20 GPS_<=5M');
     } else if (minutesSinceGps <= 15) {
       score += 5;
       scoreBreakdown.push('+5 GPS_<=15M');
     } else {
-      score -= 20;
-      scoreBreakdown.push('-20 STALE_GPS');
+      score -= 30;
+      scoreBreakdown.push('-30 STALE_GPS');
     }
 
     if (input.distanceMiles !== Number.MAX_SAFE_INTEGER) {
       if (input.distanceMiles <= 1) {
-        score += 35;
-        scoreBreakdown.push('+35 DIST_<=1MI');
+        score += 45;
+        scoreBreakdown.push('+45 DIST_<=1MI');
       } else if (input.distanceMiles <= 3) {
-        score += 25;
-        scoreBreakdown.push('+25 DIST_<=3MI');
+        score += 35;
+        scoreBreakdown.push('+35 DIST_<=3MI');
       } else if (input.distanceMiles <= 5) {
-        score += 15;
-        scoreBreakdown.push('+15 DIST_<=5MI');
+        score += 20;
+        scoreBreakdown.push('+20 DIST_<=5MI');
       } else if (input.distanceMiles <= 10) {
         score += 5;
         scoreBreakdown.push('+5 DIST_<=10MI');
       } else {
-        const penalty = Math.min(30, Math.round(input.distanceMiles));
+        const penalty = Math.min(45, Math.round(input.distanceMiles));
         score -= penalty;
         scoreBreakdown.push(`-${penalty} DIST_FAR`);
       }
     } else {
-      score -= 10;
-      scoreBreakdown.push('-10 DIST_UNKNOWN');
+      score -= 20;
+      scoreBreakdown.push('-20 DIST_UNKNOWN');
     }
 
     return {
@@ -704,6 +746,54 @@ export class AutoDispatchService {
     const diffMs = Date.now() - new Date(value).getTime();
 
     return diffMs / 1000 / 60;
+  }
+
+  private async markNoDriver(
+    bookingId: string,
+    companyId: string,
+    reason: string,
+  ) {
+    await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        status: 'NO_DRIVER',
+        driverId: null,
+      },
+    });
+
+    await this.appendTimeline(
+      bookingId,
+      `AUTO DISPATCH FAILED · ${reason}`,
+    );
+
+    const refreshed = await this.findBookingWithRelations(bookingId, companyId);
+
+    this.realtime.bookingNoDriver?.(refreshed.companyId, {
+      bookingId: refreshed.id,
+      reason,
+    });
+
+    this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
+    this.realtime.bookingUpdated(refreshed.companyId, refreshed);
+
+    return refreshed;
+  }
+
+  private async clearBookingDriverAndRelease(input: {
+    bookingId: string;
+    companyId: string;
+    driverId: string;
+    nextBookingStatus: string;
+  }) {
+    await this.prisma.booking.update({
+      where: { id: input.bookingId },
+      data: {
+        status: input.nextBookingStatus,
+        driverId: null,
+      },
+    });
+
+    await this.releaseDriverIfSafe(input.driverId);
   }
 
   private async appendTimeline(bookingId: string, message: string) {
