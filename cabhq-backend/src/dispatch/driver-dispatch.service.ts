@@ -120,7 +120,7 @@ export class DriverDispatchService {
       where: {
         driverId,
         status: {
-          in: ['COMPLETED', 'CANCELLED'],
+          in: ['COMPLETED', 'CANCELLED', 'NO_SHOW'],
         },
       },
       include: {
@@ -144,10 +144,21 @@ export class DriverDispatchService {
       where: {
         id: input.bookingId,
       },
+      include: {
+        driver: true,
+        company: true,
+        events: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        },
+      },
     });
 
     if (!booking) {
       throw new NotFoundException('Booking not found');
+    }
+
+    if (booking.status !== 'OFFERED') {
+      throw new BadRequestException('This booking is not currently offered');
     }
 
     if (booking.driverId !== input.driverId) {
@@ -168,7 +179,7 @@ export class DriverDispatchService {
       };
     }
 
-    await this.autoDispatchService.rejectOffer(
+    const updated = await this.autoDispatchService.rejectOffer(
       booking.id,
       booking.companyId,
       input.driverId,
@@ -177,6 +188,7 @@ export class DriverDispatchService {
     return {
       success: true,
       action: 'REJECT',
+      booking: this.mapBookingForDriverApp(updated),
     };
   }
 
@@ -207,6 +219,21 @@ export class DriverDispatchService {
 
     if (!allowedStatuses.includes(input.status)) {
       throw new BadRequestException('Invalid driver status');
+    }
+
+    const activeJob = await this.prisma.booking.findFirst({
+      where: {
+        driverId: driver.id,
+        status: {
+          in: ['OFFERED', 'ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'],
+        },
+      },
+    });
+
+    if (activeJob && ['ONLINE', 'AVAILABLE', 'ON_DUTY', 'OFF_DUTY'].includes(input.status)) {
+      throw new BadRequestException(
+        'Cannot manually change driver status while they have an active or offered job',
+      );
     }
 
     const updated = await this.prisma.driver.update({
@@ -359,6 +386,11 @@ export class DriverDispatchService {
             phone: booking.driver.phone ?? null,
             email: booking.driver.email ?? null,
             status: booking.driver.status,
+            latitude: booking.driver.latitude ?? null,
+            longitude: booking.driver.longitude ?? null,
+            lastLocationAt: booking.driver.lastLocationAt
+              ? new Date(booking.driver.lastLocationAt).toISOString()
+              : null,
           }
         : null,
       pricing: {
@@ -413,7 +445,9 @@ export class DriverDispatchService {
 
     const offeredAtDate = offeredEvent?.createdAt
       ? new Date(offeredEvent.createdAt)
-      : null;
+      : booking.updatedAt
+        ? new Date(booking.updatedAt)
+        : null;
 
     if (!offeredAtDate || Number.isNaN(offeredAtDate.getTime())) {
       return {
@@ -541,10 +575,14 @@ export class DriverDispatchService {
     ];
 
     const blocked = blockedReasons.length > 0;
+    const status = (driver.status || '').toUpperCase();
+    const onlineStatuses = ['ONLINE', 'AVAILABLE', 'ON_DUTY'];
+    const busyStatuses = ['OFFERED', 'BUSY'];
 
     return {
       id: driver.id,
       name: driver.name,
+      username: driver.username ?? null,
       phone: driver.phone ?? null,
       email: driver.email ?? null,
       pin: driver.pin ?? null,
@@ -565,8 +603,12 @@ export class DriverDispatchService {
       createdAt: driver.createdAt ? driver.createdAt.toISOString() : null,
       vehicle,
       documents,
+      isOnDuty: onlineStatuses.includes(status),
+      isAvailable: !blocked && onlineStatuses.includes(status),
+      isBusy: busyStatuses.includes(status),
       dispatch: {
         assignable: !blocked,
+        available: !blocked && onlineStatuses.includes(status),
         blockedReasons,
       },
       compliance: {
@@ -665,6 +707,7 @@ export class DriverDispatchService {
     return {
       id: vehicle.id,
       reg: vehicle.reg,
+      registration: vehicle.reg,
       make: vehicle.make ?? null,
       model: vehicle.model ?? null,
       colour: vehicle.colour ?? null,
@@ -781,6 +824,7 @@ export class DriverDispatchService {
       );
 
       this.realtime.bookingStatusChanged(companyId, refreshed);
+      this.realtime.bookingUpdated(companyId, refreshed);
       return;
     }
 
@@ -814,6 +858,7 @@ export class DriverDispatchService {
       );
 
       this.realtime.bookingStatusChanged(companyId, refreshed);
+      this.realtime.bookingUpdated(companyId, refreshed);
 
       const mapped = await this.getDriverProfile(freedDriver.id);
       this.realtime.driverUpdated(companyId, mapped);

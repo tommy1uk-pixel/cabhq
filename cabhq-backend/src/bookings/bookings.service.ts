@@ -106,12 +106,13 @@ export class BookingsService {
 
     return Promise.all(
       bookings.map(async (booking) => {
-        const suggestedDrivers =
-          await this.autoDispatchService.getSuggestedDriversForBooking(
-            booking.id,
-            booking.companyId,
-            3,
-          );
+        const suggestedDrivers = this.shouldLoadSuggestedDrivers(booking.status)
+          ? await this.autoDispatchService.getSuggestedDriversForBooking(
+              booking.id,
+              booking.companyId,
+              3,
+            )
+          : [];
 
         return {
           ...booking,
@@ -331,10 +332,14 @@ export class BookingsService {
   async updateBooking(input: UpdateBookingInput) {
     const booking = await this.mustFindBooking(input.bookingId, input.companyId);
 
-    if (['COMPLETED', 'CANCELLED'].includes(booking.status)) {
+    if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(booking.status)) {
       throw new BadRequestException(
-        'Cannot edit a completed or cancelled booking',
+        'Cannot edit a completed, cancelled or no-show booking',
       );
+    }
+
+    if (booking.status === 'OFFERED') {
+      await this.autoDispatchService.cancelActiveOffer(booking.id);
     }
 
     const updateData: Record<string, unknown> = {};
@@ -486,9 +491,9 @@ export class BookingsService {
       input.companyId,
     );
 
-    if (['COMPLETED', 'CANCELLED'].includes(booking.status)) {
+    if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(booking.status)) {
       throw new BadRequestException(
-        'Cannot assign a driver to a completed or cancelled booking',
+        'Cannot assign a driver to a completed, cancelled or no-show booking',
       );
     }
 
@@ -497,8 +502,8 @@ export class BookingsService {
     const previousDriverId = booking.driverId ?? null;
     const previousDriverName = booking.driver?.name ?? null;
 
-    if (booking.driverId && booking.driverId !== driver.id) {
-      await this.releaseDriverIfSafe(booking.driverId);
+    if (previousDriverId && previousDriverId !== driver.id) {
+      await this.releaseDriverIfSafe(previousDriverId);
     }
 
     await this.prisma.booking.update({
@@ -509,7 +514,7 @@ export class BookingsService {
       },
     });
 
-    await this.prisma.driver.update({
+    const updatedDriver = await this.prisma.driver.update({
       where: { id: driver.id },
       data: {
         status: 'BUSY',
@@ -532,7 +537,9 @@ export class BookingsService {
     );
 
     this.realtime.bookingAssigned(refreshed.companyId, refreshed);
+    this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
     this.realtime.bookingUpdated(refreshed.companyId, refreshed);
+    this.realtime.driverUpdated(updatedDriver.companyId, updatedDriver);
 
     return refreshed;
   }
@@ -548,9 +555,9 @@ export class BookingsService {
       throw new BadRequestException('Booking has no assigned driver');
     }
 
-    if (['COMPLETED', 'CANCELLED'].includes(booking.status)) {
+    if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(booking.status)) {
       throw new BadRequestException(
-        'Cannot unassign a completed or cancelled booking',
+        'Cannot unassign a completed, cancelled or no-show booking',
       );
     }
 
@@ -597,6 +604,8 @@ export class BookingsService {
 
     await this.autoDispatchService.cancelActiveOffer(booking.id);
 
+    const previousDriverId = booking.driverId ?? null;
+
     await this.prisma.booking.update({
       where: { id: booking.id },
       data: {
@@ -605,8 +614,8 @@ export class BookingsService {
       },
     });
 
-    if (booking.driverId) {
-      await this.releaseDriverIfSafe(booking.driverId);
+    if (previousDriverId) {
+      await this.releaseDriverIfSafe(previousDriverId);
     }
 
     await this.appendTimeline(
@@ -632,15 +641,17 @@ export class BookingsService {
       throw new BadRequestException('Status is required');
     }
 
-    if (booking.status === 'CANCELLED' && input.status !== 'CANCELLED') {
+    const nextStatus = input.status.toUpperCase();
+
+    if (booking.status === 'CANCELLED' && nextStatus !== 'CANCELLED') {
       throw new BadRequestException('Cannot change status of a cancelled booking');
     }
 
-    if (booking.status === 'COMPLETED' && input.status !== 'COMPLETED') {
+    if (booking.status === 'COMPLETED' && nextStatus !== 'COMPLETED') {
       throw new BadRequestException('Cannot change status of a completed booking');
     }
 
-    if (input.status === 'CANCELLED') {
+    if (nextStatus === 'CANCELLED') {
       return this.cancelBooking({
         bookingId: booking.id,
         companyId: booking.companyId,
@@ -648,18 +659,26 @@ export class BookingsService {
       });
     }
 
+    if (nextStatus === 'NO_SHOW') {
+      return this.noShowBooking(booking.id, booking.companyId);
+    }
+
+    this.validateStatusTransition(booking.status, nextStatus);
+
     await this.prisma.booking.update({
       where: { id: booking.id },
-      data: { status: input.status },
+      data: { status: nextStatus },
     });
 
     await this.appendTimeline(
       booking.id,
-      this.timelineMessage.statusChanged(booking.status, input.status),
+      this.timelineMessage.statusChanged(booking.status, nextStatus),
     );
 
-    if (booking.driverId && input.status === 'COMPLETED') {
-      await this.releaseDriverIfSafe(booking.driverId);
+    let updatedDriver: any = null;
+
+    if (booking.driverId && nextStatus === 'COMPLETED') {
+      updatedDriver = await this.releaseDriverIfSafe(booking.driverId);
     }
 
     const refreshed = await this.findBookingWithRelations(
@@ -669,6 +688,47 @@ export class BookingsService {
 
     this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
     this.realtime.bookingUpdated(refreshed.companyId, refreshed);
+
+    if (updatedDriver) {
+      this.realtime.driverUpdated(updatedDriver.companyId, updatedDriver);
+    }
+
+    return refreshed;
+  }
+
+  private async noShowBooking(bookingId: string, companyId: string) {
+    const booking = await this.mustFindBooking(bookingId, companyId);
+    const previousDriverId = booking.driverId ?? null;
+
+    await this.autoDispatchService.cancelActiveOffer(booking.id);
+
+    await this.prisma.booking.update({
+      where: { id: booking.id },
+      data: {
+        status: 'NO_SHOW',
+        driverId: null,
+      },
+    });
+
+    let updatedDriver: any = null;
+
+    if (previousDriverId) {
+      updatedDriver = await this.releaseDriverIfSafe(previousDriverId);
+    }
+
+    await this.appendTimeline(booking.id, 'BOOKING NO SHOW');
+
+    const refreshed = await this.findBookingWithRelations(
+      booking.id,
+      booking.companyId,
+    );
+
+    this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
+    this.realtime.bookingUpdated(refreshed.companyId, refreshed);
+
+    if (updatedDriver) {
+      this.realtime.driverUpdated(updatedDriver.companyId, updatedDriver);
+    }
 
     return refreshed;
   }
@@ -695,6 +755,12 @@ export class BookingsService {
     };
   }
 
+  private shouldLoadSuggestedDrivers(status: string) {
+    return ['BOOKED', 'NO_DRIVER', 'OFFERED'].includes(
+      (status || '').toUpperCase(),
+    );
+  }
+
   private async releaseDriverIfSafe(driverId: string) {
     const activeBooking = await this.prisma.booking.findFirst({
       where: {
@@ -705,9 +771,9 @@ export class BookingsService {
       },
     });
 
-    if (activeBooking) return;
+    if (activeBooking) return null;
 
-    await this.prisma.driver.update({
+    return this.prisma.driver.update({
       where: { id: driverId },
       data: { status: 'AVAILABLE' },
     });
@@ -747,6 +813,30 @@ export class BookingsService {
     }
 
     const blockedReasons: string[] = [];
+
+    if (!['ONLINE', 'AVAILABLE', 'ON_DUTY'].includes(driver.status)) {
+      blockedReasons.push(`Driver status is ${driver.status}`);
+    }
+
+    const activeBooking = await this.prisma.booking.findFirst({
+      where: {
+        driverId: driver.id,
+        status: {
+          in: ['OFFERED', 'ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'],
+        },
+      },
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+      },
+    });
+
+    if (activeBooking) {
+      blockedReasons.push(
+        `Driver already has active job ${activeBooking.reference ?? activeBooking.id} (${activeBooking.status})`,
+      );
+    }
 
     if (this.isExpired(driver.badgeExpiry)) {
       blockedReasons.push('Taxi badge has expired');
@@ -834,6 +924,29 @@ export class BookingsService {
       blockedReasons,
       vehicle,
     };
+  }
+
+  private validateStatusTransition(currentStatus: string, nextStatus: string) {
+    const current = (currentStatus || '').toUpperCase();
+    const next = (nextStatus || '').toUpperCase();
+
+    if (current === next) return;
+
+    const allowed: Record<string, string[]> = {
+      BOOKED: ['OFFERED', 'ACCEPTED', 'CANCELLED', 'NO_DRIVER'],
+      NO_DRIVER: ['BOOKED', 'OFFERED', 'ACCEPTED', 'CANCELLED'],
+      OFFERED: ['BOOKED', 'ACCEPTED', 'CANCELLED', 'NO_DRIVER'],
+      ACCEPTED: ['EN_ROUTE', 'ARRIVED', 'CANCELLED', 'NO_SHOW'],
+      EN_ROUTE: ['ARRIVED', 'CANCELLED', 'NO_SHOW'],
+      ARRIVED: ['ON_JOB', 'CANCELLED', 'NO_SHOW'],
+      ON_JOB: ['COMPLETED'],
+    };
+
+    const allowedNext = allowed[current] ?? [];
+
+    if (!allowedNext.includes(next)) {
+      throw new BadRequestException(`Invalid booking status change: ${current} -> ${next}`);
+    }
   }
 
   private isExpired(value?: Date | null) {
