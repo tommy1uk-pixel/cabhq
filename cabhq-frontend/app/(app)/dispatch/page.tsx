@@ -46,6 +46,7 @@ type Vehicle = {
 
 type DriverDispatchState = {
   assignable: boolean;
+  available?: boolean;
   blockedReasons: string[];
 };
 
@@ -55,6 +56,7 @@ type Driver = {
   name?: string;
   isOnDuty?: boolean;
   isAvailable?: boolean;
+  isBusy?: boolean;
   status?: string;
   latitude?: number | null;
   longitude?: number | null;
@@ -71,6 +73,7 @@ type DriverSuggestion = {
   status: string;
   distanceMiles?: number | null;
   score?: number | null;
+  scoreBreakdown?: string[];
   lastLocationAt?: string | null;
   vehicle?: Vehicle;
 };
@@ -80,6 +83,15 @@ type Account = {
   name: string;
   code?: string | null;
   status?: string;
+};
+
+type BookingOfferMeta = {
+  isActive?: boolean;
+  timeoutSeconds?: number;
+  offeredAt?: string | null;
+  expiresAt?: string | null;
+  secondsRemaining?: number;
+  expired?: boolean;
 };
 
 type Booking = {
@@ -106,7 +118,10 @@ type Booking = {
   dropoffLatitude?: number | null;
   dropoffLongitude?: number | null;
   suggestedDrivers?: DriverSuggestion[];
+  events?: TimelineEvent[];
+  offer?: BookingOfferMeta;
   createdAt?: string;
+  updatedAt?: string;
 };
 
 type TimelineEvent = {
@@ -172,6 +187,8 @@ type SocketDriverLocationPayload = {
   speed?: number | null;
   lastLocationAt?: string | null;
 };
+
+const OFFER_TIMEOUT_SECONDS = 20;
 
 const initialForm: BookingFormState = {
   customerName: '',
@@ -283,8 +300,16 @@ function statusTone(status?: string) {
     return 'border-red-500/25 bg-red-500/10 text-red-300';
   }
 
-  if (normalized === 'BOOKED' || normalized === 'OFFERED') {
-    return 'border-amber-500/25 bg-amber-500/10 text-amber-300';
+  if (normalized === 'NO_DRIVER') {
+    return 'border-red-500/25 bg-red-500/10 text-red-200';
+  }
+
+  if (normalized === 'OFFERED') {
+    return 'border-amber-400/40 bg-amber-500/15 text-amber-200';
+  }
+
+  if (normalized === 'BOOKED') {
+    return 'border-yellow-500/25 bg-yellow-500/10 text-yellow-200';
   }
 
   if (
@@ -300,6 +325,14 @@ function statusTone(status?: string) {
 
 function bookingRowTone(status?: string) {
   const normalized = (status || '').toUpperCase();
+
+  if (normalized === 'OFFERED') {
+    return 'border-amber-400/40 bg-amber-500/[0.08] shadow-[0_0_30px_rgba(245,158,11,0.12)]';
+  }
+
+  if (normalized === 'NO_DRIVER') {
+    return 'border-red-500/25 bg-red-500/[0.07]';
+  }
 
   if (normalized === 'COMPLETED') {
     return 'border-emerald-500/15 bg-emerald-500/[0.05]';
@@ -326,6 +359,20 @@ function accountTone(hasAccount: boolean) {
     : 'border-slate-500/25 bg-slate-500/10 text-slate-300';
 }
 
+function driverStatusTone(driver: Driver | DriverSuggestion) {
+  const status = (driver.status || '').toUpperCase();
+
+  if (['AVAILABLE', 'ONLINE', 'ON_DUTY'].includes(status)) {
+    return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300';
+  }
+
+  if (['OFFERED', 'BUSY', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'].includes(status)) {
+    return 'border-amber-500/25 bg-amber-500/10 text-amber-300';
+  }
+
+  return 'border-slate-500/25 bg-slate-500/10 text-slate-300';
+}
+
 function isCompleted(status?: string) {
   return ['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(
     (status || '').toUpperCase(),
@@ -344,10 +391,116 @@ function isDriverDispatchReady(driver: Driver) {
   }
 
   return (
+    driver.dispatch?.available === true ||
     driver.isAvailable === true ||
     driver.isOnDuty === true ||
     ['ONLINE', 'AVAILABLE', 'ON_DUTY'].includes(status)
   );
+}
+
+function getGpsAgeSeconds(value?: string | null, now = Date.now()) {
+  if (!value) return Number.MAX_SAFE_INTEGER;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return Number.MAX_SAFE_INTEGER;
+
+  return Math.max(0, Math.round((now - date.getTime()) / 1000));
+}
+
+function formatGpsAge(value?: string | null, now = Date.now()) {
+  const seconds = getGpsAgeSeconds(value, now);
+
+  if (seconds === Number.MAX_SAFE_INTEGER) return 'No GPS';
+  if (seconds < 60) return `${seconds}s ago`;
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ago`;
+}
+
+function getOfferInfo(booking: Booking, now = Date.now()) {
+  const status = (booking.status || '').toUpperCase();
+
+  if (status !== 'OFFERED') {
+    return {
+      active: false,
+      secondsRemaining: 0,
+      expired: false,
+      label: '—',
+    };
+  }
+
+  if (booking.offer?.expiresAt) {
+    const expiresAt = new Date(booking.offer.expiresAt).getTime();
+    const secondsRemaining = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+
+    return {
+      active: true,
+      secondsRemaining,
+      expired: secondsRemaining <= 0,
+      label: `${secondsRemaining}s`,
+    };
+  }
+
+  if (booking.offer?.secondsRemaining != null) {
+    const secondsRemaining = Math.max(0, booking.offer.secondsRemaining);
+
+    return {
+      active: true,
+      secondsRemaining,
+      expired: secondsRemaining <= 0,
+      label: `${secondsRemaining}s`,
+    };
+  }
+
+  const events = booking.events ?? [];
+  const offeredEvent = [...events]
+    .reverse()
+    .find((event) =>
+      typeof event.message === 'string' &&
+      event.message.startsWith('AUTO DISPATCH OFFERED'),
+    );
+
+  const offeredAt = offeredEvent?.createdAt
+    ? new Date(offeredEvent.createdAt).getTime()
+    : booking.updatedAt
+      ? new Date(booking.updatedAt).getTime()
+      : null;
+
+  if (!offeredAt || Number.isNaN(offeredAt)) {
+    return {
+      active: true,
+      secondsRemaining: OFFER_TIMEOUT_SECONDS,
+      expired: false,
+      label: `${OFFER_TIMEOUT_SECONDS}s`,
+    };
+  }
+
+  const expiresAt = offeredAt + OFFER_TIMEOUT_SECONDS * 1000;
+  const secondsRemaining = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+
+  return {
+    active: true,
+    secondsRemaining,
+    expired: secondsRemaining <= 0,
+    label: `${secondsRemaining}s`,
+  };
+}
+
+function getCurrentJobLabel(booking: Booking) {
+  const status = (booking.status || '').toUpperCase();
+
+  if (status === 'OFFERED') return 'Waiting for driver response';
+  if (status === 'ACCEPTED') return 'Accepted by driver';
+  if (status === 'EN_ROUTE') return 'Driver en route';
+  if (status === 'ARRIVED') return 'Driver arrived';
+  if (status === 'ON_JOB') return 'Passenger on board';
+  if (status === 'NO_DRIVER') return 'No driver accepted';
+  if (status === 'BOOKED') return 'Ready to dispatch';
+
+  return status.replace(/_/g, ' ');
 }
 
 export default function DispatchPage() {
@@ -379,11 +532,20 @@ export default function DispatchPage() {
     useState<((color: string, label: string) => DivIcon) | null>(null);
   const [form, setForm] = useState<BookingFormState>(initialForm);
   const [search, setSearch] = useState('');
+  const [now, setNow] = useState(() => Date.now());
 
   const mapRef = useRef<LeafletMap | null>(null);
 
   const token =
     typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -397,8 +559,14 @@ export default function DispatchPage() {
         const status = (driver.status || '').toUpperCase();
         const available = isDriverDispatchReady(driver);
         const busy =
-          status === 'BUSY' || status === 'ON_JOB' || status === 'EN_ROUTE';
+          status === 'BUSY' ||
+          status === 'ON_JOB' ||
+          status === 'EN_ROUTE' ||
+          status === 'ARRIVED' ||
+          status === 'OFFERED';
         const blocked = !available && !busy;
+        const gpsAge = getGpsAgeSeconds(driver.lastLocationAt);
+        const staleGps = gpsAge > 60;
 
         const color = blocked
           ? '#ef4444'
@@ -412,16 +580,17 @@ export default function DispatchPage() {
           className: '',
           html: `
             <div style="
-              width: 18px;
-              height: 18px;
+              width: 22px;
+              height: 22px;
               border-radius: 9999px;
               background: ${color};
               border: 3px solid white;
-              box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
+              box-shadow: 0 0 0 2px rgba(0,0,0,0.35), 0 0 22px ${color};
+              opacity: ${staleGps ? '0.55' : '1'};
             "></div>
           `,
-          iconSize: [18, 18],
-          iconAnchor: [9, 9],
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
         });
       });
 
@@ -430,8 +599,8 @@ export default function DispatchPage() {
           className: '',
           html: `
             <div style="
-              min-width: 28px;
-              height: 28px;
+              min-width: 30px;
+              height: 30px;
               border-radius: 9999px;
               background: ${color};
               color: white;
@@ -440,13 +609,13 @@ export default function DispatchPage() {
               align-items: center;
               justify-content: center;
               font-size: 11px;
-              font-weight: 700;
-              box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
-              padding: 0 6px;
+              font-weight: 800;
+              box-shadow: 0 0 0 2px rgba(0,0,0,0.35), 0 0 18px ${color};
+              padding: 0 7px;
             ">${label}</div>
           `,
-          iconSize: [28, 28],
-          iconAnchor: [14, 14],
+          iconSize: [30, 30],
+          iconAnchor: [15, 15],
         }),
       );
     }
@@ -723,7 +892,7 @@ export default function DispatchPage() {
     const interval = window.setInterval(() => {
       void loadDrivers(false);
       void loadBookings();
-    }, 15000);
+    }, 10000);
 
     return () => window.clearInterval(interval);
   }, [loadDrivers, loadBookings]);
@@ -739,18 +908,21 @@ export default function DispatchPage() {
     const handleBookingCreated = (payload: SocketBookingPayload) => {
       if (payload?.booking) {
         syncBooking(payload.booking);
+        void loadBookings();
       }
     };
 
     const handleBookingUpdated = (payload: SocketBookingPayload) => {
       if (payload?.booking) {
         syncBooking(payload.booking);
+        void loadBookings();
       }
     };
 
     const handleDriverUpdated = (payload: SocketDriverPayload) => {
       if (payload?.driver) {
         syncDriver(payload.driver);
+        void loadDrivers(false);
       }
     };
 
@@ -795,7 +967,14 @@ export default function DispatchPage() {
 
       closeSocket();
     };
-  }, [token, syncBooking, syncDriver, syncDriverLocation]);
+  }, [
+    token,
+    syncBooking,
+    syncDriver,
+    syncDriverLocation,
+    loadBookings,
+    loadDrivers,
+  ]);
 
   async function fetchRoute(
     from: LatLngTuple | null,
@@ -1094,6 +1273,9 @@ export default function DispatchPage() {
     return {
       bookings: bookings.length,
       live: bookings.filter((booking) => isLive(booking.status)).length,
+      offered: bookings.filter(
+        (booking) => (booking.status || '').toUpperCase() === 'OFFERED',
+      ).length,
       completed: bookings.filter(
         (booking) => (booking.status || '').toUpperCase() === 'COMPLETED',
       ).length,
@@ -1110,10 +1292,23 @@ export default function DispatchPage() {
     const q = search.trim().toLowerCase();
 
     const ordered = [...bookings].sort((a, b) => {
-      const aLive = isLive(a.status) ? 0 : 1;
-      const bLive = isLive(b.status) ? 0 : 1;
+      const statusOrder: Record<string, number> = {
+        OFFERED: 0,
+        ACCEPTED: 1,
+        EN_ROUTE: 2,
+        ARRIVED: 3,
+        ON_JOB: 4,
+        BOOKED: 5,
+        NO_DRIVER: 6,
+        COMPLETED: 7,
+        CANCELLED: 8,
+        NO_SHOW: 9,
+      };
 
-      if (aLive !== bLive) return aLive - bLive;
+      const aStatus = statusOrder[(a.status || '').toUpperCase()] ?? 20;
+      const bStatus = statusOrder[(b.status || '').toUpperCase()] ?? 20;
+
+      if (aStatus !== bStatus) return aStatus - bStatus;
 
       const aTime = new Date(
         getPickupTimeLabel(a) || a.createdAt || 0,
@@ -1170,8 +1365,7 @@ export default function DispatchPage() {
             </h1>
 
             <p className="mt-2 text-sm text-white/55">
-              Live bookings, quick booking entry, driver map and dispatch
-              control.
+              Live bookings, driver map, offer timers and dispatch control.
             </p>
           </div>
 
@@ -1192,9 +1386,10 @@ export default function DispatchPage() {
           </div>
         </div>
 
-        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-7">
+        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-8">
           <Card label="Bookings" value={stats.bookings} hint="Total jobs" />
           <Card label="Live Jobs" value={stats.live} hint="Dispatch active" />
+          <Card label="Offered" value={stats.offered} hint="Awaiting driver" urgent={stats.offered > 0} />
           <Card label="Completed" value={stats.completed} hint="Finished jobs" />
           <Card label="Drivers" value={stats.drivers} hint="Driver records" />
           <Card label="Available" value={stats.available} hint="Dispatch ready" />
@@ -1202,7 +1397,7 @@ export default function DispatchPage() {
           <Card
             label="Account Jobs"
             value={stats.accountLinked}
-            hint="Linked to accounts"
+            hint="Linked accounts"
           />
         </section>
 
@@ -1495,7 +1690,7 @@ export default function DispatchPage() {
                       icon={driverIconFactory(driver)}
                     >
                       <Popup>
-                        <div className="min-w-[180px] text-black">
+                        <div className="min-w-[190px] text-black">
                           <div className="font-bold">
                             {getDriverName(driver)}
                           </div>
@@ -1509,7 +1704,7 @@ export default function DispatchPage() {
                           </div>
 
                           <div className="mt-2 text-xs text-gray-600">
-                            GPS: {formatDateTime(driver.lastLocationAt)}
+                            GPS: {formatGpsAge(driver.lastLocationAt, now)}
                           </div>
                         </div>
                       </Popup>
@@ -1522,7 +1717,7 @@ export default function DispatchPage() {
                     icon={driverIconFactory(selectedDriver)}
                   >
                     <Popup>
-                      <div className="min-w-[180px] text-black">
+                      <div className="min-w-[190px] text-black">
                         <div className="font-bold">
                           Assigned Driver: {getDriverName(selectedDriver)}
                         </div>
@@ -1536,6 +1731,10 @@ export default function DispatchPage() {
 
                         <div className="mt-1 text-sm">
                           {getVehicleLabel(selectedDriver.vehicle ?? null)}
+                        </div>
+
+                        <div className="mt-2 text-xs text-gray-600">
+                          GPS: {formatGpsAge(selectedDriver.lastLocationAt, now)}
                         </div>
                       </div>
                     </Popup>
@@ -1649,6 +1848,7 @@ export default function DispatchPage() {
           emptyLabel="No live bookings found."
           assigningKey={assigningKey}
           autoDispatchingId={autoDispatchingId}
+          now={now}
           onAssignDriver={assignDriver}
           onAutoDispatch={autoDispatch}
           onOpenBooking={openBookingDrawer}
@@ -1664,6 +1864,7 @@ export default function DispatchPage() {
             compact
             assigningKey={assigningKey}
             autoDispatchingId={autoDispatchingId}
+            now={now}
             onAssignDriver={assignDriver}
             onAutoDispatch={autoDispatch}
             onOpenBooking={openBookingDrawer}
@@ -1680,6 +1881,7 @@ export default function DispatchPage() {
             autoDispatchingId={autoDispatchingId}
             statusBusy={statusBusy}
             selectedDriverPosition={selectedDriverPosition}
+            now={now}
             onClose={() => setDrawerOpen(false)}
             onTimeline={() => {
               setTimelineOpen(true);
@@ -1704,6 +1906,26 @@ export default function DispatchPage() {
   );
 }
 
+function OfferCountdown({ booking, now }: { booking: Booking; now: number }) {
+  const offer = getOfferInfo(booking, now);
+
+  if (!offer.active) return null;
+
+  const urgent = offer.secondsRemaining <= 5;
+
+  return (
+    <div
+      className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-black ${
+        urgent
+          ? 'animate-pulse border-red-400/40 bg-red-500/15 text-red-200'
+          : 'border-amber-400/40 bg-amber-500/15 text-amber-200'
+      }`}
+    >
+      Offer: {offer.label}
+    </div>
+  );
+}
+
 function DispatchBoard({
   title,
   loading,
@@ -1712,6 +1934,7 @@ function DispatchBoard({
   compact = false,
   assigningKey,
   autoDispatchingId,
+  now,
   onAssignDriver,
   onAutoDispatch,
   onOpenBooking,
@@ -1724,6 +1947,7 @@ function DispatchBoard({
   compact?: boolean;
   assigningKey: string | null;
   autoDispatchingId: string | null;
+  now: number;
   onAssignDriver: (bookingId: string, driverId: string) => void;
   onAutoDispatch: (bookingId: string) => void;
   onOpenBooking: (booking: Booking) => void;
@@ -1749,18 +1973,23 @@ function DispatchBoard({
       ) : (
         <div className="space-y-3">
           {bookings.map((booking) => {
+            const status = (booking.status || '').toUpperCase();
+            const offered = status === 'OFFERED';
+            const noDriver = status === 'NO_DRIVER';
+            const canDispatch = ['BOOKED', 'NO_DRIVER', 'OFFERED'].includes(status);
+
             return (
               <div
                 key={booking.id}
-                className={`rounded-2xl border px-4 py-4 ${bookingRowTone(
+                className={`rounded-2xl border px-4 py-4 transition ${bookingRowTone(
                   booking.status,
-                )}`}
+                )} ${offered ? 'animate-pulse' : ''}`}
               >
                 <div
                   className={
                     compact
                       ? 'grid gap-3 xl:grid-cols-[130px_130px_1.6fr_160px_150px_140px_auto] xl:items-center'
-                      : 'grid gap-4 xl:grid-cols-[120px_150px_1.6fr_160px_150px_130px_auto] xl:items-center'
+                      : 'grid gap-4 xl:grid-cols-[130px_150px_1.55fr_170px_170px_170px_auto] xl:items-center'
                   }
                 >
                   <div>
@@ -1776,6 +2005,8 @@ function DispatchBoard({
                         {booking.customerName || 'No name'}
                       </div>
                     ) : null}
+
+                    {!compact ? <div className="mt-2"><OfferCountdown booking={booking} now={now} /></div> : null}
                   </div>
 
                   <div>
@@ -1827,16 +2058,19 @@ function DispatchBoard({
                       {(booking.status || 'UNKNOWN').replace(/_/g, ' ')}
                     </span>
 
-                    <div className="text-sm text-white/70">
+                    <div className="text-xs text-white/50">
+                      {getCurrentJobLabel(booking)}
+                    </div>
+
+                    <div className="text-sm text-white/75">
                       {getDriverName(booking.driver)}
                     </div>
                   </div>
 
                   {!compact ? (
                     <div className="space-y-2">
-                      {booking.suggestedDrivers
-                        ?.slice(0, 2)
-                        .map((suggested, index) => {
+                      {booking.suggestedDrivers && booking.suggestedDrivers.length > 0 ? (
+                        booking.suggestedDrivers.slice(0, 2).map((suggested, index) => {
                           const key = `${booking.id}:${suggested.id}`;
 
                           return (
@@ -1845,22 +2079,35 @@ function DispatchBoard({
                               onClick={() =>
                                 onAssignDriver(booking.id, suggested.id)
                               }
-                              disabled={assigningKey === key}
+                              disabled={assigningKey === key || !canDispatch}
                               className="block w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-left text-xs text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
                             >
-                              <div className="font-semibold">
-                                #{index + 1} {suggested.name}
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold">
+                                  #{index + 1} {suggested.name}
+                                </span>
+                                {suggested.score != null ? (
+                                  <span className="rounded-full bg-black/25 px-2 py-0.5 text-[10px] text-emerald-100/80">
+                                    {suggested.score}
+                                  </span>
+                                ) : null}
                               </div>
 
                               <div className="mt-1 text-[11px] text-emerald-100/70">
                                 {formatDistance(suggested.distanceMiles)} •{' '}
+                                {formatGpsAge(suggested.lastLocationAt, now)} •{' '}
                                 {assigningKey === key
                                   ? 'Assigning...'
                                   : 'Assign'}
                               </div>
                             </button>
                           );
-                        })}
+                        })
+                      ) : (
+                        <div className={`rounded-xl border px-3 py-2 text-xs ${noDriver ? 'border-red-500/20 bg-red-500/10 text-red-200' : 'border-white/10 bg-black/20 text-white/40'}`}>
+                          {noDriver ? 'No eligible drivers' : 'No suggestions'}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="text-sm text-white/50">
@@ -1872,10 +2119,10 @@ function DispatchBoard({
                     {!compact ? (
                       <button
                         onClick={() => onAutoDispatch(booking.id)}
-                        disabled={autoDispatchingId === booking.id}
+                        disabled={autoDispatchingId === booking.id || !canDispatch}
                         className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                       >
-                        {autoDispatchingId === booking.id ? 'Running...' : 'Auto'}
+                        {autoDispatchingId === booking.id ? 'Running...' : offered ? 'Re-offer' : 'Auto'}
                       </button>
                     ) : null}
 
@@ -1917,6 +2164,7 @@ function BookingDrawer({
   autoDispatchingId,
   statusBusy,
   selectedDriverPosition,
+  now,
   onClose,
   onTimeline,
   onAutoDispatch,
@@ -1931,6 +2179,7 @@ function BookingDrawer({
   autoDispatchingId: string | null;
   statusBusy: string | null;
   selectedDriverPosition: LatLngTuple | null;
+  now: number;
   onClose: () => void;
   onTimeline: () => void;
   onAutoDispatch: (bookingId: string) => void;
@@ -1940,6 +2189,8 @@ function BookingDrawer({
 }) {
   const availableDrivers = drivers.filter(isDriverDispatchReady);
   const isFinalStatus = isCompleted(booking.status);
+  const status = (booking.status || '').toUpperCase();
+  const canDispatch = ['BOOKED', 'NO_DRIVER', 'OFFERED'].includes(status);
 
   return (
     <div className="fixed inset-0 z-[900] bg-black/70">
@@ -1971,6 +2222,8 @@ function BookingDrawer({
                 >
                   {getAccountLabel(booking)}
                 </span>
+
+                <OfferCountdown booking={booking} now={now} />
               </div>
             </div>
 
@@ -2026,18 +2279,24 @@ function BookingDrawer({
                   : 'Not available'
               }
             />
+            <Detail
+              label="GPS Age"
+              value={formatGpsAge(booking.driver?.lastLocationAt, now)}
+            />
           </DrawerPanel>
 
           <DrawerPanel title="Dispatch Actions">
             <div className="grid gap-3 md:grid-cols-2">
               <button
                 onClick={() => onAutoDispatch(booking.id)}
-                disabled={autoDispatchingId === booking.id || isFinalStatus}
+                disabled={autoDispatchingId === booking.id || isFinalStatus || !canDispatch}
                 className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
               >
                 {autoDispatchingId === booking.id
                   ? 'Running...'
-                  : 'Auto Dispatch'}
+                  : status === 'OFFERED'
+                    ? 'Cancel & Re-offer'
+                    : 'Auto Dispatch'}
               </button>
 
               <button
@@ -2108,13 +2367,18 @@ function BookingDrawer({
                       disabled={assigningKey === key || isFinalStatus}
                       className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-left hover:bg-white/10 disabled:opacity-50"
                     >
-                      <div className="font-semibold text-white">
-                        {getDriverName(driver)}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="font-semibold text-white">
+                          {getDriverName(driver)}
+                        </div>
+
+                        <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${driverStatusTone(driver)}`}>
+                          {(driver.status || 'UNKNOWN').replace(/_/g, ' ')}
+                        </span>
                       </div>
 
                       <div className="mt-1 text-xs text-white/45">
-                        {driver.status || 'UNKNOWN'} ·{' '}
-                        {getVehicleLabel(driver.vehicle ?? null)}
+                        {getVehicleLabel(driver.vehicle ?? null)} · GPS {formatGpsAge(driver.lastLocationAt, now)}
                       </div>
                     </button>
                   );
@@ -2227,13 +2491,21 @@ function Card({
   label,
   value,
   hint,
+  urgent,
 }: {
   label: string;
   value: string | number;
   hint?: string;
+  urgent?: boolean;
 }) {
   return (
-    <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+    <div
+      className={`rounded-3xl border p-5 ${
+        urgent
+          ? 'animate-pulse border-amber-400/30 bg-amber-500/10'
+          : 'border-white/10 bg-white/5'
+      }`}
+    >
       <div className="text-sm text-white/55">{label}</div>
       <div className="mt-3 text-3xl font-bold text-white">{value}</div>
       {hint ? <div className="mt-2 text-xs text-white/35">{hint}</div> : null}
