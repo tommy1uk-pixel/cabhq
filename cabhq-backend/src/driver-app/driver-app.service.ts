@@ -76,14 +76,10 @@ export class DriverAppService {
 
     const driver = driverId
       ? await this.prisma.driver.findUnique({
-          where: {
-            id: driverId,
-          },
+          where: { id: driverId },
         })
       : await this.prisma.driver.findFirst({
-          where: {
-            phone,
-          },
+          where: { phone },
         });
 
     if (!driver) {
@@ -105,6 +101,7 @@ export class DriverAppService {
     const bootstrap = await this.bootstrap(driver.id);
 
     return {
+      token: accessToken,
       accessToken,
       access_token: accessToken,
       driverToken: accessToken,
@@ -182,22 +179,108 @@ export class DriverAppService {
   async updateDriverStatus(input: UpdateDriverStatusInput) {
     await this.ensureDriver(input.driverId);
 
-    return this.driverDispatchService.updateDriverStatus({
+    const result = await this.driverDispatchService.updateDriverStatus({
       driverId: input.driverId,
       status: input.status,
     });
+
+    return {
+      success: true,
+      driver: result,
+      bootstrap: await this.bootstrap(input.driverId),
+    };
   }
 
   async updateLocation(input: UpdateDriverLocationInput) {
-    await this.ensureDriver(input.driverId);
+    const driver = await this.ensureDriver(input.driverId);
 
-    return this.driverDispatchService.updateLocation({
-      driverId: input.driverId,
-      latitude: input.latitude,
-      longitude: input.longitude,
-      heading: input.heading ?? null,
-      speed: input.speed ?? null,
+    const latitude = Number(input.latitude);
+    const longitude = Number(input.longitude);
+
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+      throw new BadRequestException('Invalid latitude');
+    }
+
+    if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+      throw new BadRequestException('Invalid longitude');
+    }
+
+    const heading =
+      input.heading === null || input.heading === undefined
+        ? null
+        : Number.isFinite(Number(input.heading))
+          ? Number(input.heading)
+          : null;
+
+    const speed =
+      input.speed === null || input.speed === undefined
+        ? null
+        : Number.isFinite(Number(input.speed))
+          ? Number(input.speed)
+          : null;
+
+    const updatedDriver = await this.prisma.driver.update({
+      where: {
+        id: driver.id,
+      },
+      data: {
+        latitude,
+        longitude,
+        heading,
+        speed,
+        lastLocationAt: new Date(),
+      },
+      include: {
+        vehicle: true,
+      },
     });
+
+    const payload = {
+      id: updatedDriver.id,
+      companyId: updatedDriver.companyId,
+      name: updatedDriver.name,
+      phone: updatedDriver.phone ?? null,
+      status: updatedDriver.status,
+      latitude: updatedDriver.latitude ?? null,
+      longitude: updatedDriver.longitude ?? null,
+      heading: updatedDriver.heading ?? null,
+      speed: updatedDriver.speed ?? null,
+      lastLocationAt: updatedDriver.lastLocationAt ?? null,
+      vehicle: updatedDriver.vehicle
+        ? {
+            id: updatedDriver.vehicle.id,
+            reg: updatedDriver.vehicle.reg ?? null,
+            plateNumber: updatedDriver.vehicle.plateNumber ?? null,
+            make: updatedDriver.vehicle.make ?? null,
+            model: updatedDriver.vehicle.model ?? null,
+            colour: updatedDriver.vehicle.colour ?? null,
+          }
+        : null,
+    };
+
+    this.realtime.driverLocation(updatedDriver.companyId, {
+      driverId: updatedDriver.id,
+      latitude,
+      longitude,
+      heading,
+      speed,
+      lastLocationAt: updatedDriver.lastLocationAt?.toISOString(),
+    });
+
+    this.realtime.driverUpdated(updatedDriver.companyId, payload);
+
+    return {
+      success: true,
+      driver: payload,
+      location: {
+        latitude,
+        longitude,
+        heading,
+        speed,
+        lastLocationAt: updatedDriver.lastLocationAt,
+      },
+      bootstrap: await this.bootstrap(driver.id),
+    };
   }
 
   async markJobStatus(input: MarkJobStatusInput) {
@@ -230,12 +313,8 @@ export class DriverAppService {
     this.validateDriverStatusTransition(booking.status, input.nextStatus);
 
     await this.prisma.booking.update({
-      where: {
-        id: booking.id,
-      },
-      data: {
-        status: input.nextStatus,
-      },
+      where: { id: booking.id },
+      data: { status: input.nextStatus },
     });
 
     await this.prisma.bookingEvent.create({
@@ -247,21 +326,13 @@ export class DriverAppService {
 
     if (input.nextStatus === 'COMPLETED') {
       await this.prisma.driver.update({
-        where: {
-          id: input.driverId,
-        },
-        data: {
-          status: 'AVAILABLE',
-        },
+        where: { id: input.driverId },
+        data: { status: 'AVAILABLE' },
       });
     } else if (['EN_ROUTE', 'ARRIVED', 'ON_JOB'].includes(input.nextStatus)) {
       await this.prisma.driver.update({
-        where: {
-          id: input.driverId,
-        },
-        data: {
-          status: 'BUSY',
-        },
+        where: { id: input.driverId },
+        data: { status: 'BUSY' },
       });
     }
 
@@ -285,6 +356,7 @@ export class DriverAppService {
     const updatedDriver = await this.driverDispatchService.getDriverProfile(
       input.driverId,
     );
+
     this.realtime.driverUpdated(refreshed.companyId, updatedDriver);
 
     return {
@@ -324,17 +396,14 @@ export class DriverAppService {
     });
 
     await this.prisma.driver.update({
-      where: {
-        id: driver.id,
-      },
-      data: {
-        status: statusToSet,
-      },
+      where: { id: driver.id },
+      data: { status: statusToSet },
     });
 
     const updatedDriver = await this.driverDispatchService.getDriverProfile(
       driver.id,
     );
+
     this.realtime.driverUpdated(driver.companyId, updatedDriver);
 
     return {
@@ -380,9 +449,7 @@ export class DriverAppService {
     const statusToSet = input.endStatus ?? 'OFF_DUTY';
 
     await this.prisma.driverShift.update({
-      where: {
-        id: activeShift.id,
-      },
+      where: { id: activeShift.id },
       data: {
         endedAt: new Date(),
         endStatus: statusToSet,
@@ -391,17 +458,14 @@ export class DriverAppService {
     });
 
     await this.prisma.driver.update({
-      where: {
-        id: driver.id,
-      },
-      data: {
-        status: statusToSet,
-      },
+      where: { id: driver.id },
+      data: { status: statusToSet },
     });
 
     const updatedDriver = await this.driverDispatchService.getDriverProfile(
       driver.id,
     );
+
     this.realtime.driverUpdated(driver.companyId, updatedDriver);
 
     return {
@@ -439,12 +503,8 @@ export class DriverAppService {
     await this.ensureDriver(driverId);
 
     const shifts = await this.prisma.driverShift.findMany({
-      where: {
-        driverId,
-      },
-      orderBy: {
-        startedAt: 'desc',
-      },
+      where: { driverId },
+      orderBy: { startedAt: 'desc' },
       take: 30,
     });
 
@@ -457,9 +517,7 @@ export class DriverAppService {
 
   private async mapShiftWithSummary(shiftId: string) {
     const shift = await this.prisma.driverShift.findUnique({
-      where: {
-        id: shiftId,
-      },
+      where: { id: shiftId },
     });
 
     if (!shift) {
@@ -511,7 +569,7 @@ export class DriverAppService {
 
     const durationMinutes = Math.max(
       0,
-      Math.round((shiftEnd.getTime() - shift.startedAt.getTime()) / (1000 * 60)),
+      Math.round((shiftEnd.getTime() - shift.startedAt.getTime()) / 60000),
     );
 
     return {
@@ -575,9 +633,7 @@ export class DriverAppService {
 
   private async ensureDriver(driverId: string) {
     const driver = await this.prisma.driver.findUnique({
-      where: {
-        id: driverId,
-      },
+      where: { id: driverId },
     });
 
     if (!driver) {
