@@ -290,7 +290,7 @@ export default function JobDetailsPage() {
                       <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/45">
                         <span>{formatDateTime(job.pickupAt)}</span>
                         <span>{job.driverName || 'Unassigned'}</span>
-                        <span>{formatCurrency(job.quotedPrice)}</span>
+                        <span>{formatCurrency(getBookingPrice(job))}</span>
                       </div>
                     </div>
                   );

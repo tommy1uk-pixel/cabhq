@@ -246,7 +246,7 @@ export default function JobsCalendarPage() {
 
                       <div className="mt-2 flex flex-wrap gap-4 text-xs text-white/45">
                         <span>Driver: {job.driverName || 'Unassigned'}</span>
-                        <span>Fare: {formatCurrency(job.quotedPrice)}</span>
+                        <span>Fare: {formatCurrency(getBookingPrice(job))}</span>
                       </div>
 
                       {job.notes ? (
