@@ -129,6 +129,77 @@ export class BookingsService {
     );
   }
 
+  async publicTracking(reference: string) {
+    const booking = await this.prisma.booking.findFirst({
+      where: {
+        reference,
+      },
+      include: {
+        driver: {
+          include: {
+            vehicle: true,
+          },
+        },
+        company: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        events: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 20,
+        },
+      },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    return {
+      reference: booking.reference,
+      status: booking.status,
+      pickup: booking.pickup,
+      dropoff: booking.dropoff,
+      pickupTime: booking.pickupTime,
+      quotedPrice: booking.quotedPrice,
+      pricingMode: booking.pricingMode,
+      company: booking.company
+        ? {
+            id: booking.company.id,
+            name: booking.company.name,
+          }
+        : null,
+      driver: booking.driver
+        ? {
+            id: booking.driver.id,
+            name: booking.driver.name,
+            phone: booking.driver.phone ?? null,
+            latitude: booking.driver.latitude ?? null,
+            longitude: booking.driver.longitude ?? null,
+            heading: booking.driver.heading ?? null,
+            speed: booking.driver.speed ?? null,
+            lastLocationAt: booking.driver.lastLocationAt ?? null,
+            vehicle: booking.driver.vehicle
+              ? {
+                  reg: booking.driver.vehicle.reg ?? null,
+                  plateNumber: booking.driver.vehicle.plateNumber ?? null,
+                  make: booking.driver.vehicle.make ?? null,
+                  model: booking.driver.vehicle.model ?? null,
+                  colour: booking.driver.vehicle.colour ?? null,
+                }
+              : null,
+          }
+        : null,
+      timeline: booking.events.map((event) => ({
+        id: event.id,
+        message: event.message,
+        createdAt: event.createdAt,
+      })),
+    };
+  }
+
   async timeline(input: { bookingId: string; companyId: string }) {
     const booking = await this.prisma.booking.findFirst({
       where: {
@@ -945,7 +1016,9 @@ export class BookingsService {
     const allowedNext = allowed[current] ?? [];
 
     if (!allowedNext.includes(next)) {
-      throw new BadRequestException(`Invalid booking status change: ${current} -> ${next}`);
+      throw new BadRequestException(
+        `Invalid booking status change: ${current} -> ${next}`,
+      );
     }
   }
 
