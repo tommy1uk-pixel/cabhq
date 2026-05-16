@@ -207,6 +207,8 @@ export default function AddressAutofillInputInner({
         );
       }
 
+      onChangeValue(resolvedLabel);
+
       onSelectAddress({
         label: resolvedLabel,
         lat: coords.lat,
@@ -214,8 +216,6 @@ export default function AddressAutofillInputInner({
         postcode: selected?.postcode ?? null,
         placeName: selected?.line1 ?? item.address,
       });
-
-      onChangeValue(resolvedLabel);
 
       setItems([]);
       setOpen(false);
