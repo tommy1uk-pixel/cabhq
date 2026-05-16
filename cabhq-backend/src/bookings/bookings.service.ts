@@ -132,7 +132,7 @@ export class BookingsService {
   async publicTracking(reference: string) {
     const booking = await this.prisma.booking.findFirst({
       where: {
-        reference,
+        reference: reference.trim(),
       },
       include: {
         driver: {
@@ -162,6 +162,10 @@ export class BookingsService {
       status: booking.status,
       pickup: booking.pickup,
       dropoff: booking.dropoff,
+      pickupLat: booking.pickupLat ?? null,
+      pickupLng: booking.pickupLng ?? null,
+      dropoffLat: booking.dropoffLat ?? null,
+      dropoffLng: booking.dropoffLng ?? null,
       pickupTime: booking.pickupTime,
       quotedPrice: booking.quotedPrice,
       pricingMode: booking.pricingMode,
