@@ -129,31 +129,6 @@ const AIRPORTS = [
   },
 ];
 
-const LOCAL_KNOWN_PLACES = [
-  {
-    id: 'LOCAL:THE_OAK_DT117XL',
-    address: 'The Oak, Lady Baden Powell Way, Blandford Forum, DT11 7XL',
-    line1: 'The Oak',
-    line2: 'Lady Baden Powell Way',
-    line3: null,
-    town: 'Blandford Forum',
-    county: 'Dorset',
-    postcode: 'DT11 7XL',
-    latitude: 50.86933,
-    longitude: -2.15511,
-    keywords: [
-      'the oak',
-      'the oak lady baden powell way',
-      'lady baden powell way',
-      'dt11 7xl',
-      'dt117xl',
-      'the oak blandford',
-      'the oak blandford forum',
-      'the oak pimperne',
-    ],
-  },
-];
-
 @Injectable()
 export class LocationsService {
   private readonly retrieveCache = new Map<string, RetrievedAddress>();
@@ -165,24 +140,6 @@ export class LocationsService {
 
     const cleanQuery = this.cleanSearchQuery(query);
     const queryNorm = cleanQuery.toLowerCase();
-
-    const localResults = LOCAL_KNOWN_PLACES.filter((place) =>
-      place.keywords.some((keyword) => {
-        const normalisedKeyword = this.normalise(keyword);
-        const normalisedQuery = this.normalise(cleanQuery);
-
-        return (
-          normalisedKeyword.includes(normalisedQuery) ||
-          normalisedQuery.includes(normalisedKeyword)
-        );
-      }),
-    ).map((place) => ({
-      id: place.id,
-      address: place.address,
-      latitude: place.latitude,
-      longitude: place.longitude,
-      type: 'LOCAL_PLACE',
-    }));
 
     const airportResults = AIRPORTS.filter((airport) =>
       airport.keywords.some(
@@ -199,7 +156,7 @@ export class LocationsService {
     const apiKey = process.env.POSTCODER_API_KEY;
 
     if (!apiKey) {
-      return [...localResults, ...airportResults];
+      return airportResults;
     }
 
     const url =
@@ -213,9 +170,7 @@ export class LocationsService {
     const text = await response.text();
 
     if (!response.ok) {
-      if (localResults.length > 0 || airportResults.length > 0) {
-        return [...localResults, ...airportResults];
-      }
+      if (airportResults.length > 0) return airportResults;
 
       throw new Error(
         `Postcoder failed: ${response.status} ${response.statusText} - ${text}`,
@@ -224,15 +179,17 @@ export class LocationsService {
 
     const data = JSON.parse(text);
 
-    const postcoderResults = (data || []).map((item: PostcoderSuggestion) => ({
-      id: item.id,
-      address: item.summaryline || item.summary || '',
-      latitude: null,
-      longitude: null,
-      type: item.type,
-    }));
+    const postcoderResults = (Array.isArray(data) ? data : []).map(
+      (item: PostcoderSuggestion) => ({
+        id: item.id,
+        address: item.summaryline || item.summary || '',
+        latitude: null,
+        longitude: null,
+        type: item.type,
+      }),
+    );
 
-    return [...localResults, ...airportResults, ...postcoderResults];
+    return [...airportResults, ...postcoderResults];
   }
 
   async retrievePostcoderAddress(id: string) {
@@ -241,24 +198,6 @@ export class LocationsService {
     }
 
     const cleanId = id.trim();
-
-    const localPlace = LOCAL_KNOWN_PLACES.find((item) => item.id === cleanId);
-
-    if (localPlace) {
-      return {
-        id: localPlace.id,
-        address: localPlace.address,
-        line1: localPlace.line1,
-        line2: localPlace.line2,
-        line3: localPlace.line3,
-        town: localPlace.town,
-        county: localPlace.county,
-        postcode: localPlace.postcode,
-        latitude: localPlace.latitude,
-        longitude: localPlace.longitude,
-        raw: localPlace,
-      };
-    }
 
     const airport = AIRPORTS.find((item) => item.id === cleanId);
 
@@ -279,7 +218,6 @@ export class LocationsService {
     }
 
     const cached = this.retrieveCache.get(cleanId);
-
     if (cached) return cached;
 
     const apiKey = process.env.POSTCODER_API_KEY;
@@ -309,39 +247,17 @@ export class LocationsService {
     const data = JSON.parse(text);
     const address = Array.isArray(data) ? data[0] : data;
 
-    const fullAddress = [
-      address.addressline1,
-      address.addressline2,
-      address.addressline3,
-      address.posttown,
-      address.postcode,
-    ]
-      .filter(Boolean)
-      .join(', ');
+    const mapped = this.mapPostcoderAddress(cleanId, address);
 
-    const result: RetrievedAddress = {
-      id: cleanId,
-      address: fullAddress,
-      line1: address.addressline1 || null,
-      line2: address.addressline2 || null,
-      line3: address.addressline3 || null,
-      town: address.posttown || null,
-      county: address.county || null,
-      postcode: address.postcode || null,
-      latitude: this.toNumberOrNull(address.latitude),
-      longitude: this.toNumberOrNull(address.longitude),
-      raw: address,
-    };
-
-    if (result.latitude === null || result.longitude === null) {
-      const fallbackCoords = await this.geocodeAddress(fullAddress);
-      result.latitude = fallbackCoords.latitude;
-      result.longitude = fallbackCoords.longitude;
+    if (mapped.latitude === null || mapped.longitude === null) {
+      const fallbackCoords = await this.geocodeAddress(mapped.address);
+      mapped.latitude = fallbackCoords.latitude;
+      mapped.longitude = fallbackCoords.longitude;
     }
 
-    this.retrieveCache.set(cleanId, result);
+    this.retrieveCache.set(cleanId, mapped);
 
-    return result;
+    return mapped;
   }
 
   async geocodeAddress(address: string) {
@@ -351,15 +267,6 @@ export class LocationsService {
       return {
         latitude: null,
         longitude: null,
-      };
-    }
-
-    const localPlace = this.findLocalKnownPlace(cleanAddress);
-
-    if (localPlace) {
-      return {
-        latitude: localPlace.latitude,
-        longitude: localPlace.longitude,
       };
     }
 
@@ -434,6 +341,107 @@ export class LocationsService {
     };
   }
 
+  private mapPostcoderAddress(id: string, address: any): RetrievedAddress {
+    const line1 = this.firstText([
+      address.addressline1,
+      address.address_line_1,
+      address.line1,
+      address.line_1,
+      address.summaryline,
+      address.summary,
+      address.organisation,
+      address.organisationname,
+      address.organisation_name,
+      address.buildingname,
+      address.building_name,
+      address.premise,
+    ]);
+
+    const line2 = this.firstText([
+      address.addressline2,
+      address.address_line_2,
+      address.line2,
+      address.line_2,
+      address.street,
+      address.thoroughfare,
+      address.dependentstreet,
+      address.dependent_street,
+    ]);
+
+    const line3 = this.firstText([
+      address.addressline3,
+      address.address_line_3,
+      address.line3,
+      address.line_3,
+      address.dependentlocality,
+      address.dependent_locality,
+      address.locality,
+    ]);
+
+    const town = this.firstText([
+      address.posttown,
+      address.post_town,
+      address.town,
+      address.city,
+    ]);
+
+    const county = this.firstText([address.county, address.traditional_county]);
+
+    const postcode = this.firstText([
+      address.postcode,
+      address.post_code,
+      address.postalcode,
+      address.postal_code,
+    ]);
+
+    const fullAddressFromSummary = this.firstText([
+      address.summaryline,
+      address.summary,
+    ]);
+
+    const fullAddressFromParts = [
+      line1,
+      line2,
+      line3,
+      town,
+      county,
+      postcode,
+    ]
+      .filter(Boolean)
+      .join(', ');
+
+    const fullAddress =
+      fullAddressFromParts.length >= fullAddressFromSummary.length
+        ? fullAddressFromParts
+        : fullAddressFromSummary;
+
+    return {
+      id,
+      address: fullAddress,
+      line1: line1 || null,
+      line2: line2 || null,
+      line3: line3 || null,
+      town: town || null,
+      county: county || null,
+      postcode: postcode || null,
+      latitude: this.toNumberOrNull(
+        address.latitude ??
+          address.lat ??
+          address.geo?.lat ??
+          address.location?.lat,
+      ),
+      longitude: this.toNumberOrNull(
+        address.longitude ??
+          address.lng ??
+          address.lon ??
+          address.geo?.lng ??
+          address.geo?.lon ??
+          address.location?.lng,
+      ),
+      raw: address,
+    };
+  }
+
   private async geocodeWithPostcoder(address: string) {
     const apiKey = process.env.POSTCODER_API_KEY;
 
@@ -474,22 +482,21 @@ export class LocationsService {
         };
       }
 
-      const normalisedAddress = this.normalise(address);
       const normalisedPostcode = postcode
         ? this.normalisePostcode(postcode)
         : null;
 
       const bestSuggestion =
         suggestions.find((suggestion) => {
-          const summary = this.normalise(
-            suggestion.summaryline || suggestion.summary || '',
-          );
+          const summary = suggestion.summaryline || suggestion.summary || '';
 
           if (normalisedPostcode) {
-            return this.normalisePostcode(summary).includes(normalisedPostcode);
+            return this
+              .normalisePostcode(summary)
+              .includes(normalisedPostcode);
           }
 
-          return summary.includes(normalisedAddress);
+          return this.normalise(summary).includes(this.normalise(address));
         }) || suggestions[0];
 
       if (!bestSuggestion?.id) {
@@ -509,18 +516,6 @@ export class LocationsService {
           latitude: null,
           longitude: null,
         };
-      }
-
-      if (postcode && retrieved.postcode) {
-        const requestedPostcode = this.normalisePostcode(postcode);
-        const returnedPostcode = this.normalisePostcode(retrieved.postcode);
-
-        if (!returnedPostcode.includes(requestedPostcode)) {
-          return {
-            latitude: null,
-            longitude: null,
-          };
-        }
       }
 
       return {
@@ -568,8 +563,7 @@ export class LocationsService {
       }
 
       const data = (await response.json()) as MapboxGeocodeResponse;
-      const feature = data.features?.[0];
-      const center = feature?.center;
+      const center = data.features?.[0]?.center;
 
       if (!center) {
         return {
@@ -600,21 +594,6 @@ export class LocationsService {
     }
   }
 
-  private findLocalKnownPlace(address: string) {
-    const normalisedAddress = this.normalise(address);
-
-    return LOCAL_KNOWN_PLACES.find((item) =>
-      item.keywords.some((keyword) => {
-        const normalisedKeyword = this.normalise(keyword);
-
-        return (
-          normalisedAddress.includes(normalisedKeyword) ||
-          normalisedKeyword.includes(normalisedAddress)
-        );
-      }),
-    );
-  }
-
   private findAirport(address: string) {
     const normalisedAddress = this.normalise(address);
 
@@ -632,6 +611,16 @@ export class LocationsService {
 
   private cleanSearchQuery(value: string) {
     return value.trim().replace(/\s+/g, ' ');
+  }
+
+  private firstText(values: unknown[]) {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+
+    return '';
   }
 
   private extractPostcode(value: string) {
