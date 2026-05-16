@@ -1,17 +1,17 @@
 import { Controller, Get, Query } from '@nestjs/common';
-import { MapboxService } from './mapbox.service';
+import { LocationsService } from '../locations/locations.service';
 
 @Controller('mapbox')
 export class MapboxController {
-  constructor(private readonly mapboxService: MapboxService) {}
+  constructor(private readonly locationsService: LocationsService) {}
 
   @Get('search')
   async search(@Query('q') q: string) {
-    return this.mapboxService.search(q);
+    return this.locationsService.searchMapbox(q);
   }
 
   @Get('retrieve')
   async retrieve(@Query('id') id: string) {
-    return this.mapboxService.retrieve(id);
+    return this.locationsService.retrievePostcoderAddress(id);
   }
 }
