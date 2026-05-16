@@ -26,13 +26,7 @@ export class DriverAppController {
   constructor(private readonly driverAppService: DriverAppService) {}
 
   @Post('login')
-  async login(
-    @Body()
-    body: {
-      driverId: string;
-      pin: string;
-    },
-  ) {
+  async login(@Body() body: { driverId?: string; phone?: string; pin: string }) {
     return this.driverAppService.login(body);
   }
 
@@ -70,11 +64,7 @@ export class DriverAppController {
   @Post('me/offer/respond')
   async respondToOffer(
     @Req() req: DriverAppRequest,
-    @Body()
-    body: {
-      bookingId: string;
-      action: 'ACCEPT' | 'REJECT';
-    },
+    @Body() body: { bookingId: string; action: 'ACCEPT' | 'REJECT' },
   ) {
     return this.driverAppService.respondToOffer({
       driverId: req.user.driverId,
@@ -146,8 +136,21 @@ export class DriverAppController {
   }
 
   @UseGuards(DriverAppAuthGuard)
+  @Post('me/jobs/:bookingId/on-job')
+  async markOnJob(
+    @Req() req: DriverAppRequest,
+    @Param('bookingId') bookingId: string,
+  ) {
+    return this.driverAppService.markJobStatus({
+      driverId: req.user.driverId,
+      bookingId,
+      nextStatus: 'ON_JOB',
+    });
+  }
+
+  @UseGuards(DriverAppAuthGuard)
   @Post('me/jobs/:bookingId/start')
-  async startJob(
+  async startJobAlias(
     @Req() req: DriverAppRequest,
     @Param('bookingId') bookingId: string,
   ) {
@@ -168,6 +171,19 @@ export class DriverAppController {
       driverId: req.user.driverId,
       bookingId,
       nextStatus: 'COMPLETED',
+    });
+  }
+
+  @UseGuards(DriverAppAuthGuard)
+  @Post('me/jobs/:bookingId/no-show')
+  async noShowJob(
+    @Req() req: DriverAppRequest,
+    @Param('bookingId') bookingId: string,
+  ) {
+    return this.driverAppService.markJobStatus({
+      driverId: req.user.driverId,
+      bookingId,
+      nextStatus: 'NO_SHOW',
     });
   }
 

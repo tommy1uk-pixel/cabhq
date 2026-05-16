@@ -37,7 +37,7 @@ type UpdateDriverLocationInput = {
 type MarkJobStatusInput = {
   driverId: string;
   bookingId: string;
-  nextStatus: 'EN_ROUTE' | 'ARRIVED' | 'ON_JOB' | 'COMPLETED';
+  nextStatus: 'EN_ROUTE' | 'ARRIVED' | 'ON_JOB' | 'COMPLETED' | 'NO_SHOW';
 };
 
 type StartShiftInput = {
@@ -310,11 +310,20 @@ export class DriverAppService {
       throw new BadRequestException('Booking is already completed');
     }
 
+    if (booking.status === 'NO_SHOW') {
+      throw new BadRequestException('Booking is already marked no-show');
+    }
+
     this.validateDriverStatusTransition(booking.status, input.nextStatus);
+
+    const releaseDriver = ['COMPLETED', 'NO_SHOW'].includes(input.nextStatus);
 
     await this.prisma.booking.update({
       where: { id: booking.id },
-      data: { status: input.nextStatus },
+      data: {
+        status: input.nextStatus,
+        driverId: releaseDriver ? null : booking.driverId,
+      },
     });
 
     await this.prisma.bookingEvent.create({
@@ -324,7 +333,7 @@ export class DriverAppService {
       },
     });
 
-    if (input.nextStatus === 'COMPLETED') {
+    if (releaseDriver) {
       await this.prisma.driver.update({
         where: { id: input.driverId },
         data: { status: 'AVAILABLE' },
@@ -339,7 +348,6 @@ export class DriverAppService {
     const refreshed = await this.prisma.booking.findFirstOrThrow({
       where: {
         id: booking.id,
-        driverId: input.driverId,
       },
       include: {
         driver: true,
@@ -598,18 +606,20 @@ export class DriverAppService {
     currentStatus: string,
     nextStatus: MarkJobStatusInput['nextStatus'],
   ) {
+    const current = (currentStatus || '').toUpperCase();
+
     const transitions: Record<string, MarkJobStatusInput['nextStatus'][]> = {
-      ACCEPTED: ['EN_ROUTE', 'ARRIVED'],
-      EN_ROUTE: ['ARRIVED'],
-      ARRIVED: ['ON_JOB'],
+      ACCEPTED: ['EN_ROUTE', 'ARRIVED', 'NO_SHOW'],
+      EN_ROUTE: ['ARRIVED', 'NO_SHOW'],
+      ARRIVED: ['ON_JOB', 'NO_SHOW'],
       ON_JOB: ['COMPLETED'],
     };
 
-    const allowed = transitions[currentStatus] ?? [];
+    const allowed = transitions[current] ?? [];
 
     if (!allowed.includes(nextStatus)) {
       throw new BadRequestException(
-        `Invalid job status change: ${currentStatus} -> ${nextStatus}`,
+        `Invalid job status change: ${current} -> ${nextStatus}`,
       );
     }
   }
@@ -623,9 +633,11 @@ export class DriverAppService {
       case 'ARRIVED':
         return 'DRIVER UPDATE · driver marked job as ARRIVED';
       case 'ON_JOB':
-        return 'DRIVER UPDATE · driver marked job as ON_JOB';
+        return 'DRIVER UPDATE · driver marked passenger as ON_JOB';
       case 'COMPLETED':
         return 'DRIVER UPDATE · driver marked job as COMPLETED';
+      case 'NO_SHOW':
+        return 'DRIVER UPDATE · driver marked passenger as NO_SHOW';
       default:
         return `DRIVER UPDATE · ${nextStatus}`;
     }
