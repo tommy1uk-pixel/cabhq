@@ -38,15 +38,9 @@ type RetrievedAddress = {
 
 type MapboxGeocodeResponse = {
   features?: Array<{
-    id?: string;
     place_name?: string;
     text?: string;
     center?: [number, number];
-    relevance?: number;
-    context?: Array<{
-      id?: string;
-      text?: string;
-    }>;
   }>;
 };
 
@@ -61,6 +55,23 @@ type MapboxDirectionsResponse = {
 };
 
 const KNOWN_PLACES = [
+  {
+    id: 'PLACE:THE_OAK_DT117XL',
+    address: 'The Oak, Lady Baden Powell Way, Blandford Forum, DT11 7XL',
+    postcode: 'DT11 7XL',
+    latitude: 50.86933,
+    longitude: -2.15511,
+    keywords: [
+      'the oak',
+      'oak',
+      'dt11 7xl',
+      'dt117xl',
+      'lady baden powell way',
+      'the oak lady baden powell way',
+      'the oak blandford',
+      'the oak blandford forum',
+    ],
+  },
   {
     id: 'PLACE:POOLE_HOSPITAL',
     address: 'Poole Hospital NHS Trust, Longfleet Road, Poole, BH15 2JB',
@@ -78,86 +89,16 @@ const KNOWN_PLACES = [
 ];
 
 const AIRPORTS = [
-  {
-    id: 'AIRPORT:HEATHROW',
-    address: 'Heathrow Airport, Hounslow, TW6',
-    postcode: 'TW6',
-    latitude: 51.47,
-    longitude: -0.4543,
-    keywords: ['heathrow', 'lhr', 'heathrow airport'],
-  },
-  {
-    id: 'AIRPORT:GATWICK',
-    address: 'Gatwick Airport, Horley, RH6',
-    postcode: 'RH6',
-    latitude: 51.1537,
-    longitude: -0.1821,
-    keywords: ['gatwick', 'lgw', 'gatwick airport'],
-  },
-  {
-    id: 'AIRPORT:BOURNEMOUTH',
-    address: 'Bournemouth Airport, Christchurch, BH23',
-    postcode: 'BH23',
-    latitude: 50.78,
-    longitude: -1.8425,
-    keywords: ['bournemouth airport', 'bournemouth', 'boh'],
-  },
-  {
-    id: 'AIRPORT:SOUTHAMPTON',
-    address: 'Southampton Airport, Southampton, SO18',
-    postcode: 'SO18',
-    latitude: 50.9503,
-    longitude: -1.3568,
-    keywords: ['southampton airport', 'southampton', 'sou'],
-  },
-  {
-    id: 'AIRPORT:BRISTOL',
-    address: 'Bristol Airport, Bristol, BS48',
-    postcode: 'BS48',
-    latitude: 51.3837,
-    longitude: -2.7191,
-    keywords: ['bristol airport', 'bristol', 'brs'],
-  },
-  {
-    id: 'AIRPORT:EXETER',
-    address: 'Exeter Airport, Exeter, EX5',
-    postcode: 'EX5',
-    latitude: 50.7344,
-    longitude: -3.4139,
-    keywords: ['exeter airport', 'exeter', 'ext'],
-  },
-  {
-    id: 'AIRPORT:LUTON',
-    address: 'London Luton Airport, Luton, LU2',
-    postcode: 'LU2',
-    latitude: 51.8747,
-    longitude: -0.3683,
-    keywords: ['luton airport', 'luton', 'ltn'],
-  },
-  {
-    id: 'AIRPORT:STANSTED',
-    address: 'London Stansted Airport, Stansted, CM24',
-    postcode: 'CM24',
-    latitude: 51.885,
-    longitude: 0.235,
-    keywords: ['stansted airport', 'stansted', 'stn'],
-  },
-  {
-    id: 'AIRPORT:BIRMINGHAM',
-    address: 'Birmingham Airport, Birmingham, B26',
-    postcode: 'B26',
-    latitude: 52.4539,
-    longitude: -1.748,
-    keywords: ['birmingham airport', 'birmingham', 'bhx'],
-  },
-  {
-    id: 'AIRPORT:MANCHESTER',
-    address: 'Manchester Airport, Manchester, M90',
-    postcode: 'M90',
-    latitude: 53.365,
-    longitude: -2.2722,
-    keywords: ['manchester airport', 'manchester', 'man'],
-  },
+  { id: 'AIRPORT:HEATHROW', address: 'Heathrow Airport, Hounslow, TW6', postcode: 'TW6', latitude: 51.47, longitude: -0.4543, keywords: ['heathrow', 'lhr', 'heathrow airport'] },
+  { id: 'AIRPORT:GATWICK', address: 'Gatwick Airport, Horley, RH6', postcode: 'RH6', latitude: 51.1537, longitude: -0.1821, keywords: ['gatwick', 'lgw', 'gatwick airport'] },
+  { id: 'AIRPORT:BOURNEMOUTH', address: 'Bournemouth Airport, Christchurch, BH23', postcode: 'BH23', latitude: 50.78, longitude: -1.8425, keywords: ['bournemouth airport', 'bournemouth', 'boh'] },
+  { id: 'AIRPORT:SOUTHAMPTON', address: 'Southampton Airport, Southampton, SO18', postcode: 'SO18', latitude: 50.9503, longitude: -1.3568, keywords: ['southampton airport', 'southampton', 'sou'] },
+  { id: 'AIRPORT:BRISTOL', address: 'Bristol Airport, Bristol, BS48', postcode: 'BS48', latitude: 51.3837, longitude: -2.7191, keywords: ['bristol airport', 'bristol', 'brs'] },
+  { id: 'AIRPORT:EXETER', address: 'Exeter Airport, Exeter, EX5', postcode: 'EX5', latitude: 50.7344, longitude: -3.4139, keywords: ['exeter airport', 'exeter', 'ext'] },
+  { id: 'AIRPORT:LUTON', address: 'London Luton Airport, Luton, LU2', postcode: 'LU2', latitude: 51.8747, longitude: -0.3683, keywords: ['luton airport', 'luton', 'ltn'] },
+  { id: 'AIRPORT:STANSTED', address: 'London Stansted Airport, Stansted, CM24', postcode: 'CM24', latitude: 51.885, longitude: 0.235, keywords: ['stansted airport', 'stansted', 'stn'] },
+  { id: 'AIRPORT:BIRMINGHAM', address: 'Birmingham Airport, Birmingham, B26', postcode: 'B26', latitude: 52.4539, longitude: -1.748, keywords: ['birmingham airport', 'birmingham', 'bhx'] },
+  { id: 'AIRPORT:MANCHESTER', address: 'Manchester Airport, Manchester, M90', postcode: 'M90', latitude: 53.365, longitude: -2.2722, keywords: ['manchester airport', 'manchester', 'man'] },
 ];
 
 @Injectable()
@@ -170,43 +111,14 @@ export class LocationsService {
     }
 
     const cleanQuery = this.cleanSearchQuery(query);
-    const queryNorm = cleanQuery.toLowerCase();
 
-    const knownPlaceResults: AddressSuggestion[] = KNOWN_PLACES.filter((place) =>
-      place.keywords.some((keyword) => {
-        const normalisedKeyword = this.normalise(keyword);
-        const normalisedQuery = this.normalise(cleanQuery);
-
-        return (
-          normalisedKeyword.includes(normalisedQuery) ||
-          normalisedQuery.includes(normalisedKeyword)
-        );
-      }),
-    ).map((place) => ({
-      id: place.id,
-      address: place.address,
-      latitude: place.latitude,
-      longitude: place.longitude,
-      type: 'KNOWN_PLACE',
-    }));
-
-    const airportResults: AddressSuggestion[] = AIRPORTS.filter((airport) =>
-      airport.keywords.some(
-        (keyword) => keyword.includes(queryNorm) || queryNorm.includes(keyword),
-      ),
-    ).map((airport) => ({
-      id: airport.id,
-      address: airport.address,
-      latitude: airport.latitude,
-      longitude: airport.longitude,
-      type: 'AIRPORT',
-    }));
-
+    const knownPlaceResults = this.findKnownPlaceSuggestions(cleanQuery);
+    const airportResults = this.findAirportSuggestions(cleanQuery);
     const postcoderResults = await this.searchPostcoder(cleanQuery);
 
     const shouldUseMapbox =
       knownPlaceResults.length === 0 &&
-      postcoderResults.length < 5 &&
+      postcoderResults.length < 4 &&
       cleanQuery.length >= 4;
 
     const mapboxResults = shouldUseMapbox
@@ -214,14 +126,13 @@ export class LocationsService {
       : [];
 
     const seen = new Set<string>();
-    const combinedResults: AddressSuggestion[] = [
+
+    return [
       ...knownPlaceResults,
       ...airportResults,
       ...postcoderResults,
       ...mapboxResults,
-    ];
-
-    return combinedResults.filter((item) => {
+    ].filter((item) => {
       const key = this.normalise(item.address);
 
       if (!key || seen.has(key)) return false;
@@ -231,7 +142,7 @@ export class LocationsService {
     });
   }
 
-  async retrievePostcoderAddress(id: string) {
+  async retrievePostcoderAddress(id: string): Promise<RetrievedAddress> {
     if (!id?.trim()) {
       throw new BadRequestException('Address id required');
     }
@@ -245,19 +156,7 @@ export class LocationsService {
     const knownPlace = KNOWN_PLACES.find((item) => item.id === cleanId);
 
     if (knownPlace) {
-      return {
-        id: knownPlace.id,
-        address: knownPlace.address,
-        line1: knownPlace.address,
-        line2: null,
-        line3: null,
-        town: null,
-        county: null,
-        postcode: knownPlace.postcode,
-        latitude: knownPlace.latitude,
-        longitude: knownPlace.longitude,
-        raw: knownPlace,
-      };
+      return this.mapKnownPlace(knownPlace);
     }
 
     const airport = AIRPORTS.find((item) => item.id === cleanId);
@@ -309,6 +208,11 @@ export class LocationsService {
     const address = Array.isArray(data) ? data[0] : data;
 
     const mapped = this.mapPostcoderAddress(cleanId, address);
+    const upgradedKnownPlace = this.findKnownPlace(mapped.address);
+
+    if (upgradedKnownPlace) {
+      return this.mapKnownPlace(upgradedKnownPlace);
+    }
 
     if (mapped.latitude === null || mapped.longitude === null) {
       const fallbackCoords = await this.geocodeWithMapbox(mapped.address);
@@ -325,10 +229,7 @@ export class LocationsService {
     const cleanAddress = this.cleanSearchQuery(address);
 
     if (!cleanAddress) {
-      return {
-        latitude: null,
-        longitude: null,
-      };
+      return { latitude: null, longitude: null };
     }
 
     const knownPlace = this.findKnownPlace(cleanAddress);
@@ -361,10 +262,7 @@ export class LocationsService {
       return mapboxCoords;
     }
 
-    return {
-      latitude: null,
-      longitude: null,
-    };
+    return { latitude: null, longitude: null };
   }
 
   async getRoute(input: RouteInput) {
@@ -432,13 +330,28 @@ export class LocationsService {
       const data = JSON.parse(text);
 
       return (Array.isArray(data) ? data : [])
-        .map((item: PostcoderSuggestion) => ({
-          id: item.id,
-          address: item.summaryline || item.summary || '',
-          latitude: null,
-          longitude: null,
-          type: item.type || 'POSTCODER',
-        }))
+        .map((item: PostcoderSuggestion) => {
+          const address = item.summaryline || item.summary || '';
+          const knownPlace = this.findKnownPlace(address || query);
+
+          if (knownPlace) {
+            return {
+              id: knownPlace.id,
+              address: knownPlace.address,
+              latitude: knownPlace.latitude,
+              longitude: knownPlace.longitude,
+              type: 'KNOWN_PLACE',
+            };
+          }
+
+          return {
+            id: item.id,
+            address,
+            latitude: null,
+            longitude: null,
+            type: item.type || 'POSTCODER',
+          };
+        })
         .filter((item) => item.address.trim().length > 0);
     } catch {
       return [];
@@ -449,34 +362,31 @@ export class LocationsService {
     const results = await this.searchPostcoder(address);
 
     if (results.length === 0) {
+      return { latitude: null, longitude: null };
+    }
+
+    const first = results[0];
+
+    if (first.latitude !== null && first.longitude !== null) {
       return {
-        latitude: null,
-        longitude: null,
+        latitude: first.latitude,
+        longitude: first.longitude,
       };
     }
 
     try {
-      const retrieved = await this.retrievePostcoderAddress(results[0].id);
+      const retrieved = await this.retrievePostcoderAddress(first.id);
 
       const lat = this.toNumberOrNull(retrieved.latitude);
       const lng = this.toNumberOrNull(retrieved.longitude);
 
       if (!this.isValidLatLng(lat, lng)) {
-        return {
-          latitude: null,
-          longitude: null,
-        };
+        return { latitude: null, longitude: null };
       }
 
-      return {
-        latitude: lat,
-        longitude: lng,
-      };
+      return { latitude: lat, longitude: lng };
     } catch {
-      return {
-        latitude: null,
-        longitude: null,
-      };
+      return { latitude: null, longitude: null };
     }
   }
 
@@ -580,6 +490,8 @@ export class LocationsService {
       address.buildingname,
       address.building_name,
       address.premise,
+      address.summaryline,
+      address.summary,
     ]);
 
     const line2 = this.firstText([
@@ -671,10 +583,7 @@ export class LocationsService {
     const token = process.env.MAPBOX_ACCESS_TOKEN;
 
     if (!token) {
-      return {
-        latitude: null,
-        longitude: null,
-      };
+      return { latitude: null, longitude: null };
     }
 
     try {
@@ -690,42 +599,64 @@ export class LocationsService {
       const response = await fetch(url);
 
       if (!response.ok) {
-        return {
-          latitude: null,
-          longitude: null,
-        };
+        return { latitude: null, longitude: null };
       }
 
       const data = (await response.json()) as MapboxGeocodeResponse;
       const center = data.features?.[0]?.center;
 
       if (!center) {
-        return {
-          latitude: null,
-          longitude: null,
-        };
+        return { latitude: null, longitude: null };
       }
 
       const longitude = center[0];
       const latitude = center[1];
 
       if (!this.isValidLatLng(latitude, longitude)) {
-        return {
-          latitude: null,
-          longitude: null,
-        };
+        return { latitude: null, longitude: null };
       }
 
-      return {
-        longitude,
-        latitude,
-      };
+      return { longitude, latitude };
     } catch {
-      return {
-        latitude: null,
-        longitude: null,
-      };
+      return { latitude: null, longitude: null };
     }
+  }
+
+  private findKnownPlaceSuggestions(query: string): AddressSuggestion[] {
+    const normalisedQuery = this.normalise(query);
+
+    return KNOWN_PLACES.filter((item) =>
+      item.keywords.some((keyword) => {
+        const normalisedKeyword = this.normalise(keyword);
+
+        return (
+          normalisedKeyword.includes(normalisedQuery) ||
+          normalisedQuery.includes(normalisedKeyword)
+        );
+      }),
+    ).map((item) => ({
+      id: item.id,
+      address: item.address,
+      latitude: item.latitude,
+      longitude: item.longitude,
+      type: 'KNOWN_PLACE',
+    }));
+  }
+
+  private findAirportSuggestions(query: string): AddressSuggestion[] {
+    const queryNorm = query.toLowerCase();
+
+    return AIRPORTS.filter((airport) =>
+      airport.keywords.some(
+        (keyword) => keyword.includes(queryNorm) || queryNorm.includes(keyword),
+      ),
+    ).map((airport) => ({
+      id: airport.id,
+      address: airport.address,
+      latitude: airport.latitude,
+      longitude: airport.longitude,
+      type: 'AIRPORT',
+    }));
   }
 
   private findKnownPlace(address: string) {
@@ -756,6 +687,22 @@ export class LocationsService {
         );
       }),
     );
+  }
+
+  private mapKnownPlace(place: (typeof KNOWN_PLACES)[number]): RetrievedAddress {
+    return {
+      id: place.id,
+      address: place.address,
+      line1: place.address,
+      line2: null,
+      line3: null,
+      town: null,
+      county: null,
+      postcode: place.postcode,
+      latitude: place.latitude,
+      longitude: place.longitude,
+      raw: place,
+    };
   }
 
   private cleanSearchQuery(value: string) {
