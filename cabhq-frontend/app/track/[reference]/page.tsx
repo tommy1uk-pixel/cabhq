@@ -1,8 +1,18 @@
 'use client';
 
+import 'leaflet/dist/leaflet.css';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import {
+  MapContainer,
+  Marker,
+  Popup,
+  TileLayer,
+  useMap,
+} from 'react-leaflet';
+import L from 'leaflet';
 
 type TrackingData = {
   reference: string;
@@ -64,6 +74,154 @@ function getTrackingReference(raw: unknown) {
   if (Array.isArray(raw)) return decodeURIComponent(raw[0] || '').trim();
   if (typeof raw === 'string') return decodeURIComponent(raw).trim();
   return '';
+}
+
+function makeCarIcon(heading?: number | null) {
+  return L.divIcon({
+    className: '',
+    html: `
+      <div style="
+        width: 46px;
+        height: 46px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #06b6d4, #0f172a);
+        border: 3px solid white;
+        box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transform: rotate(${heading ?? 0}deg);
+      ">
+        <div style="
+          font-size: 24px;
+          line-height: 1;
+          transform: rotate(${-(heading ?? 0)}deg);
+        ">🚕</div>
+      </div>
+    `,
+    iconSize: [46, 46],
+    iconAnchor: [23, 23],
+    popupAnchor: [0, -22],
+  });
+}
+
+function RecenterMap({
+  latitude,
+  longitude,
+}: {
+  latitude: number;
+  longitude: number;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    map.setView([latitude, longitude], map.getZoom() || 15, {
+      animate: true,
+    });
+  }, [latitude, longitude, map]);
+
+  return null;
+}
+
+function LiveDriverMap({
+  data,
+  vehicle,
+}: {
+  data: TrackingData;
+  vehicle: string;
+}) {
+  const latitude = data.driver?.latitude;
+  const longitude = data.driver?.longitude;
+  const heading = data.driver?.heading ?? null;
+
+  const carIcon = useMemo(() => makeCarIcon(heading), [heading]);
+
+  if (latitude == null || longitude == null) {
+    return (
+      <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-6">
+        <h2 className="text-xl font-black">Live map</h2>
+        <p className="mt-3 text-white/60">
+          Waiting for the driver app to send GPS location.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="overflow-hidden rounded-3xl border border-cyan-500/20 bg-[#0b1220]">
+      <div className="flex items-center justify-between gap-4 p-6">
+        <div>
+          <h2 className="text-xl font-black">Live map</h2>
+          <p className="mt-1 text-sm text-white/50">
+            Updates automatically every 10 seconds
+          </p>
+        </div>
+
+        <div className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-emerald-300">
+          GPS Live
+        </div>
+      </div>
+
+      <div className="h-[360px] w-full overflow-hidden bg-black md:h-[430px]">
+        <MapContainer
+          center={[latitude, longitude]}
+          zoom={15}
+          scrollWheelZoom={false}
+          className="h-full w-full"
+        >
+          <TileLayer
+            attribution="&copy; OpenStreetMap contributors"
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+
+          <RecenterMap latitude={latitude} longitude={longitude} />
+
+          <Marker position={[latitude, longitude]} icon={carIcon}>
+            <Popup>
+              <div>
+                <strong>{data.driver?.name || 'Driver'}</strong>
+                <br />
+                {vehicle}
+                <br />
+                Last update: {formatDateTime(data.driver?.lastLocationAt)}
+              </div>
+            </Popup>
+          </Marker>
+        </MapContainer>
+      </div>
+
+      <div className="grid gap-3 p-6 text-sm text-white/60 md:grid-cols-2">
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="text-xs font-black uppercase tracking-[0.18em] text-white/35">
+            Current Coordinates
+          </div>
+          <div className="mt-2 font-bold text-white">
+            {latitude.toFixed(5)}, {longitude.toFixed(5)}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="text-xs font-black uppercase tracking-[0.18em] text-white/35">
+            Last GPS Update
+          </div>
+          <div className="mt-2 font-bold text-white">
+            {formatDateTime(data.driver?.lastLocationAt)}
+          </div>
+        </div>
+      </div>
+
+      <div className="px-6 pb-6">
+        <a
+          href={`https://www.google.com/maps?q=${latitude},${longitude}`}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-5 py-3 text-sm font-bold text-cyan-200"
+        >
+          Open driver location in Google Maps
+        </a>
+      </div>
+    </section>
+  );
 }
 
 export default function TrackingPage() {
@@ -167,7 +325,7 @@ export default function TrackingPage() {
 
   return (
     <main className="min-h-screen bg-[#05070c] px-5 py-8 text-white">
-      <div className="mx-auto max-w-2xl space-y-5">
+      <div className="mx-auto max-w-3xl space-y-5">
         <section className="rounded-3xl border border-cyan-500/20 bg-[#0b1220] p-6">
           <div className="text-xs font-bold uppercase tracking-[0.25em] text-cyan-300">
             CabHQ Live Tracking
@@ -185,6 +343,8 @@ export default function TrackingPage() {
             {statusLabel(data.status)}
           </div>
         </section>
+
+        <LiveDriverMap data={data} vehicle={vehicle} />
 
         <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-6">
           <h2 className="text-xl font-black">Journey</h2>
@@ -245,33 +405,6 @@ export default function TrackingPage() {
             </p>
           )}
         </section>
-
-        {data.driver?.latitude != null && data.driver?.longitude != null ? (
-          <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-6">
-            <h2 className="text-xl font-black">Live location</h2>
-
-            <div className="mt-3 text-sm text-white/50">
-              Latitude: {data.driver.latitude} · Longitude:{' '}
-              {data.driver.longitude}
-            </div>
-
-            <a
-              href={`https://www.google.com/maps?q=${data.driver.latitude},${data.driver.longitude}`}
-              target="_blank"
-              rel="noreferrer"
-              className="mt-4 inline-flex rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-5 py-3 text-sm font-bold text-cyan-200"
-            >
-              Open driver location
-            </a>
-          </section>
-        ) : (
-          <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-6">
-            <h2 className="text-xl font-black">Live location</h2>
-            <p className="mt-3 text-white/60">
-              Waiting for the driver app to send GPS location.
-            </p>
-          </section>
-        )}
       </div>
     </main>
   );
