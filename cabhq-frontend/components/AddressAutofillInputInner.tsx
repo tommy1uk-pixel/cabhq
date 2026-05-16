@@ -66,6 +66,53 @@ function getValidLatLng(
   return { lat, lng };
 }
 
+function buildRetrievedLabel(selected: RetrievedAddress | null) {
+  if (!selected) return '';
+
+  const fromAddress = selected.address?.trim();
+
+  const fromParts = [
+    selected.line1,
+    selected.line2,
+    selected.line3,
+    selected.town,
+    selected.county,
+    selected.postcode,
+  ]
+    .filter(Boolean)
+    .join(', ')
+    .trim();
+
+  if (fromAddress && fromParts) {
+    return fromAddress.length >= fromParts.length ? fromAddress : fromParts;
+  }
+
+  return fromAddress || fromParts || '';
+}
+
+function chooseBestLabel(itemAddress: string, selected: RetrievedAddress | null) {
+  const dropdownLabel = itemAddress.trim();
+  const retrievedLabel = buildRetrievedLabel(selected);
+
+  if (!dropdownLabel) return retrievedLabel;
+  if (!retrievedLabel) return dropdownLabel;
+
+  const dropdownHasPostcode = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(
+    dropdownLabel,
+  );
+
+  const retrievedHasPostcode = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i.test(
+    retrievedLabel,
+  );
+
+  if (dropdownHasPostcode && !retrievedHasPostcode) return dropdownLabel;
+  if (retrievedHasPostcode && !dropdownHasPostcode) return retrievedLabel;
+
+  return dropdownLabel.length >= retrievedLabel.length
+    ? dropdownLabel
+    : retrievedLabel;
+}
+
 async function searchBackendAddresses(query: string): Promise<Suggestion[]> {
   const data = await apiFetch<Suggestion[]>(
     `/mapbox/search?q=${encodeURIComponent(query)}`,
@@ -176,20 +223,7 @@ export default function AddressAutofillInputInner({
         console.warn('Address retrieve failed, using suggestion fallback:', err);
       }
 
-      const resolvedLabel =
-        selected?.address?.trim() ||
-        [
-          selected?.line1,
-          selected?.line2,
-          selected?.line3,
-          selected?.town,
-          selected?.county,
-          selected?.postcode,
-        ]
-          .filter(Boolean)
-          .join(', ')
-          .trim() ||
-        item.address;
+      const resolvedLabel = chooseBestLabel(item.address, selected);
 
       const rawLat = toNumberOrNull(
         selected?.latitude ?? selected?.lat ?? item.latitude ?? item.lat,
