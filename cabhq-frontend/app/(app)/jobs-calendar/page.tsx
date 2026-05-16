@@ -11,18 +11,33 @@ type JobStatus =
   | 'ARRIVED'
   | 'ON_JOB'
   | 'COMPLETED'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  | 'NO_SHOW'
+  | 'NO_DRIVER';
 
 type CalendarJob = {
   id: string;
   reference: string;
-  customerName: string;
-  pickup: string;
-  dropoff: string;
-  pickupAt: string;
+  customerName?: string | null;
+  pickup?: string | null;
+  pickupAddress?: string | null;
+  dropoff?: string | null;
+  dropoffAddress?: string | null;
+  pickupAt?: string | null;
+  pickupTime?: string | null;
   status: JobStatus;
   driverName?: string | null;
+  driver?: {
+    name?: string | null;
+  } | null;
   quotedPrice?: number | null;
+  calculatedFare?: number | null;
+  fare?: number | null;
+  price?: number | null;
+  pricing?: {
+    quotedPrice?: number | null;
+    calculatedFare?: number | null;
+  } | null;
   notes?: string | null;
 };
 
@@ -84,13 +99,46 @@ const initialJobs: CalendarJob[] = [
   },
 ];
 
+function getBookingPrice(job: CalendarJob | null | undefined) {
+  return (
+    job?.quotedPrice ??
+    job?.pricing?.quotedPrice ??
+    job?.calculatedFare ??
+    job?.pricing?.calculatedFare ??
+    job?.fare ??
+    job?.price ??
+    null
+  );
+}
+
+function getPickup(job: CalendarJob) {
+  return job.pickupAddress || job.pickup || '—';
+}
+
+function getDropoff(job: CalendarJob) {
+  return job.dropoffAddress || job.dropoff || '—';
+}
+
+function getPickupAt(job: CalendarJob) {
+  return job.pickupAt || job.pickupTime || '';
+}
+
+function getDriverName(job: CalendarJob) {
+  return job.driverName || job.driver?.name || null;
+}
+
 function formatCurrency(value?: number | null) {
   if (value == null) return '—';
-  return `£${value.toFixed(2)}`;
+  return `£${Number(value).toFixed(2)}`;
 }
 
 function formatDateHeading(date: string) {
   const d = new Date(date);
+
+  if (Number.isNaN(d.getTime())) {
+    return 'Invalid date';
+  }
+
   return d.toLocaleDateString('en-GB', {
     weekday: 'long',
     day: '2-digit',
@@ -98,8 +146,15 @@ function formatDateHeading(date: string) {
   });
 }
 
-function formatTime(value: string) {
+function formatTime(value?: string | null) {
+  if (!value) return '—';
+
   const d = new Date(value);
+
+  if (Number.isNaN(d.getTime())) {
+    return '—';
+  }
+
   return d.toLocaleTimeString('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
@@ -110,12 +165,15 @@ function statusClass(status: JobStatus) {
   if (status === 'COMPLETED') {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   }
-  if (status === 'CANCELLED') {
+
+  if (status === 'CANCELLED' || status === 'NO_SHOW') {
     return 'border-red-500/30 bg-red-500/10 text-red-300';
   }
-  if (status === 'BOOKED' || status === 'OFFERED') {
+
+  if (status === 'BOOKED' || status === 'OFFERED' || status === 'NO_DRIVER') {
     return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   }
+
   return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
 }
 
@@ -126,7 +184,8 @@ export default function JobsCalendarPage() {
 
   const groupedJobs = useMemo(() => {
     const filtered = jobs.filter((job) => {
-      const matchesDate = job.pickupAt.slice(0, 10) === selectedDate;
+      const pickupAt = getPickupAt(job);
+      const matchesDate = pickupAt.slice(0, 10) === selectedDate;
       const q = search.trim().toLowerCase();
 
       if (!matchesDate) return false;
@@ -134,10 +193,10 @@ export default function JobsCalendarPage() {
 
       return [
         job.reference,
-        job.customerName,
-        job.pickup,
-        job.dropoff,
-        job.driverName ?? '',
+        job.customerName ?? '',
+        getPickup(job),
+        getDropoff(job),
+        getDriverName(job) ?? '',
         job.status,
       ]
         .join(' ')
@@ -147,19 +206,25 @@ export default function JobsCalendarPage() {
 
     return filtered.sort(
       (a, b) =>
-        new Date(a.pickupAt).getTime() - new Date(b.pickupAt).getTime(),
+        new Date(getPickupAt(a)).getTime() - new Date(getPickupAt(b)).getTime(),
     );
   }, [jobs, search, selectedDate]);
 
   const stats = useMemo(() => {
-    const dayJobs = jobs.filter((job) => job.pickupAt.slice(0, 10) === selectedDate);
+    const dayJobs = jobs.filter(
+      (job) => getPickupAt(job).slice(0, 10) === selectedDate,
+    );
+
     return {
       total: dayJobs.length,
       live: dayJobs.filter((job) =>
         ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'].includes(job.status),
       ).length,
       booked: dayJobs.filter((job) => job.status === 'BOOKED').length,
-      revenue: dayJobs.reduce((sum, job) => sum + (job.quotedPrice ?? 0), 0),
+      revenue: dayJobs.reduce(
+        (sum, job) => sum + Number(getBookingPrice(job) ?? 0),
+        0,
+      ),
     };
   }, [jobs, selectedDate]);
 
@@ -192,6 +257,7 @@ export default function JobsCalendarPage() {
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="rounded-xl border border-white/10 bg-[#0b1728] px-4 py-3 text-white outline-none"
               />
+
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -222,11 +288,13 @@ export default function JobsCalendarPage() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-xl bg-black/30 px-3 py-1 text-sm font-semibold text-white">
-                          {formatTime(job.pickupAt)}
+                          {formatTime(getPickupAt(job))}
                         </span>
+
                         <span className="text-lg font-bold text-white">
                           {job.reference}
                         </span>
+
                         <span
                           className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(
                             job.status,
@@ -237,20 +305,26 @@ export default function JobsCalendarPage() {
                       </div>
 
                       <p className="mt-3 text-sm font-semibold text-white">
-                        {job.customerName}
+                        {job.customerName || 'No customer name'}
                       </p>
 
                       <p className="mt-2 text-sm text-white/75">
-                        {job.pickup} → {job.dropoff}
+                        {getPickup(job)} → {getDropoff(job)}
                       </p>
 
                       <div className="mt-2 flex flex-wrap gap-4 text-xs text-white/45">
-                        <span>Driver: {job.driverName || 'Unassigned'}</span>
-                        <span>Fare: {formatCurrency(getBookingPrice(job))}</span>
+                        <span>
+                          Driver: {getDriverName(job) || 'Unassigned'}
+                        </span>
+                        <span>
+                          Fare: {formatCurrency(getBookingPrice(job))}
+                        </span>
                       </div>
 
                       {job.notes ? (
-                        <p className="mt-3 text-sm text-white/55">{job.notes}</p>
+                        <p className="mt-3 text-sm text-white/55">
+                          {job.notes}
+                        </p>
                       ) : null}
                     </div>
 
@@ -258,6 +332,7 @@ export default function JobsCalendarPage() {
                       <button className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-500">
                         Open Job
                       </button>
+
                       <button className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white hover:bg-white/10">
                         Reassign
                       </button>
