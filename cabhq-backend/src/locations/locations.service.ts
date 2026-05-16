@@ -31,6 +31,8 @@ type RetrievedAddress = {
 type MapboxGeocodeResponse = {
   features?: Array<{
     center?: [number, number];
+    relevance?: number;
+    place_name?: string;
   }>;
 };
 
@@ -168,9 +170,7 @@ export class LocationsService {
     const text = await response.text();
 
     if (!response.ok) {
-      if (airportResults.length > 0) {
-        return airportResults;
-      }
+      if (airportResults.length > 0) return airportResults;
 
       throw new Error(
         `Postcoder failed: ${response.status} ${response.statusText} - ${text}`,
@@ -217,9 +217,7 @@ export class LocationsService {
 
     const cached = this.retrieveCache.get(cleanId);
 
-    if (cached) {
-      return cached;
-    }
+    if (cached) return cached;
 
     const apiKey = process.env.POSTCODER_API_KEY;
 
@@ -258,8 +256,6 @@ export class LocationsService {
       .filter(Boolean)
       .join(', ');
 
-    const fallbackCoords = await this.geocodeAddress(fullAddress);
-
     const result: RetrievedAddress = {
       id: cleanId,
       address: fullAddress,
@@ -269,12 +265,16 @@ export class LocationsService {
       town: address.posttown || null,
       county: address.county || null,
       postcode: address.postcode || null,
-      latitude: address.latitude ? Number(address.latitude) : fallbackCoords.latitude,
-      longitude: address.longitude
-        ? Number(address.longitude)
-        : fallbackCoords.longitude,
+      latitude: this.toNumberOrNull(address.latitude),
+      longitude: this.toNumberOrNull(address.longitude),
       raw: address,
     };
+
+    if (result.latitude === null || result.longitude === null) {
+      const fallbackCoords = await this.geocodeAddress(fullAddress);
+      result.latitude = fallbackCoords.latitude;
+      result.longitude = fallbackCoords.longitude;
+    }
 
     this.retrieveCache.set(cleanId, result);
 
@@ -291,15 +291,7 @@ export class LocationsService {
       };
     }
 
-    const airport = AIRPORTS.find((item) => {
-      const normalisedAddress = cleanAddress.toLowerCase();
-
-      return item.keywords.some(
-        (keyword) =>
-          normalisedAddress.includes(keyword) ||
-          keyword.includes(normalisedAddress),
-      );
-    });
+    const airport = this.findAirport(cleanAddress);
 
     if (airport) {
       return {
@@ -308,52 +300,22 @@ export class LocationsService {
       };
     }
 
-    const token = process.env.MAPBOX_ACCESS_TOKEN;
+    const postcoderCoords = await this.geocodeWithPostcoder(cleanAddress);
 
-    if (!token) {
-      return {
-        latitude: null,
-        longitude: null,
-      };
+    if (postcoderCoords.latitude !== null && postcoderCoords.longitude !== null) {
+      return postcoderCoords;
     }
 
-    try {
-      const url =
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/` +
-        `${encodeURIComponent(cleanAddress)}.json` +
-        `?access_token=${encodeURIComponent(token)}` +
-        `&country=gb` +
-        `&limit=1`;
+    const mapboxCoords = await this.geocodeWithMapbox(cleanAddress);
 
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        return {
-          latitude: null,
-          longitude: null,
-        };
-      }
-
-      const data = (await response.json()) as MapboxGeocodeResponse;
-      const center = data.features?.[0]?.center;
-
-      if (!center) {
-        return {
-          latitude: null,
-          longitude: null,
-        };
-      }
-
-      return {
-        longitude: center[0],
-        latitude: center[1],
-      };
-    } catch {
-      return {
-        latitude: null,
-        longitude: null,
-      };
+    if (mapboxCoords.latitude !== null && mapboxCoords.longitude !== null) {
+      return mapboxCoords;
     }
+
+    return {
+      latitude: null,
+      longitude: null,
+    };
   }
 
   async getRoute(input: RouteInput) {
@@ -398,5 +360,234 @@ export class LocationsService {
         route.geometry?.coordinates?.map((coord) => [coord[1], coord[0]]) ||
         [],
     };
+  }
+
+  private async geocodeWithPostcoder(address: string) {
+    const apiKey = process.env.POSTCODER_API_KEY;
+
+    if (!apiKey) {
+      return {
+        latitude: null,
+        longitude: null,
+      };
+    }
+
+    try {
+      const postcode = this.extractPostcode(address);
+
+      const searchQuery = postcode || address;
+
+      const searchUrl =
+        `https://ws.postcoder.com/pcw/autocomplete/find` +
+        `?query=${encodeURIComponent(searchQuery)}` +
+        `&country=uk` +
+        `&apikey=${encodeURIComponent(apiKey)}` +
+        `&enablefacets=false`;
+
+      const searchResponse = await fetch(searchUrl);
+      const searchText = await searchResponse.text();
+
+      if (!searchResponse.ok) {
+        return {
+          latitude: null,
+          longitude: null,
+        };
+      }
+
+      const suggestions = JSON.parse(searchText) as PostcoderSuggestion[];
+
+      if (!Array.isArray(suggestions) || suggestions.length === 0) {
+        return {
+          latitude: null,
+          longitude: null,
+        };
+      }
+
+      const normalisedAddress = this.normalise(address);
+      const normalisedPostcode = postcode
+        ? this.normalisePostcode(postcode)
+        : null;
+
+      const bestSuggestion =
+        suggestions.find((suggestion) => {
+          const summary = this.normalise(
+            suggestion.summaryline || suggestion.summary || '',
+          );
+
+          if (normalisedPostcode) {
+            return this.normalisePostcode(summary).includes(normalisedPostcode);
+          }
+
+          return summary.includes(normalisedAddress);
+        }) || suggestions[0];
+
+      if (!bestSuggestion?.id) {
+        return {
+          latitude: null,
+          longitude: null,
+        };
+      }
+
+      const retrieved = await this.retrievePostcoderAddress(bestSuggestion.id);
+
+      const lat = this.toNumberOrNull(retrieved.latitude);
+      const lng = this.toNumberOrNull(retrieved.longitude);
+
+      if (!this.isValidLatLng(lat, lng)) {
+        return {
+          latitude: null,
+          longitude: null,
+        };
+      }
+
+      if (postcode && retrieved.postcode) {
+        const requestedPostcode = this.normalisePostcode(postcode);
+        const returnedPostcode = this.normalisePostcode(retrieved.postcode);
+
+        if (!returnedPostcode.includes(requestedPostcode)) {
+          return {
+            latitude: null,
+            longitude: null,
+          };
+        }
+      }
+
+      return {
+        latitude: lat,
+        longitude: lng,
+      };
+    } catch {
+      return {
+        latitude: null,
+        longitude: null,
+      };
+    }
+  }
+
+  private async geocodeWithMapbox(address: string) {
+    const token = process.env.MAPBOX_ACCESS_TOKEN;
+
+    if (!token) {
+      return {
+        latitude: null,
+        longitude: null,
+      };
+    }
+
+    try {
+      const postcode = this.extractPostcode(address);
+
+      const query = postcode || address;
+
+      const url =
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/` +
+        `${encodeURIComponent(query)}.json` +
+        `?access_token=${encodeURIComponent(token)}` +
+        `&country=gb` +
+        `&limit=1` +
+        `&proximity=-2.1650,50.8570` +
+        `&bbox=-4.2,50.0,-0.7,51.8`;
+
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        return {
+          latitude: null,
+          longitude: null,
+        };
+      }
+
+      const data = (await response.json()) as MapboxGeocodeResponse;
+      const feature = data.features?.[0];
+      const center = feature?.center;
+
+      if (!center) {
+        return {
+          latitude: null,
+          longitude: null,
+        };
+      }
+
+      const longitude = center[0];
+      const latitude = center[1];
+
+      if (!this.isValidLatLng(latitude, longitude)) {
+        return {
+          latitude: null,
+          longitude: null,
+        };
+      }
+
+      return {
+        longitude,
+        latitude,
+      };
+    } catch {
+      return {
+        latitude: null,
+        longitude: null,
+      };
+    }
+  }
+
+  private findAirport(address: string) {
+    const normalisedAddress = this.normalise(address);
+
+    return AIRPORTS.find((item) =>
+      item.keywords.some((keyword) => {
+        const normalisedKeyword = this.normalise(keyword);
+
+        return (
+          normalisedAddress.includes(normalisedKeyword) ||
+          normalisedKeyword.includes(normalisedAddress)
+        );
+      }),
+    );
+  }
+
+  private extractPostcode(value: string) {
+    const match = value
+      .toUpperCase()
+      .match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/);
+
+    return match?.[0] ? this.formatPostcode(match[0]) : null;
+  }
+
+  private formatPostcode(value: string) {
+    const compact = value.toUpperCase().replace(/\s+/g, '');
+
+    if (compact.length <= 3) return compact;
+
+    return `${compact.slice(0, -3)} ${compact.slice(-3)}`;
+  }
+
+  private normalisePostcode(value: string) {
+    return value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+
+  private normalise(value: string) {
+    return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  private toNumberOrNull(value: unknown) {
+    if (value === null || value === undefined || value === '') return null;
+
+    const numberValue =
+      typeof value === 'number' ? value : Number(String(value).trim());
+
+    return Number.isFinite(numberValue) ? numberValue : null;
+  }
+
+  private isValidLatLng(lat: number | null, lng: number | null) {
+    return (
+      lat !== null &&
+      lng !== null &&
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lng >= -180 &&
+      lng <= 180
+    );
   }
 }
