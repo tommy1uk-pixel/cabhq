@@ -45,7 +45,7 @@ type AddressAutofillInputInnerProps = {
   onSelectAddress: (address: SelectedAddress) => void;
 };
 
-function toNumberOrNull(value: unknown) {
+function toNumberOrNull(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
 
   const numberValue =
@@ -54,15 +54,16 @@ function toNumberOrNull(value: unknown) {
   return Number.isFinite(numberValue) ? numberValue : null;
 }
 
-function isValidLatLng(lat: number | null, lng: number | null) {
-  return (
-    lat !== null &&
-    lng !== null &&
-    lat >= -90 &&
-    lat <= 90 &&
-    lng >= -180 &&
-    lng <= 180
-  );
+function getValidLatLng(
+  lat: number | null,
+  lng: number | null,
+): { lat: number; lng: number } | null {
+  if (lat === null || lng === null) return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90) return null;
+  if (lng < -180 || lng > 180) return null;
+
+  return { lat, lng };
 }
 
 async function searchBackendAddresses(query: string): Promise<Suggestion[]> {
@@ -175,7 +176,7 @@ export default function AddressAutofillInputInner({
         console.warn('Address retrieve failed, using suggestion fallback:', err);
       }
 
-      const label =
+      const resolvedLabel =
         selected?.address?.trim() ||
         [
           selected?.line1,
@@ -190,29 +191,31 @@ export default function AddressAutofillInputInner({
           .trim() ||
         item.address;
 
-      const lat = toNumberOrNull(
+      const rawLat = toNumberOrNull(
         selected?.latitude ?? selected?.lat ?? item.latitude ?? item.lat,
       );
 
-      const lng = toNumberOrNull(
+      const rawLng = toNumberOrNull(
         selected?.longitude ?? selected?.lng ?? item.longitude ?? item.lng,
       );
 
-      if (!isValidLatLng(lat, lng)) {
+      const coords = getValidLatLng(rawLat, rawLng);
+
+      if (!coords) {
         throw new Error(
           'Selected address has no GPS coordinates. Please choose another result.',
         );
       }
 
       onSelectAddress({
-        label,
-        lat,
-        lng,
+        label: resolvedLabel,
+        lat: coords.lat,
+        lng: coords.lng,
         postcode: selected?.postcode ?? null,
         placeName: selected?.line1 ?? item.address,
       });
 
-      onChangeValue(label);
+      onChangeValue(resolvedLabel);
 
       setItems([]);
       setOpen(false);
@@ -235,6 +238,7 @@ export default function AddressAutofillInputInner({
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
+
       setHighlightedIndex((prev) => {
         if (prev >= items.length - 1) return 0;
         return prev + 1;
@@ -243,6 +247,7 @@ export default function AddressAutofillInputInner({
 
     if (event.key === 'ArrowUp') {
       event.preventDefault();
+
       setHighlightedIndex((prev) => {
         if (prev <= 0) return items.length - 1;
         return prev - 1;
@@ -306,6 +311,7 @@ export default function AddressAutofillInputInner({
 
             const itemLat = toNumberOrNull(item.latitude ?? item.lat);
             const itemLng = toNumberOrNull(item.longitude ?? item.lng);
+            const itemCoords = getValidLatLng(itemLat, itemLng);
 
             return (
               <button
@@ -325,8 +331,10 @@ export default function AddressAutofillInputInner({
                 </div>
 
                 <div className="mt-1 text-xs text-cyan-300/80">
-                  {isValidLatLng(itemLat, itemLng)
-                    ? `${itemLat.toFixed(5)}, ${itemLng.toFixed(5)}`
+                  {itemCoords
+                    ? `${itemCoords.lat.toFixed(5)}, ${itemCoords.lng.toFixed(
+                        5,
+                      )}`
                     : 'Click to load full address'}
                 </div>
               </button>
