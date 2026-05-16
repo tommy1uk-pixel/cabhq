@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { apiFetch } from '@/lib/api';
 
 type TrackingData = {
   reference: string;
@@ -10,19 +12,32 @@ type TrackingData = {
   pickupTime: string;
   quotedPrice?: number | null;
   pricingMode?: string | null;
+  company?: {
+    id: string;
+    name: string;
+  } | null;
   driver?: {
+    id?: string;
     name?: string | null;
     phone?: string | null;
     latitude?: number | null;
     longitude?: number | null;
+    heading?: number | null;
+    speed?: number | null;
     lastLocationAt?: string | null;
     vehicle?: {
       reg?: string | null;
+      plateNumber?: string | null;
       make?: string | null;
       model?: string | null;
       colour?: string | null;
     } | null;
   } | null;
+  timeline?: Array<{
+    id: string;
+    message: string;
+    createdAt: string;
+  }>;
 };
 
 function formatDateTime(value?: string | null) {
@@ -30,13 +45,12 @@ function formatDateTime(value?: string | null) {
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return '—';
-  }
+  if (Number.isNaN(date.getTime())) return '—';
 
   return date.toLocaleString('en-GB', {
     day: '2-digit',
     month: 'short',
+    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -46,67 +60,51 @@ function statusLabel(status?: string | null) {
   return (status || 'UNKNOWN').replace(/_/g, ' ');
 }
 
-export default function TrackingPage({
-  params,
-}: {
-  params: { reference: string };
-}) {
+function getTrackingReference(raw: unknown) {
+  if (Array.isArray(raw)) return decodeURIComponent(raw[0] || '').trim();
+  if (typeof raw === 'string') return decodeURIComponent(raw).trim();
+  return '';
+}
+
+export default function TrackingPage() {
+  const params = useParams();
+  const reference = getTrackingReference(params?.reference);
+
   const [data, setData] = useState<TrackingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const apiUrl =
-    process.env.NEXT_PUBLIC_API_URL ||
-    'https://cabhq-production.up.railway.app';
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function loadTracking() {
-      try {
-        if (!mounted) return;
-
-        setError('');
-
-        const trackingUrl = `${apiUrl.replace(
-          /\/+$/,
-          '',
-        )}/bookings/track/${encodeURIComponent(params.reference)}`;
-
-        console.log('TRACKING URL:', trackingUrl);
-
-        const response = await fetch(trackingUrl, {
-          method: 'GET',
-          cache: 'no-store',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-
-        const json = await response.json();
-
-        console.log('TRACKING RESPONSE:', json);
-
-        if (!response.ok) {
-          throw new Error(json?.message || 'Tracking unavailable');
-        }
-
-        if (mounted) {
-          setData(json);
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error(err);
-
-        if (mounted) {
-          setError(
-            err instanceof Error ? err.message : 'Tracking unavailable',
-          );
-          setLoading(false);
-        }
-      }
+  const loadTracking = useCallback(async () => {
+    if (!reference) {
+      setError('Missing booking reference');
+      setLoading(false);
+      return;
     }
 
+    try {
+      setError('');
+
+      const tracking = await apiFetch<TrackingData>(
+        `/bookings/track/${encodeURIComponent(reference)}`,
+        {
+          method: 'GET',
+        },
+        {
+          publicRequest: true,
+          suppressAutoClear: true,
+        },
+      );
+
+      setData(tracking);
+      setLoading(false);
+    } catch (err) {
+      setData(null);
+      setError(err instanceof Error ? err.message : 'Tracking unavailable');
+      setLoading(false);
+    }
+  }, [reference]);
+
+  useEffect(() => {
     void loadTracking();
 
     const interval = window.setInterval(() => {
@@ -114,21 +112,18 @@ export default function TrackingPage({
     }, 10000);
 
     return () => {
-      mounted = false;
       window.clearInterval(interval);
     };
-  }, [apiUrl, params.reference]);
+  }, [loadTracking]);
 
   const vehicle = useMemo(() => {
-    if (!data?.driver?.vehicle) {
-      return 'Vehicle details pending';
-    }
+    if (!data?.driver?.vehicle) return 'Vehicle details pending';
 
     return [
       data.driver.vehicle.colour,
       data.driver.vehicle.make,
       data.driver.vehicle.model,
-      data.driver.vehicle.reg,
+      data.driver.vehicle.reg || data.driver.vehicle.plateNumber,
     ]
       .filter(Boolean)
       .join(' ');
@@ -148,13 +143,13 @@ export default function TrackingPage({
     return (
       <main className="min-h-screen bg-[#05070c] px-5 py-10 text-white">
         <div className="mx-auto max-w-xl rounded-3xl border border-red-500/20 bg-red-500/10 p-6">
-          <h1 className="text-2xl font-black">
-            Tracking unavailable
-          </h1>
+          <h1 className="text-2xl font-black">Tracking unavailable</h1>
 
-          <p className="mt-3 text-red-100">
-            {error}
-          </p>
+          <p className="mt-3 text-red-100">{error}</p>
+
+          <div className="mt-5 rounded-2xl border border-white/10 bg-black/20 p-4 text-xs text-white/50">
+            Ref checked: {reference || 'No reference'}
+          </div>
         </div>
       </main>
     );
@@ -178,9 +173,13 @@ export default function TrackingPage({
             CabHQ Live Tracking
           </div>
 
-          <h1 className="mt-3 text-3xl font-black">
-            {data.reference}
-          </h1>
+          <h1 className="mt-3 text-3xl font-black">{data.reference}</h1>
+
+          {data.company?.name ? (
+            <p className="mt-2 text-sm font-semibold text-white/50">
+              {data.company.name}
+            </p>
+          ) : null}
 
           <div className="mt-4 inline-flex rounded-full border border-cyan-500/25 bg-cyan-500/10 px-4 py-2 text-sm font-bold text-cyan-200">
             {statusLabel(data.status)}
@@ -188,36 +187,27 @@ export default function TrackingPage({
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-6">
-          <h2 className="text-xl font-black">
-            Journey
-          </h2>
+          <h2 className="text-xl font-black">Journey</h2>
 
           <div className="mt-5 space-y-4">
             <div>
               <div className="text-xs font-bold uppercase tracking-[0.18em] text-white/40">
                 Pickup
               </div>
-
-              <div className="mt-1 text-lg font-bold">
-                {data.pickup}
-              </div>
+              <div className="mt-1 text-lg font-bold">{data.pickup}</div>
             </div>
 
             <div>
               <div className="text-xs font-bold uppercase tracking-[0.18em] text-white/40">
                 Dropoff
               </div>
-
-              <div className="mt-1 text-lg font-bold">
-                {data.dropoff}
-              </div>
+              <div className="mt-1 text-lg font-bold">{data.dropoff}</div>
             </div>
 
             <div>
               <div className="text-xs font-bold uppercase tracking-[0.18em] text-white/40">
                 Pickup time
               </div>
-
               <div className="mt-1 text-lg font-bold">
                 {formatDateTime(data.pickupTime)}
               </div>
@@ -226,9 +216,7 @@ export default function TrackingPage({
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-6">
-          <h2 className="text-xl font-black">
-            Driver
-          </h2>
+          <h2 className="text-xl font-black">Driver</h2>
 
           {data.driver ? (
             <div className="mt-5 space-y-3">
@@ -236,9 +224,7 @@ export default function TrackingPage({
                 {data.driver.name || 'Driver assigned'}
               </div>
 
-              <div className="text-white/60">
-                {vehicle}
-              </div>
+              <div className="text-white/60">{vehicle}</div>
 
               {data.driver.phone ? (
                 <a
@@ -250,8 +236,7 @@ export default function TrackingPage({
               ) : null}
 
               <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/60">
-                Last GPS update:{' '}
-                {formatDateTime(data.driver.lastLocationAt)}
+                Last GPS update: {formatDateTime(data.driver.lastLocationAt)}
               </div>
             </div>
           ) : (
@@ -261,12 +246,14 @@ export default function TrackingPage({
           )}
         </section>
 
-        {data.driver?.latitude != null &&
-        data.driver?.longitude != null ? (
+        {data.driver?.latitude != null && data.driver?.longitude != null ? (
           <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-6">
-            <h2 className="text-xl font-black">
-              Live location
-            </h2>
+            <h2 className="text-xl font-black">Live location</h2>
+
+            <div className="mt-3 text-sm text-white/50">
+              Latitude: {data.driver.latitude} · Longitude:{' '}
+              {data.driver.longitude}
+            </div>
 
             <a
               href={`https://www.google.com/maps?q=${data.driver.latitude},${data.driver.longitude}`}
@@ -277,7 +264,14 @@ export default function TrackingPage({
               Open driver location
             </a>
           </section>
-        ) : null}
+        ) : (
+          <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-6">
+            <h2 className="text-xl font-black">Live location</h2>
+            <p className="mt-3 text-white/60">
+              Waiting for the driver app to send GPS location.
+            </p>
+          </section>
+        )}
       </div>
     </main>
   );

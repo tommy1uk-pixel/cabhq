@@ -147,6 +147,12 @@ type BookingFormState = {
   pickupLongitude: number | null;
   dropoffLatitude: number | null;
   dropoffLongitude: number | null;
+  airportDirection: string;
+  airportName: string;
+  airportTerminal: string;
+  flightNumber: string;
+  flightTime: string;
+  meetAndGreet: boolean;
 };
 
 type PricingQuote = {
@@ -205,6 +211,12 @@ const initialForm: BookingFormState = {
   pickupLongitude: null,
   dropoffLatitude: null,
   dropoffLongitude: null,
+  airportDirection: '',
+  airportName: '',
+  airportTerminal: '',
+  flightNumber: '',
+  flightTime: '',
+  meetAndGreet: false,
 };
 
 function getDriverName(driver: Driver | null | undefined) {
@@ -489,6 +501,58 @@ function getOfferInfo(booking: Booking, now = Date.now()) {
   };
 }
 
+
+const AIRPORT_OPTIONS = [
+  'Heathrow',
+  'Gatwick',
+  'Bournemouth',
+  'Southampton',
+  'Bristol',
+  'Exeter',
+  'Luton',
+  'Stansted',
+  'Birmingham',
+  'Manchester',
+];
+
+function detectAirportName(value: string) {
+  const normalized = value.toLowerCase();
+
+  return (
+    AIRPORT_OPTIONS.find((airport) =>
+      normalized.includes(airport.toLowerCase()),
+    ) || ''
+  );
+}
+
+function hasAirportKeyword(value: string) {
+  const normalized = value.toLowerCase();
+
+  return (
+    normalized.includes('airport') ||
+    normalized.includes('terminal') ||
+    AIRPORT_OPTIONS.some((airport) =>
+      normalized.includes(airport.toLowerCase()),
+    )
+  );
+}
+
+function buildAirportNotes(form: BookingFormState) {
+  const lines = [
+    'AIRPORT DETAILS',
+    form.airportDirection
+      ? `Journey Type: ${form.airportDirection}`
+      : null,
+    form.airportName ? `Airport: ${form.airportName}` : null,
+    form.airportTerminal ? `Terminal: ${form.airportTerminal}` : null,
+    form.flightNumber ? `Flight Number: ${form.flightNumber}` : null,
+    form.flightTime ? `Flight Time: ${formatDateTime(form.flightTime)}` : null,
+    `Meet & Greet: ${form.meetAndGreet ? 'YES' : 'NO'}`,
+  ].filter(Boolean);
+
+  return lines.join('\n');
+}
+
 function getCurrentJobLabel(booking: Booking) {
   const status = (booking.status || '').toUpperCase();
 
@@ -538,6 +602,11 @@ export default function DispatchPage() {
 
   const token =
     typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+
+  const airportBookingEnabled =
+    hasAirportKeyword(form.pickupAddress) ||
+    hasAirportKeyword(form.dropoffAddress) ||
+    Boolean(form.airportName);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1200,6 +1269,12 @@ export default function DispatchPage() {
         throw new Error('Quoted price must be a valid number');
       }
 
+      const baseNotes = form.notes.trim();
+      const airportNotes = airportBookingEnabled ? buildAirportNotes(form) : '';
+      const finalNotes = [baseNotes, airportNotes]
+        .filter((item) => item.trim().length > 0)
+        .join('\n\n');
+
       const payload = {
         customerName: form.customerName.trim(),
         customerPhone: form.customerPhone.trim() || null,
@@ -1225,7 +1300,7 @@ export default function DispatchPage() {
 
         passengerCount: Number(form.passengerCount) || 1,
         quotedPrice: quotedPriceNumber,
-        notes: form.notes.trim() || null,
+        notes: finalNotes || null,
         autoDispatch: autoDispatchAfterCreate,
       };
 
@@ -1471,14 +1546,20 @@ export default function DispatchPage() {
                       quotedPrice: '',
                     }))
                   }
-                  onSelectAddress={(address: SelectedAddress) =>
+                  onSelectAddress={(address: SelectedAddress) => {
+                    const detectedAirport = detectAirportName(address.label);
+
                     setForm((prev) => ({
                       ...prev,
                       pickupAddress: address.label,
                       pickupLatitude: address.lat,
                       pickupLongitude: address.lng,
-                    }))
-                  }
+                      airportName: prev.airportName || detectedAirport,
+                      airportDirection:
+                        prev.airportDirection ||
+                        (detectedAirport ? 'Airport Pickup' : ''),
+                    }));
+                  }}
                 />
               </div>
 
@@ -1497,16 +1578,130 @@ export default function DispatchPage() {
                       quotedPrice: '',
                     }))
                   }
-                  onSelectAddress={(address: SelectedAddress) =>
+                  onSelectAddress={(address: SelectedAddress) => {
+                    const detectedAirport = detectAirportName(address.label);
+
                     setForm((prev) => ({
                       ...prev,
                       dropoffAddress: address.label,
                       dropoffLatitude: address.lat,
                       dropoffLongitude: address.lng,
-                    }))
-                  }
+                      airportName: prev.airportName || detectedAirport,
+                      airportDirection:
+                        prev.airportDirection ||
+                        (detectedAirport ? 'Airport Dropoff' : ''),
+                    }));
+                  }}
                 />
               </div>
+
+              {airportBookingEnabled ? (
+                <div className="md:col-span-2 rounded-3xl border border-cyan-500/20 bg-cyan-500/[0.06] p-5">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="text-lg font-black text-white">
+                        Airport Details
+                      </h3>
+                      <p className="mt-1 text-sm text-cyan-100/65">
+                        Add terminal, flight and meet & greet details. These are saved into the booking notes.
+                      </p>
+                    </div>
+
+                    <span className="w-fit rounded-full border border-cyan-500/25 bg-cyan-500/10 px-3 py-1 text-xs font-bold text-cyan-200">
+                      Airport booking
+                    </span>
+                  </div>
+
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    <SelectField
+                      label="Journey type"
+                      value={form.airportDirection}
+                      onChange={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          airportDirection: value,
+                        }))
+                      }
+                      options={[
+                        { label: 'Select journey type', value: '' },
+                        { label: 'Airport Pickup', value: 'Airport Pickup' },
+                        { label: 'Airport Dropoff', value: 'Airport Dropoff' },
+                      ]}
+                    />
+
+                    <SelectField
+                      label="Airport"
+                      value={form.airportName}
+                      onChange={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          airportName: value,
+                        }))
+                      }
+                      options={[
+                        { label: 'Select airport', value: '' },
+                        ...AIRPORT_OPTIONS.map((airport) => ({
+                          label: airport,
+                          value: airport,
+                        })),
+                      ]}
+                    />
+
+                    <Field
+                      label="Terminal"
+                      value={form.airportTerminal}
+                      onChange={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          airportTerminal: value,
+                        }))
+                      }
+                      placeholder="Terminal 5"
+                    />
+
+                    <Field
+                      label="Flight number"
+                      value={form.flightNumber}
+                      onChange={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          flightNumber: value.toUpperCase(),
+                        }))
+                      }
+                      placeholder="BA123"
+                    />
+
+                    <DateTimeField
+                      label="Flight date & time"
+                      value={form.flightTime}
+                      onChange={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          flightTime: value,
+                        }))
+                      }
+                    />
+
+                    <label className="flex min-h-[74px] items-center gap-3 rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={form.meetAndGreet}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            meetAndGreet: event.target.checked,
+                          }))
+                        }
+                        className="h-5 w-5"
+                      />
+
+                      <span className="text-sm font-semibold text-white">
+                        Meet & Greet required
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              ) : null}
 
               <SelectField
                 label="When"
