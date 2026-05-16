@@ -135,4 +135,44 @@ export class CreateBookingDto {
   @IsOptional()
   @IsString()
   passengerNotes?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  isAirportBooking?: boolean;
+
+  @IsOptional()
+  @IsString()
+  airportCode?: string | null;
+
+  @IsOptional()
+  @IsString()
+  airportName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  airportTerminal?: string | null;
+
+  @IsOptional()
+  @IsString()
+  flightNumber?: string | null;
+
+  @IsOptional()
+  @IsString()
+  flightDirection?: string | null;
+
+  @IsOptional()
+  @IsString()
+  flightDateTime?: string | null;
+
+  @IsOptional()
+  @IsString()
+  airline?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  meetAndGreet?: boolean;
+
+  @IsOptional()
+  @IsString()
+  airportNotes?: string | null;
 }

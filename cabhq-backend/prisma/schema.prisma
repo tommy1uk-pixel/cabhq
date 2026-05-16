@@ -120,13 +120,13 @@ model User {
 }
 
 model Driver {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   name           String
   username       String?
   phone          String?
   email          String?
   pin            String
-  status         String   @default("AVAILABLE")
+  status         String    @default("AVAILABLE")
   latitude       Float?
   longitude      Float?
   heading        Float?
@@ -136,7 +136,7 @@ model Driver {
   badgeExpiry    DateTime?
   dbsExpiry      DateTime?
   licenceExpiry  DateTime?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
   companyId      String
 
   company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -178,17 +178,17 @@ model DriverDocument {
 }
 
 model Vehicle {
-  id                   String   @id @default(uuid())
+  id                   String    @id @default(uuid())
   reg                  String
   make                 String?
   model                String?
   colour               String?
-  capacity             Int?     @default(4)
-  status               String   @default("ACTIVE")
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  capacity             Int?      @default(4)
+  status               String    @default("ACTIVE")
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
   companyId            String
-  driverId             String?  @unique
+  driverId             String?   @unique
   inspectionExpiry     DateTime?
   insuranceExpiry      DateTime?
   motExpiry            DateTime?
@@ -267,6 +267,17 @@ model Booking {
   distanceMiles   Float?
   durationMinutes Float?
 
+  isAirportBooking Boolean   @default(false)
+  airportCode      String?
+  airportName      String?
+  airportTerminal  String?
+  flightNumber     String?
+  flightDirection  String?
+  flightDateTime   DateTime?
+  airline          String?
+  meetAndGreet     Boolean   @default(false)
+  airportNotes     String?
+
   createdAt DateTime @default(now())
 
   companyId String
@@ -285,6 +296,9 @@ model Booking {
   @@index([pickupTime])
   @@index([bookerPhone])
   @@index([passengerPhone])
+  @@index([isAirportBooking])
+  @@index([airportCode])
+  @@index([flightNumber])
 }
 
 model BookingEvent {
@@ -313,7 +327,7 @@ model RoutePrice {
 }
 
 model DriverShift {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   driverId    String
   companyId   String
   startedAt   DateTime
@@ -321,8 +335,8 @@ model DriverShift {
   startStatus String?
   endStatus   String?
   notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   driver  Driver  @relation(fields: [driverId], references: [id], onDelete: Cascade)
@@ -380,8 +394,8 @@ model Account {
   postcode String?
 
   vatNumber    String?
-  paymentTerms Int    @default(30)
-  creditLimit  Float? @default(0)
+  paymentTerms Int     @default(30)
+  creditLimit  Float?  @default(0)
 
   status String  @default("ACTIVE")
   notes  String?

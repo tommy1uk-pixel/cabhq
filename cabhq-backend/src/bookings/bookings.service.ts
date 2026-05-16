@@ -35,6 +35,17 @@ type CreateBookingInput = {
   passengerName?: string | null;
   passengerPhone?: string | null;
   passengerNotes?: string | null;
+
+  isAirportBooking?: boolean;
+  airportCode?: string | null;
+  airportName?: string | null;
+  airportTerminal?: string | null;
+  flightNumber?: string | null;
+  flightDirection?: string | null;
+  flightDateTime?: string | null;
+  airline?: string | null;
+  meetAndGreet?: boolean;
+  airportNotes?: string | null;
 };
 
 type UpdateBookingInput = {
@@ -55,6 +66,17 @@ type UpdateBookingInput = {
   notes?: string | null;
   quotedPrice?: number | null;
   pricingMode?: string | null;
+
+  isAirportBooking?: boolean;
+  airportCode?: string | null;
+  airportName?: string | null;
+  airportTerminal?: string | null;
+  flightNumber?: string | null;
+  flightDirection?: string | null;
+  flightDateTime?: string | null;
+  airline?: string | null;
+  meetAndGreet?: boolean;
+  airportNotes?: string | null;
 };
 
 type AssignDriverInput = {
@@ -171,6 +193,18 @@ export class BookingsService {
       pickupTime: booking.pickupTime,
       quotedPrice: booking.quotedPrice,
       pricingMode: booking.pricingMode,
+
+      isAirportBooking: booking.isAirportBooking ?? false,
+      airportCode: booking.airportCode ?? null,
+      airportName: booking.airportName ?? null,
+      airportTerminal: booking.airportTerminal ?? null,
+      flightNumber: booking.flightNumber ?? null,
+      flightDirection: booking.flightDirection ?? null,
+      flightDateTime: booking.flightDateTime ?? null,
+      airline: booking.airline ?? null,
+      meetAndGreet: booking.meetAndGreet ?? false,
+      airportNotes: booking.airportNotes ?? null,
+
       company: booking.company
         ? {
             id: booking.company.id,
@@ -244,6 +278,8 @@ export class BookingsService {
       throw new BadRequestException('Pickup time is invalid');
     }
 
+    const flightDateTime = this.parseOptionalDate(input.flightDateTime);
+
     let accountId: string | null = null;
     let accountName: string | null = null;
 
@@ -314,6 +350,29 @@ export class BookingsService {
       dropoffLng = dropoffCoords.longitude ?? null;
     }
 
+    const airportNotes = this.cleanString(input.airportNotes);
+    const airportCode = this.cleanUpperString(input.airportCode);
+    const airportName = this.cleanString(input.airportName);
+    const airportTerminal = this.cleanString(input.airportTerminal);
+    const flightNumber = this.cleanUpperString(input.flightNumber);
+    const flightDirection = this.cleanUpperString(input.flightDirection);
+    const airline = this.cleanString(input.airline);
+    const meetAndGreet = input.meetAndGreet ?? false;
+
+    const isAirportBooking =
+      input.isAirportBooking ??
+      Boolean(
+        airportCode ||
+          airportName ||
+          airportTerminal ||
+          flightNumber ||
+          flightDirection ||
+          flightDateTime ||
+          airline ||
+          meetAndGreet ||
+          airportNotes,
+      );
+
     const booking = await this.prisma.booking.create({
       data: {
         companyId: input.companyId,
@@ -343,6 +402,17 @@ export class BookingsService {
         passengerNotes: input.passengerNotes?.trim() || null,
         passengerCount: input.passengerCount ?? null,
         notes: input.notes?.trim() || null,
+
+        isAirportBooking,
+        airportCode,
+        airportName,
+        airportTerminal,
+        flightNumber,
+        flightDirection,
+        flightDateTime,
+        airline,
+        meetAndGreet,
+        airportNotes,
       },
     });
 
@@ -385,6 +455,22 @@ export class BookingsService {
       );
     }
 
+    if (booking.isAirportBooking) {
+      await this.appendTimeline(
+        booking.id,
+        this.timelineMessage.airportCaptured({
+          airportName: booking.airportName,
+          airportCode: booking.airportCode,
+          airportTerminal: booking.airportTerminal,
+          flightNumber: booking.flightNumber,
+          flightDirection: booking.flightDirection,
+          flightDateTime: booking.flightDateTime,
+          airline: booking.airline,
+          meetAndGreet: booking.meetAndGreet,
+        }),
+      );
+    }
+
     if (input.notes?.trim()) {
       await this.appendTimeline(
         booking.id,
@@ -397,6 +483,10 @@ export class BookingsService {
         booking.id,
         `PASSENGER NOTES · ${input.passengerNotes.trim()}`,
       );
+    }
+
+    if (airportNotes) {
+      await this.appendTimeline(booking.id, `AIRPORT NOTES · ${airportNotes}`);
     }
 
     if (booking.quotedPrice != null) {
@@ -499,7 +589,14 @@ export class BookingsService {
         | 'passengerPhone'
         | 'passengerNotes'
         | 'notes'
-        | 'pricingMode';
+        | 'pricingMode'
+        | 'airportCode'
+        | 'airportName'
+        | 'airportTerminal'
+        | 'flightNumber'
+        | 'flightDirection'
+        | 'airline'
+        | 'airportNotes';
       label: string;
     }> = [
       { key: 'customerName', label: 'customer name' },
@@ -512,6 +609,13 @@ export class BookingsService {
       { key: 'passengerNotes', label: 'passenger notes' },
       { key: 'notes', label: 'booking notes' },
       { key: 'pricingMode', label: 'pricing mode' },
+      { key: 'airportCode', label: 'airport code' },
+      { key: 'airportName', label: 'airport name' },
+      { key: 'airportTerminal', label: 'airport terminal' },
+      { key: 'flightNumber', label: 'flight number' },
+      { key: 'flightDirection', label: 'flight direction' },
+      { key: 'airline', label: 'airline' },
+      { key: 'airportNotes', label: 'airport notes' },
     ];
 
     for (const field of stringFields) {
@@ -519,7 +623,13 @@ export class BookingsService {
 
       if (incoming === undefined) continue;
 
-      const value = incoming?.trim() || null;
+      const value =
+        field.key === 'flightNumber' ||
+        field.key === 'flightDirection' ||
+        field.key === 'airportCode'
+          ? incoming?.trim().toUpperCase() || null
+          : incoming?.trim() || null;
+
       const current = booking[field.key] ?? null;
 
       if (value !== current) {
@@ -528,6 +638,42 @@ export class BookingsService {
           `${field.label} changed from "${current ?? 'blank'}" to "${
             value ?? 'blank'
           }"`,
+        );
+      }
+    }
+
+    if (input.isAirportBooking !== undefined) {
+      const value = input.isAirportBooking ?? false;
+      const current = booking.isAirportBooking ?? false;
+
+      if (value !== current) {
+        updateData.isAirportBooking = value;
+        changes.push(
+          `airport booking changed from "${current}" to "${value}"`,
+        );
+      }
+    }
+
+    if (input.meetAndGreet !== undefined) {
+      const value = input.meetAndGreet ?? false;
+      const current = booking.meetAndGreet ?? false;
+
+      if (value !== current) {
+        updateData.meetAndGreet = value;
+        changes.push(`meet and greet changed from "${current}" to "${value}"`);
+      }
+    }
+
+    if (input.flightDateTime !== undefined) {
+      const value = this.parseOptionalDate(input.flightDateTime);
+      const current = booking.flightDateTime ?? null;
+
+      if ((value?.getTime() ?? null) !== (current?.getTime() ?? null)) {
+        updateData.flightDateTime = value;
+        changes.push(
+          `flight date/time changed from "${
+            current ? current.toLocaleString('en-GB') : 'blank'
+          }" to "${value ? value.toLocaleString('en-GB') : 'blank'}"`,
         );
       }
     }
@@ -1091,6 +1237,30 @@ export class BookingsService {
     return `CAB-${y}${m}${d}-${random}`;
   }
 
+  private cleanString(value?: string | null) {
+    const cleaned = value?.trim();
+    return cleaned ? cleaned : null;
+  }
+
+  private cleanUpperString(value?: string | null) {
+    const cleaned = this.cleanString(value);
+    return cleaned ? cleaned.toUpperCase() : null;
+  }
+
+  private parseOptionalDate(value?: string | null) {
+    const cleaned = this.cleanString(value);
+
+    if (!cleaned) return null;
+
+    const date = new Date(cleaned);
+
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Flight date/time is invalid');
+    }
+
+    return date;
+  }
+
   private readonly timelineMessage = {
     bookingCreated: (data: {
       reference: string;
@@ -1124,6 +1294,30 @@ export class BookingsService {
         data.isThirdPartyBooking ? ' · THIRD PARTY BOOKING' : ''
       }${data.passengerName ? ` · ${data.passengerName}` : ''}${
         data.passengerPhone ? ` · ${data.passengerPhone}` : ''
+      }`,
+
+    airportCaptured: (data: {
+      airportName: string | null;
+      airportCode: string | null;
+      airportTerminal: string | null;
+      flightNumber: string | null;
+      flightDirection: string | null;
+      flightDateTime: Date | null;
+      airline: string | null;
+      meetAndGreet: boolean;
+    }) =>
+      `AIRPORT DETAILS CAPTURED${
+        data.airportName ? ` · ${data.airportName}` : ''
+      }${data.airportCode ? ` · ${data.airportCode}` : ''}${
+        data.airportTerminal ? ` · Terminal ${data.airportTerminal}` : ''
+      }${data.flightNumber ? ` · Flight ${data.flightNumber}` : ''}${
+        data.flightDirection ? ` · ${data.flightDirection}` : ''
+      }${
+        data.flightDateTime
+          ? ` · ${data.flightDateTime.toLocaleString('en-GB')}`
+          : ''
+      }${data.airline ? ` · ${data.airline}` : ''}${
+        data.meetAndGreet ? ' · Meet & greet' : ''
       }`,
 
     pricingCaptured: (data: {

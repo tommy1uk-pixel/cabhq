@@ -53,7 +53,49 @@ type UpdateBookingBody = {
   notes?: string | null;
   quotedPrice?: number | null;
   pricingMode?: string | null;
+
+  isAirportBooking?: boolean;
+  airportCode?: string | null;
+  airportName?: string | null;
+  airportTerminal?: string | null;
+  flightNumber?: string | null;
+  flightDirection?: string | null;
+  flightDateTime?: string | null;
+  airline?: string | null;
+  meetAndGreet?: boolean;
+  airportNotes?: string | null;
 };
+
+function cleanString(value?: string | null) {
+  const cleaned = value?.trim();
+  return cleaned ? cleaned : null;
+}
+
+function cleanAirportDirection(value?: string | null) {
+  const cleaned = cleanString(value)?.toUpperCase();
+
+  if (!cleaned) return null;
+
+  if (['ARRIVAL', 'DEPARTURE', 'TRANSFER'].includes(cleaned)) {
+    return cleaned;
+  }
+
+  return cleaned;
+}
+
+function parseOptionalDate(value?: string | null) {
+  const cleaned = cleanString(value);
+
+  if (!cleaned) return null;
+
+  const date = new Date(cleaned);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString();
+}
 
 @Controller('bookings')
 export class BookingsController {
@@ -92,25 +134,26 @@ export class BookingsController {
   @Post()
   async create(@Req() req: AuthRequest, @Body() body: CreateBookingDto) {
     const bookerName =
-      body.bookerName?.trim() || body.customerName?.trim() || null;
+      cleanString(body.bookerName) || cleanString(body.customerName);
 
     const bookerPhone =
-      body.bookerPhone?.trim() || body.customerPhone?.trim() || null;
+      cleanString(body.bookerPhone) || cleanString(body.customerPhone);
 
     const isThirdPartyBooking = body.isThirdPartyBooking ?? false;
 
     const passengerName = isThirdPartyBooking
-      ? body.passengerName?.trim() || null
-      : body.passengerName?.trim() || bookerName;
+      ? cleanString(body.passengerName)
+      : cleanString(body.passengerName) || bookerName;
 
     const passengerPhone = isThirdPartyBooking
-      ? body.passengerPhone?.trim() || null
-      : body.passengerPhone?.trim() || bookerPhone;
+      ? cleanString(body.passengerPhone)
+      : cleanString(body.passengerPhone) || bookerPhone;
 
     return this.bookingsService.create({
       companyId: req.user.companyId,
-      pickup: body.pickupAddress?.trim() || body.pickup?.trim() || '',
-      dropoff: body.dropoffAddress?.trim() || body.dropoff?.trim() || '',
+      pickup: cleanString(body.pickupAddress) || cleanString(body.pickup) || '',
+      dropoff:
+        cleanString(body.dropoffAddress) || cleanString(body.dropoff) || '',
       pickupLat: body.pickupLat ?? body.pickupLatitude ?? null,
       pickupLng: body.pickupLng ?? body.pickupLongitude ?? null,
       dropoffLat: body.dropoffLat ?? body.dropoffLatitude ?? null,
@@ -122,18 +165,29 @@ export class BookingsController {
       distanceMiles: body.distanceMiles ?? null,
       durationMinutes: body.durationMinutes ?? null,
       autoDispatch: body.autoDispatch ?? false,
-      customerName: body.customerName?.trim() || bookerName,
-      customerPhone: body.customerPhone?.trim() || bookerPhone,
+      customerName: cleanString(body.customerName) || bookerName,
+      customerPhone: cleanString(body.customerPhone) || bookerPhone,
       passengerCount: body.passengerCount ?? null,
-      notes: body.notes?.trim() || null,
-      accountId: body.accountId?.trim() || null,
+      notes: cleanString(body.notes),
+      accountId: cleanString(body.accountId),
       isThirdPartyBooking,
       bookerName,
       bookerPhone,
-      bookerEmail: body.bookerEmail?.trim() || null,
+      bookerEmail: cleanString(body.bookerEmail),
       passengerName,
       passengerPhone,
-      passengerNotes: body.passengerNotes?.trim() || null,
+      passengerNotes: cleanString(body.passengerNotes),
+
+      isAirportBooking: body.isAirportBooking ?? false,
+      airportCode: cleanString(body.airportCode),
+      airportName: cleanString(body.airportName),
+      airportTerminal: cleanString(body.airportTerminal),
+      flightNumber: cleanString(body.flightNumber)?.toUpperCase() ?? null,
+      flightDirection: cleanAirportDirection(body.flightDirection),
+      flightDateTime: parseOptionalDate(body.flightDateTime),
+      airline: cleanString(body.airline),
+      meetAndGreet: body.meetAndGreet ?? false,
+      airportNotes: cleanString(body.airportNotes),
     });
   }
 
@@ -162,6 +216,17 @@ export class BookingsController {
       notes: body.notes,
       quotedPrice: body.quotedPrice,
       pricingMode: body.pricingMode,
+
+      isAirportBooking: body.isAirportBooking,
+      airportCode: body.airportCode,
+      airportName: body.airportName,
+      airportTerminal: body.airportTerminal,
+      flightNumber: body.flightNumber,
+      flightDirection: body.flightDirection,
+      flightDateTime: body.flightDateTime,
+      airline: body.airline,
+      meetAndGreet: body.meetAndGreet,
+      airportNotes: body.airportNotes,
     });
   }
 
