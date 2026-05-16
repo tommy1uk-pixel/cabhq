@@ -20,6 +20,12 @@ type BookingResponse = {
   reference: string;
 };
 
+type AirportOption = {
+  code: string;
+  name: string;
+  terminals: string[];
+};
+
 type FormState = {
   pickup: string;
   pickupLat: number | null;
@@ -42,7 +48,71 @@ type FormState = {
   passengerPhone: string;
   passengerNotes: string;
   autoDispatch: boolean;
+
+  isAirportBooking: boolean;
+  airportCode: string;
+  airportName: string;
+  airportTerminal: string;
+  flightNumber: string;
+  flightDirection: string;
+  flightDateTime: string;
+  airline: string;
+  meetAndGreet: boolean;
+  airportNotes: string;
 };
+
+const AIRPORTS: AirportOption[] = [
+  {
+    code: 'LHR',
+    name: 'Heathrow Airport',
+    terminals: ['Terminal 2', 'Terminal 3', 'Terminal 4', 'Terminal 5'],
+  },
+  {
+    code: 'LGW',
+    name: 'Gatwick Airport',
+    terminals: ['North Terminal', 'South Terminal'],
+  },
+  {
+    code: 'BRS',
+    name: 'Bristol Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'SOU',
+    name: 'Southampton Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'BOH',
+    name: 'Bournemouth Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'EXT',
+    name: 'Exeter Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'LTN',
+    name: 'London Luton Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'STN',
+    name: 'London Stansted Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'BHX',
+    name: 'Birmingham Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'MAN',
+    name: 'Manchester Airport',
+    terminals: ['Terminal 1', 'Terminal 2', 'Terminal 3'],
+  },
+];
 
 const initialForm: FormState = {
   pickup: '',
@@ -66,6 +136,17 @@ const initialForm: FormState = {
   passengerPhone: '',
   passengerNotes: '',
   autoDispatch: false,
+
+  isAirportBooking: false,
+  airportCode: '',
+  airportName: '',
+  airportTerminal: '',
+  flightNumber: '',
+  flightDirection: '',
+  flightDateTime: '',
+  airline: '',
+  meetAndGreet: false,
+  airportNotes: '',
 };
 
 const inputClassName =
@@ -92,6 +173,10 @@ export default function CreateBookingPage() {
     return accounts.filter((account) => account.status !== 'CLOSED');
   }, [accounts]);
 
+  const selectedAirport = useMemo(() => {
+    return AIRPORTS.find((airport) => airport.code === form.airportCode);
+  }, [form.airportCode]);
+
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({
       ...prev,
@@ -117,6 +202,17 @@ export default function CreateBookingPage() {
     }));
   }
 
+  function selectAirport(code: string) {
+    const airport = AIRPORTS.find((item) => item.code === code);
+
+    setForm((prev) => ({
+      ...prev,
+      airportCode: airport?.code || '',
+      airportName: airport?.name || '',
+      airportTerminal: '',
+    }));
+  }
+
   function validate() {
     if (!form.pickup.trim()) return 'Pickup is required';
     if (!form.dropoff.trim()) return 'Dropoff is required';
@@ -128,6 +224,11 @@ export default function CreateBookingPage() {
 
     if (form.dropoffLat == null || form.dropoffLng == null) {
       return 'Please select a dropoff address from the dropdown so GPS coordinates are saved';
+    }
+
+    if (form.isAirportBooking) {
+      if (!form.airportCode.trim()) return 'Airport is required';
+      if (!form.flightDirection.trim()) return 'Flight direction is required';
     }
 
     if (form.isThirdPartyBooking) {
@@ -159,6 +260,15 @@ export default function CreateBookingPage() {
 
       if (Number.isNaN(pickupTime.getTime())) {
         setError('Pickup time is invalid');
+        return;
+      }
+
+      const flightDateTime = form.flightDateTime
+        ? new Date(form.flightDateTime)
+        : null;
+
+      if (flightDateTime && Number.isNaN(flightDateTime.getTime())) {
+        setError('Flight date/time is invalid');
         return;
       }
 
@@ -219,6 +329,28 @@ export default function CreateBookingPage() {
 
         passengerNotes: form.passengerNotes.trim() || null,
         autoDispatch: form.autoDispatch,
+
+        isAirportBooking: form.isAirportBooking,
+        airportCode: form.isAirportBooking ? form.airportCode.trim() : null,
+        airportName: form.isAirportBooking ? form.airportName.trim() : null,
+        airportTerminal: form.isAirportBooking
+          ? form.airportTerminal.trim() || null
+          : null,
+        flightNumber: form.isAirportBooking
+          ? form.flightNumber.trim().toUpperCase() || null
+          : null,
+        flightDirection: form.isAirportBooking
+          ? form.flightDirection.trim().toUpperCase() || null
+          : null,
+        flightDateTime:
+          form.isAirportBooking && flightDateTime
+            ? flightDateTime.toISOString()
+            : null,
+        airline: form.isAirportBooking ? form.airline.trim() || null : null,
+        meetAndGreet: form.isAirportBooking ? form.meetAndGreet : false,
+        airportNotes: form.isAirportBooking
+          ? form.airportNotes.trim() || null
+          : null,
       };
 
       await apiFetch<BookingResponse>('/bookings', {
@@ -237,7 +369,7 @@ export default function CreateBookingPage() {
   return (
     <AdminShell
       title="Create Booking"
-      subtitle="Create direct, account or third-party bookings"
+      subtitle="Create direct, account, airport or third-party bookings"
       actions={
         <button
           type="button"
@@ -260,7 +392,7 @@ export default function CreateBookingPage() {
             </h1>
 
             <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 md:text-base">
-              Add the journey, customer details, passenger details, account
+              Add journey details, customer details, airport details, account
               link, price and dispatch preference from one clean screen.
             </p>
           </div>
@@ -346,6 +478,153 @@ export default function CreateBookingPage() {
                   }
                 />
               </div>
+            </Panel>
+
+            <Panel
+              title="Airport Details"
+              subtitle="Add terminal, flight number and airport-specific instructions."
+            >
+              <div className="mb-5">
+                <Toggle
+                  label="This is an airport booking"
+                  checked={form.isAirportBooking}
+                  onChange={(value) => setField('isAirportBooking', value)}
+                />
+              </div>
+
+              {form.isAirportBooking ? (
+                <div className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field
+                      label="Airport"
+                      input={
+                        <select
+                          value={form.airportCode}
+                          onChange={(e) => selectAirport(e.target.value)}
+                          className={inputClassName}
+                        >
+                          <option value="">Select airport</option>
+                          {AIRPORTS.map((airport) => (
+                            <option key={airport.code} value={airport.code}>
+                              {airport.name} ({airport.code})
+                            </option>
+                          ))}
+                        </select>
+                      }
+                    />
+
+                    <Field
+                      label="Terminal"
+                      input={
+                        <select
+                          value={form.airportTerminal}
+                          onChange={(e) =>
+                            setField('airportTerminal', e.target.value)
+                          }
+                          className={inputClassName}
+                          disabled={!selectedAirport}
+                        >
+                          <option value="">Select terminal</option>
+                          {selectedAirport?.terminals.map((terminal) => (
+                            <option key={terminal} value={terminal}>
+                              {terminal}
+                            </option>
+                          ))}
+                        </select>
+                      }
+                    />
+
+                    <Field
+                      label="Flight Direction"
+                      input={
+                        <select
+                          value={form.flightDirection}
+                          onChange={(e) =>
+                            setField('flightDirection', e.target.value)
+                          }
+                          className={inputClassName}
+                        >
+                          <option value="">Select direction</option>
+                          <option value="DEPARTURE">Departure</option>
+                          <option value="ARRIVAL">Arrival</option>
+                          <option value="TRANSFER">Transfer</option>
+                        </select>
+                      }
+                    />
+
+                    <Field
+                      label="Flight Number"
+                      input={
+                        <input
+                          value={form.flightNumber}
+                          onChange={(e) =>
+                            setField(
+                              'flightNumber',
+                              e.target.value.toUpperCase(),
+                            )
+                          }
+                          className={inputClassName}
+                          placeholder="Example: BA248"
+                        />
+                      }
+                    />
+
+                    <Field
+                      label="Flight Date / Time"
+                      input={
+                        <input
+                          type="datetime-local"
+                          value={form.flightDateTime}
+                          onChange={(e) =>
+                            setField('flightDateTime', e.target.value)
+                          }
+                          className={inputClassName}
+                        />
+                      }
+                    />
+
+                    <Field
+                      label="Airline"
+                      input={
+                        <input
+                          value={form.airline}
+                          onChange={(e) =>
+                            setField('airline', e.target.value)
+                          }
+                          className={inputClassName}
+                          placeholder="Example: British Airways"
+                        />
+                      }
+                    />
+                  </div>
+
+                  <Toggle
+                    label="Meet & greet required"
+                    checked={form.meetAndGreet}
+                    onChange={(value) => setField('meetAndGreet', value)}
+                  />
+
+                  <Field
+                    label="Airport Notes"
+                    input={
+                      <textarea
+                        rows={4}
+                        value={form.airportNotes}
+                        onChange={(e) =>
+                          setField('airportNotes', e.target.value)
+                        }
+                        className={`${inputClassName} resize-none`}
+                        placeholder="Example: Meet inside arrivals, name board, call passenger once landed..."
+                      />
+                    }
+                  />
+                </div>
+              ) : (
+                <p className="text-sm leading-6 text-white/55">
+                  Switch this on for airport jobs so CabHQ can store terminal,
+                  flight and meet & greet information.
+                </p>
+              )}
             </Panel>
 
             <Panel
@@ -589,6 +868,41 @@ export default function CreateBookingPage() {
                         : 'Direct booking'
                     }
                   />
+
+                  <SummaryRow
+                    label="Airport Job"
+                    value={form.isAirportBooking ? 'Yes' : 'No'}
+                  />
+
+                  {form.isAirportBooking ? (
+                    <>
+                      <SummaryRow
+                        label="Airport"
+                        value={
+                          form.airportName && form.airportCode
+                            ? `${form.airportName} (${form.airportCode})`
+                            : '—'
+                        }
+                      />
+                      <SummaryRow
+                        label="Terminal"
+                        value={form.airportTerminal || '—'}
+                      />
+                      <SummaryRow
+                        label="Flight"
+                        value={form.flightNumber || '—'}
+                      />
+                      <SummaryRow
+                        label="Direction"
+                        value={form.flightDirection || '—'}
+                      />
+                      <SummaryRow
+                        label="Meet & Greet"
+                        value={form.meetAndGreet ? 'Yes' : 'No'}
+                      />
+                    </>
+                  ) : null}
+
                   <SummaryRow
                     label="Booker"
                     value={
@@ -667,7 +981,7 @@ export default function CreateBookingPage() {
 
               <Panel
                 title="Address Search"
-                subtitle="Powered by CabHQ Mapbox search."
+                subtitle="Powered by CabHQ address search."
               >
                 <div className="space-y-3 text-sm text-white/60">
                   <p>• Search and select addresses from dropdown</p>

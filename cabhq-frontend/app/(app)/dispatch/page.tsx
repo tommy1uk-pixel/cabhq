@@ -85,6 +85,14 @@ type Account = {
   status?: string;
 };
 
+type TimelineEvent = {
+  id: string;
+  type?: string;
+  note?: string | null;
+  createdAt: string;
+  message?: string | null;
+};
+
 type BookingOfferMeta = {
   isActive?: boolean;
   timeoutSeconds?: number;
@@ -122,14 +130,17 @@ type Booking = {
   offer?: BookingOfferMeta;
   createdAt?: string;
   updatedAt?: string;
-};
 
-type TimelineEvent = {
-  id: string;
-  type?: string;
-  note?: string | null;
-  createdAt: string;
-  message?: string | null;
+  isAirportBooking?: boolean;
+  airportCode?: string | null;
+  airportName?: string | null;
+  airportTerminal?: string | null;
+  flightNumber?: string | null;
+  flightDirection?: string | null;
+  flightDateTime?: string | null;
+  airline?: string | null;
+  meetAndGreet?: boolean;
+  airportNotes?: string | null;
 };
 
 type BookingFormState = {
@@ -147,12 +158,17 @@ type BookingFormState = {
   pickupLongitude: number | null;
   dropoffLatitude: number | null;
   dropoffLongitude: number | null;
-  airportDirection: string;
+
+  isAirportBooking: boolean;
+  airportCode: string;
   airportName: string;
   airportTerminal: string;
   flightNumber: string;
-  flightTime: string;
+  flightDirection: string;
+  flightDateTime: string;
+  airline: string;
   meetAndGreet: boolean;
+  airportNotes: string;
 };
 
 type PricingQuote = {
@@ -194,7 +210,66 @@ type SocketDriverLocationPayload = {
   lastLocationAt?: string | null;
 };
 
+type AirportOption = {
+  code: string;
+  name: string;
+  terminals: string[];
+};
+
 const OFFER_TIMEOUT_SECONDS = 20;
+
+const AIRPORTS: AirportOption[] = [
+  {
+    code: 'LHR',
+    name: 'Heathrow Airport',
+    terminals: ['Terminal 2', 'Terminal 3', 'Terminal 4', 'Terminal 5'],
+  },
+  {
+    code: 'LGW',
+    name: 'Gatwick Airport',
+    terminals: ['North Terminal', 'South Terminal'],
+  },
+  {
+    code: 'BRS',
+    name: 'Bristol Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'SOU',
+    name: 'Southampton Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'BOH',
+    name: 'Bournemouth Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'EXT',
+    name: 'Exeter Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'LTN',
+    name: 'London Luton Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'STN',
+    name: 'London Stansted Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'BHX',
+    name: 'Birmingham Airport',
+    terminals: ['Main Terminal'],
+  },
+  {
+    code: 'MAN',
+    name: 'Manchester Airport',
+    terminals: ['Terminal 1', 'Terminal 2', 'Terminal 3'],
+  },
+];
 
 const initialForm: BookingFormState = {
   customerName: '',
@@ -211,12 +286,17 @@ const initialForm: BookingFormState = {
   pickupLongitude: null,
   dropoffLatitude: null,
   dropoffLongitude: null,
-  airportDirection: '',
+
+  isAirportBooking: false,
+  airportCode: '',
   airportName: '',
   airportTerminal: '',
   flightNumber: '',
-  flightTime: '',
+  flightDirection: '',
+  flightDateTime: '',
+  airline: '',
   meetAndGreet: false,
+  airportNotes: '',
 };
 
 function getDriverName(driver: Driver | null | undefined) {
@@ -371,20 +451,6 @@ function accountTone(hasAccount: boolean) {
     : 'border-slate-500/25 bg-slate-500/10 text-slate-300';
 }
 
-function driverStatusTone(driver: Driver | DriverSuggestion) {
-  const status = (driver.status || '').toUpperCase();
-
-  if (['AVAILABLE', 'ONLINE', 'ON_DUTY'].includes(status)) {
-    return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300';
-  }
-
-  if (['OFFERED', 'BUSY', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'].includes(status)) {
-    return 'border-amber-500/25 bg-amber-500/10 text-amber-300';
-  }
-
-  return 'border-slate-500/25 bg-slate-500/10 text-slate-300';
-}
-
 function isCompleted(status?: string) {
   return ['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(
     (status || '').toUpperCase(),
@@ -501,58 +567,6 @@ function getOfferInfo(booking: Booking, now = Date.now()) {
   };
 }
 
-
-const AIRPORT_OPTIONS = [
-  'Heathrow',
-  'Gatwick',
-  'Bournemouth',
-  'Southampton',
-  'Bristol',
-  'Exeter',
-  'Luton',
-  'Stansted',
-  'Birmingham',
-  'Manchester',
-];
-
-function detectAirportName(value: string) {
-  const normalized = value.toLowerCase();
-
-  return (
-    AIRPORT_OPTIONS.find((airport) =>
-      normalized.includes(airport.toLowerCase()),
-    ) || ''
-  );
-}
-
-function hasAirportKeyword(value: string) {
-  const normalized = value.toLowerCase();
-
-  return (
-    normalized.includes('airport') ||
-    normalized.includes('terminal') ||
-    AIRPORT_OPTIONS.some((airport) =>
-      normalized.includes(airport.toLowerCase()),
-    )
-  );
-}
-
-function buildAirportNotes(form: BookingFormState) {
-  const lines = [
-    'AIRPORT DETAILS',
-    form.airportDirection
-      ? `Journey Type: ${form.airportDirection}`
-      : null,
-    form.airportName ? `Airport: ${form.airportName}` : null,
-    form.airportTerminal ? `Terminal: ${form.airportTerminal}` : null,
-    form.flightNumber ? `Flight Number: ${form.flightNumber}` : null,
-    form.flightTime ? `Flight Time: ${formatDateTime(form.flightTime)}` : null,
-    `Meet & Greet: ${form.meetAndGreet ? 'YES' : 'NO'}`,
-  ].filter(Boolean);
-
-  return lines.join('\n');
-}
-
 function getCurrentJobLabel(booking: Booking) {
   const status = (booking.status || '').toUpperCase();
 
@@ -565,6 +579,75 @@ function getCurrentJobLabel(booking: Booking) {
   if (status === 'BOOKED') return 'Ready to dispatch';
 
   return status.replace(/_/g, ' ');
+}
+
+function detectAirport(address: string) {
+  const normalised = address.toLowerCase();
+
+  return AIRPORTS.find((airport) => {
+    const name = airport.name.toLowerCase();
+    const code = airport.code.toLowerCase();
+
+    return normalised.includes(name.replace(' airport', '')) ||
+      normalised.includes(code) ||
+      normalised.includes(name);
+  });
+}
+
+function isAirportBookingFromData(booking: Booking) {
+  return (
+    booking.isAirportBooking === true ||
+    Boolean(booking.airportCode) ||
+    Boolean(booking.airportName) ||
+    Boolean(booking.airportTerminal) ||
+    Boolean(booking.flightNumber) ||
+    Boolean(booking.flightDirection) ||
+    Boolean(booking.meetAndGreet) ||
+    Boolean(booking.airportNotes)
+  );
+}
+
+function getAirportDirectionLabel(value?: string | null) {
+  const normalised = (value || '').toUpperCase();
+
+  if (normalised === 'ARRIVAL') return 'AIRPORT PICKUP';
+  if (normalised === 'DEPARTURE') return 'AIRPORT DROPOFF';
+  if (normalised === 'TRANSFER') return 'AIRPORT TRANSFER';
+
+  return normalised || 'AIRPORT JOB';
+}
+
+function airportTone(direction?: string | null) {
+  const normalised = (direction || '').toUpperCase();
+
+  if (normalised === 'ARRIVAL') {
+    return 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200';
+  }
+
+  if (normalised === 'DEPARTURE') {
+    return 'border-purple-500/25 bg-purple-500/10 text-purple-200';
+  }
+
+  return 'border-blue-500/25 bg-blue-500/10 text-blue-200';
+}
+
+function getAirportTerminalLabel(value?: string | null) {
+  if (!value) return null;
+  return value.toLowerCase().includes('terminal') ? value : `Terminal ${value}`;
+}
+
+function airportCodeFromName(name?: string | null) {
+  if (!name) return null;
+
+  const match = AIRPORTS.find(
+    (airport) => airport.name.toLowerCase() === name.toLowerCase(),
+  );
+
+  return match?.code ?? null;
+}
+
+function selectedAirportFromCode(code: string) {
+  return AIRPORTS.find((airport) => airport.code === code) ?? null;
 }
 
 export default function DispatchPage() {
@@ -603,9 +686,13 @@ export default function DispatchPage() {
   const token =
     typeof window !== 'undefined' ? localStorage.getItem('token') : null;
 
+  const selectedAirport = selectedAirportFromCode(form.airportCode);
+
   const airportBookingEnabled =
-    hasAirportKeyword(form.pickupAddress) ||
-    hasAirportKeyword(form.dropoffAddress) ||
+    form.isAirportBooking ||
+    Boolean(detectAirport(form.pickupAddress)) ||
+    Boolean(detectAirport(form.dropoffAddress)) ||
+    Boolean(form.airportCode) ||
     Boolean(form.airportName);
 
   useEffect(() => {
@@ -1269,11 +1356,10 @@ export default function DispatchPage() {
         throw new Error('Quoted price must be a valid number');
       }
 
-      const baseNotes = form.notes.trim();
-      const airportNotes = airportBookingEnabled ? buildAirportNotes(form) : '';
-      const finalNotes = [baseNotes, airportNotes]
-        .filter((item) => item.trim().length > 0)
-        .join('\n\n');
+      const flightDate =
+        form.flightDateTime.trim() !== ''
+          ? new Date(form.flightDateTime).toISOString()
+          : null;
 
       const payload = {
         customerName: form.customerName.trim(),
@@ -1300,8 +1386,27 @@ export default function DispatchPage() {
 
         passengerCount: Number(form.passengerCount) || 1,
         quotedPrice: quotedPriceNumber,
-        notes: finalNotes || null,
+        notes: form.notes.trim() || null,
         autoDispatch: autoDispatchAfterCreate,
+
+        isAirportBooking: airportBookingEnabled,
+        airportCode: airportBookingEnabled ? form.airportCode || null : null,
+        airportName: airportBookingEnabled ? form.airportName || null : null,
+        airportTerminal: airportBookingEnabled
+          ? form.airportTerminal || null
+          : null,
+        flightNumber: airportBookingEnabled
+          ? form.flightNumber.trim().toUpperCase() || null
+          : null,
+        flightDirection: airportBookingEnabled
+          ? form.flightDirection || null
+          : null,
+        flightDateTime: airportBookingEnabled ? flightDate : null,
+        airline: airportBookingEnabled ? form.airline.trim() || null : null,
+        meetAndGreet: airportBookingEnabled ? form.meetAndGreet : false,
+        airportNotes: airportBookingEnabled
+          ? form.airportNotes.trim() || null
+          : null,
       };
 
       const created = await apiFetch<Booking>('/bookings', {
@@ -1360,6 +1465,7 @@ export default function DispatchPage() {
       accountLinked: bookings.filter((booking) =>
         Boolean(booking.accountId || booking.account),
       ).length,
+      airportJobs: bookings.filter(isAirportBookingFromData).length,
     };
   }, [bookings, drivers, liveDrivers.length]);
 
@@ -1408,6 +1514,12 @@ export default function DispatchPage() {
         getDriverName(booking.driver),
         booking.status,
         booking.account?.name,
+        booking.airportCode,
+        booking.airportName,
+        booking.airportTerminal,
+        booking.flightNumber,
+        booking.flightDirection,
+        booking.airline,
       ]
         .filter(Boolean)
         .join(' ')
@@ -1440,7 +1552,8 @@ export default function DispatchPage() {
             </h1>
 
             <p className="mt-2 text-sm text-white/55">
-              Live bookings, driver map, offer timers and dispatch control.
+              Live bookings, driver map, airport work, offer timers and dispatch
+              control.
             </p>
           </div>
 
@@ -1461,10 +1574,20 @@ export default function DispatchPage() {
           </div>
         </div>
 
-        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-8">
+        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-9">
           <Card label="Bookings" value={stats.bookings} hint="Total jobs" />
           <Card label="Live Jobs" value={stats.live} hint="Dispatch active" />
-          <Card label="Offered" value={stats.offered} hint="Awaiting driver" urgent={stats.offered > 0} />
+          <Card
+            label="Airport Jobs"
+            value={stats.airportJobs}
+            hint="Flight work"
+          />
+          <Card
+            label="Offered"
+            value={stats.offered}
+            hint="Awaiting driver"
+            urgent={stats.offered > 0}
+          />
           <Card label="Completed" value={stats.completed} hint="Finished jobs" />
           <Card label="Drivers" value={stats.drivers} hint="Driver records" />
           <Card label="Available" value={stats.available} hint="Dispatch ready" />
@@ -1481,7 +1604,7 @@ export default function DispatchPage() {
             <div className="mb-5">
               <h2 className="text-2xl font-bold text-white">New Booking</h2>
               <p className="mt-1 text-sm text-white/55">
-                Create and dispatch bookings quickly from one screen.
+                Create standard, account, airport and dispatch-ready bookings.
               </p>
             </div>
 
@@ -1547,17 +1670,18 @@ export default function DispatchPage() {
                     }))
                   }
                   onSelectAddress={(address: SelectedAddress) => {
-                    const detectedAirport = detectAirportName(address.label);
+                    const airport = detectAirport(address.label);
 
                     setForm((prev) => ({
                       ...prev,
                       pickupAddress: address.label,
                       pickupLatitude: address.lat,
                       pickupLongitude: address.lng,
-                      airportName: prev.airportName || detectedAirport,
-                      airportDirection:
-                        prev.airportDirection ||
-                        (detectedAirport ? 'Airport Pickup' : ''),
+                      isAirportBooking: prev.isAirportBooking || Boolean(airport),
+                      airportCode: prev.airportCode || airport?.code || '',
+                      airportName: prev.airportName || airport?.name || '',
+                      flightDirection:
+                        prev.flightDirection || (airport ? 'ARRIVAL' : ''),
                     }));
                   }}
                 />
@@ -1579,75 +1703,73 @@ export default function DispatchPage() {
                     }))
                   }
                   onSelectAddress={(address: SelectedAddress) => {
-                    const detectedAirport = detectAirportName(address.label);
+                    const airport = detectAirport(address.label);
 
                     setForm((prev) => ({
                       ...prev,
                       dropoffAddress: address.label,
                       dropoffLatitude: address.lat,
                       dropoffLongitude: address.lng,
-                      airportName: prev.airportName || detectedAirport,
-                      airportDirection:
-                        prev.airportDirection ||
-                        (detectedAirport ? 'Airport Dropoff' : ''),
+                      isAirportBooking: prev.isAirportBooking || Boolean(airport),
+                      airportCode: prev.airportCode || airport?.code || '',
+                      airportName: prev.airportName || airport?.name || '',
+                      flightDirection:
+                        prev.flightDirection || (airport ? 'DEPARTURE' : ''),
                     }));
                   }}
                 />
               </div>
 
-              {airportBookingEnabled ? (
-                <div className="md:col-span-2 rounded-3xl border border-cyan-500/20 bg-cyan-500/[0.06] p-5">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h3 className="text-lg font-black text-white">
-                        Airport Details
-                      </h3>
-                      <p className="mt-1 text-sm text-cyan-100/65">
-                        Add terminal, flight and meet & greet details. These are saved into the booking notes.
-                      </p>
-                    </div>
-
-                    <span className="w-fit rounded-full border border-cyan-500/25 bg-cyan-500/10 px-3 py-1 text-xs font-bold text-cyan-200">
-                      Airport booking
-                    </span>
+              <div className="md:col-span-2 rounded-3xl border border-cyan-500/20 bg-cyan-500/[0.06] p-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="text-lg font-black text-white">
+                      Airport Details
+                    </h3>
+                    <p className="mt-1 text-sm text-cyan-100/65">
+                      Store terminal, flight number, flight time and meet & greet
+                      against the booking.
+                    </p>
                   </div>
 
+                  <Toggle
+                    label="Airport booking"
+                    checked={form.isAirportBooking}
+                    onChange={(value) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        isAirportBooking: value,
+                      }))
+                    }
+                  />
+                </div>
+
+                {airportBookingEnabled ? (
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
                     <SelectField
-                      label="Journey type"
-                      value={form.airportDirection}
-                      onChange={(value) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          airportDirection: value,
-                        }))
-                      }
-                      options={[
-                        { label: 'Select journey type', value: '' },
-                        { label: 'Airport Pickup', value: 'Airport Pickup' },
-                        { label: 'Airport Dropoff', value: 'Airport Dropoff' },
-                      ]}
-                    />
-
-                    <SelectField
                       label="Airport"
-                      value={form.airportName}
-                      onChange={(value) =>
+                      value={form.airportCode}
+                      onChange={(value) => {
+                        const airport = selectedAirportFromCode(value);
+
                         setForm((prev) => ({
                           ...prev,
-                          airportName: value,
-                        }))
-                      }
+                          airportCode: airport?.code || '',
+                          airportName: airport?.name || '',
+                          airportTerminal: '',
+                          isAirportBooking: true,
+                        }));
+                      }}
                       options={[
                         { label: 'Select airport', value: '' },
-                        ...AIRPORT_OPTIONS.map((airport) => ({
-                          label: airport,
-                          value: airport,
+                        ...AIRPORTS.map((airport) => ({
+                          label: `${airport.name} (${airport.code})`,
+                          value: airport.code,
                         })),
                       ]}
                     />
 
-                    <Field
+                    <SelectField
                       label="Terminal"
                       value={form.airportTerminal}
                       onChange={(value) =>
@@ -1656,7 +1778,33 @@ export default function DispatchPage() {
                           airportTerminal: value,
                         }))
                       }
-                      placeholder="Terminal 5"
+                      options={[
+                        { label: 'Select terminal', value: '' },
+                        ...(selectedAirport?.terminals ?? []).map((terminal) => ({
+                          label: terminal,
+                          value: terminal,
+                        })),
+                      ]}
+                    />
+
+                    <SelectField
+                      label="Direction"
+                      value={form.flightDirection}
+                      onChange={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          flightDirection: value,
+                        }))
+                      }
+                      options={[
+                        { label: 'Select direction', value: '' },
+                        { label: 'Arrival / Airport Pickup', value: 'ARRIVAL' },
+                        {
+                          label: 'Departure / Airport Dropoff',
+                          value: 'DEPARTURE',
+                        },
+                        { label: 'Transfer', value: 'TRANSFER' },
+                      ]}
                     />
 
                     <Field
@@ -1673,13 +1821,25 @@ export default function DispatchPage() {
 
                     <DateTimeField
                       label="Flight date & time"
-                      value={form.flightTime}
+                      value={form.flightDateTime}
                       onChange={(value) =>
                         setForm((prev) => ({
                           ...prev,
-                          flightTime: value,
+                          flightDateTime: value,
                         }))
                       }
+                    />
+
+                    <Field
+                      label="Airline"
+                      value={form.airline}
+                      onChange={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          airline: value,
+                        }))
+                      }
+                      placeholder="British Airways"
                     />
 
                     <label className="flex min-h-[74px] items-center gap-3 rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3">
@@ -1699,9 +1859,23 @@ export default function DispatchPage() {
                         Meet & Greet required
                       </span>
                     </label>
+
+                    <div className="md:col-span-2">
+                      <TextAreaField
+                        label="Airport notes"
+                        value={form.airportNotes}
+                        onChange={(value) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            airportNotes: value,
+                          }))
+                        }
+                        placeholder="Meet inside arrivals, call once landed, name board, parking instructions..."
+                      />
+                    </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null}
+              </div>
 
               <SelectField
                 label="When"
@@ -1779,19 +1953,6 @@ export default function DispatchPage() {
                       {pricingResult.distanceMiles.toFixed(2)} miles •{' '}
                       {pricingResult.durationMinutes} mins
                     </div>
-
-                    {pricingResult.matchedRoute ? (
-                      <div className="mt-1 text-[11px] opacity-70">
-                        {pricingResult.matchedRoute.fromLabel} →{' '}
-                        {pricingResult.matchedRoute.toLabel}
-                      </div>
-                    ) : null}
-
-                    {pricingResult.routeSource ? (
-                      <div className="mt-1 text-[11px] opacity-50">
-                        Route: {pricingResult.routeSource}
-                      </div>
-                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -2030,7 +2191,7 @@ export default function DispatchPage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search ref, customer, phone, route, driver, account..."
+              placeholder="Search ref, customer, phone, route, driver, account, airport, flight..."
               className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50 xl:w-[420px]"
             />
           </div>
@@ -2121,6 +2282,56 @@ function OfferCountdown({ booking, now }: { booking: Booking; now: number }) {
   );
 }
 
+function AirportBadges({ booking }: { booking: Booking }) {
+  if (!isAirportBookingFromData(booking)) return null;
+
+  const terminal = getAirportTerminalLabel(booking.airportTerminal);
+  const direction = getAirportDirectionLabel(booking.flightDirection);
+  const code = booking.airportCode || airportCodeFromName(booking.airportName);
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      <span
+        className={`rounded-full border px-3 py-1 text-[11px] font-black ${airportTone(
+          booking.flightDirection,
+        )}`}
+      >
+        {direction}
+      </span>
+
+      {booking.airportName || code ? (
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-bold text-white">
+          {booking.airportName || 'Airport'} {code ? `(${code})` : ''}
+        </span>
+      ) : null}
+
+      {terminal ? (
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-bold text-white">
+          {terminal}
+        </span>
+      ) : null}
+
+      {booking.flightNumber ? (
+        <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[11px] font-black text-amber-200">
+          ✈ {booking.flightNumber}
+        </span>
+      ) : null}
+
+      {booking.flightDateTime ? (
+        <span className="rounded-full border border-blue-500/20 bg-blue-500/10 px-3 py-1 text-[11px] font-bold text-blue-200">
+          {formatDateTime(booking.flightDateTime)}
+        </span>
+      ) : null}
+
+      {booking.meetAndGreet ? (
+        <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-[11px] font-black text-emerald-200">
+          MEET & GREET
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function DispatchBoard({
   title,
   loading,
@@ -2171,7 +2382,9 @@ function DispatchBoard({
             const status = (booking.status || '').toUpperCase();
             const offered = status === 'OFFERED';
             const noDriver = status === 'NO_DRIVER';
-            const canDispatch = ['BOOKED', 'NO_DRIVER', 'OFFERED'].includes(status);
+            const canDispatch = ['BOOKED', 'NO_DRIVER', 'OFFERED'].includes(
+              status,
+            );
 
             return (
               <div
@@ -2201,7 +2414,11 @@ function DispatchBoard({
                       </div>
                     ) : null}
 
-                    {!compact ? <div className="mt-2"><OfferCountdown booking={booking} now={now} /></div> : null}
+                    {!compact ? (
+                      <div className="mt-2">
+                        <OfferCountdown booking={booking} now={now} />
+                      </div>
+                    ) : null}
                   </div>
 
                   <div>
@@ -2224,6 +2441,8 @@ function DispatchBoard({
                     <div className="truncate text-sm text-white/55">
                       → {getDropoffLabel(booking)}
                     </div>
+
+                    <AirportBadges booking={booking} />
 
                     {!compact ? (
                       <div className="mt-2 flex flex-wrap gap-4 text-xs text-white/40">
@@ -2264,42 +2483,52 @@ function DispatchBoard({
 
                   {!compact ? (
                     <div className="space-y-2">
-                      {booking.suggestedDrivers && booking.suggestedDrivers.length > 0 ? (
-                        booking.suggestedDrivers.slice(0, 2).map((suggested, index) => {
-                          const key = `${booking.id}:${suggested.id}`;
+                      {booking.suggestedDrivers &&
+                      booking.suggestedDrivers.length > 0 ? (
+                        booking.suggestedDrivers
+                          .slice(0, 2)
+                          .map((suggested, index) => {
+                            const key = `${booking.id}:${suggested.id}`;
 
-                          return (
-                            <button
-                              key={suggested.id}
-                              onClick={() =>
-                                onAssignDriver(booking.id, suggested.id)
-                              }
-                              disabled={assigningKey === key || !canDispatch}
-                              className="block w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-left text-xs text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="font-semibold">
-                                  #{index + 1} {suggested.name}
-                                </span>
-                                {suggested.score != null ? (
-                                  <span className="rounded-full bg-black/25 px-2 py-0.5 text-[10px] text-emerald-100/80">
-                                    {suggested.score}
+                            return (
+                              <button
+                                key={suggested.id}
+                                onClick={() =>
+                                  onAssignDriver(booking.id, suggested.id)
+                                }
+                                disabled={assigningKey === key || !canDispatch}
+                                className="block w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-left text-xs text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold">
+                                    #{index + 1} {suggested.name}
                                   </span>
-                                ) : null}
-                              </div>
+                                  {suggested.score != null ? (
+                                    <span className="rounded-full bg-black/25 px-2 py-0.5 text-[10px] text-emerald-100/80">
+                                      {suggested.score}
+                                    </span>
+                                  ) : null}
+                                </div>
 
-                              <div className="mt-1 text-[11px] text-emerald-100/70">
-                                {formatDistance(suggested.distanceMiles)} •{' '}
-                                {formatGpsAge(suggested.lastLocationAt, now)} •{' '}
-                                {assigningKey === key
-                                  ? 'Assigning...'
-                                  : 'Assign'}
-                              </div>
-                            </button>
-                          );
-                        })
+                                <div className="mt-1 text-[11px] text-emerald-100/70">
+                                  {formatDistance(suggested.distanceMiles)} •{' '}
+                                  {formatGpsAge(suggested.lastLocationAt, now)}{' '}
+                                  •{' '}
+                                  {assigningKey === key
+                                    ? 'Assigning...'
+                                    : 'Assign'}
+                                </div>
+                              </button>
+                            );
+                          })
                       ) : (
-                        <div className={`rounded-xl border px-3 py-2 text-xs ${noDriver ? 'border-red-500/20 bg-red-500/10 text-red-200' : 'border-white/10 bg-black/20 text-white/40'}`}>
+                        <div
+                          className={`rounded-xl border px-3 py-2 text-xs ${
+                            noDriver
+                              ? 'border-red-500/20 bg-red-500/10 text-red-200'
+                              : 'border-white/10 bg-black/20 text-white/40'
+                          }`}
+                        >
                           {noDriver ? 'No eligible drivers' : 'No suggestions'}
                         </div>
                       )}
@@ -2314,10 +2543,16 @@ function DispatchBoard({
                     {!compact ? (
                       <button
                         onClick={() => onAutoDispatch(booking.id)}
-                        disabled={autoDispatchingId === booking.id || !canDispatch}
+                        disabled={
+                          autoDispatchingId === booking.id || !canDispatch
+                        }
                         className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                       >
-                        {autoDispatchingId === booking.id ? 'Running...' : offered ? 'Re-offer' : 'Auto'}
+                        {autoDispatchingId === booking.id
+                          ? 'Running...'
+                          : offered
+                            ? 'Re-offer'
+                            : 'Auto'}
                       </button>
                     ) : null}
 
@@ -2337,9 +2572,15 @@ function DispatchBoard({
                   </div>
                 </div>
 
-                {booking.notes && !compact ? (
+                {(booking.notes || booking.airportNotes) && !compact ? (
                   <div className="mt-3 border-t border-white/5 pt-3 text-xs text-white/45">
-                    {booking.notes}
+                    {booking.airportNotes ? (
+                      <div className="mb-2 rounded-xl border border-cyan-500/10 bg-cyan-500/5 p-3 text-cyan-100/70">
+                        Airport notes: {booking.airportNotes}
+                      </div>
+                    ) : null}
+
+                    {booking.notes ? <div>{booking.notes}</div> : null}
                   </div>
                 ) : null}
               </div>
@@ -2420,11 +2661,13 @@ function BookingDrawer({
 
                 <OfferCountdown booking={booking} now={now} />
               </div>
+
+              <AirportBadges booking={booking} />
             </div>
 
             <button
               onClick={onClose}
-              className="rounded-2xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+              className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white hover:bg-white/10"
             >
               Close
             </button>
@@ -2432,189 +2675,201 @@ function BookingDrawer({
         </div>
 
         <div className="space-y-5 p-5">
-          <DrawerPanel title="Trip">
-            <Detail label="Pickup" value={getPickupLabel(booking)} />
-            <Detail label="Dropoff" value={getDropoffLabel(booking)} />
-            <Detail
-              label="Pickup Time"
-              value={formatDateTime(getPickupTimeLabel(booking))}
-            />
-            <Detail
-              label="Passengers"
-              value={String(booking.passengerCount ?? '—')}
-            />
-            <Detail label="Fare" value={formatPrice(booking.quotedPrice)} />
-          </DrawerPanel>
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <h3 className="text-lg font-bold text-white">Journey</h3>
 
-          <DrawerPanel title="Customer">
-            <Detail label="Name" value={booking.customerName || '—'} />
-            <Detail label="Phone" value={booking.customerPhone || '—'} />
-            <Detail label="Account" value={getAccountLabel(booking)} />
-            <Detail
-              label="Account Status"
-              value={booking.account?.status || '—'}
-            />
-          </DrawerPanel>
+            <div className="mt-4 space-y-4">
+              <Detail label="Pickup" value={getPickupLabel(booking)} />
+              <Detail label="Dropoff" value={getDropoffLabel(booking)} />
+              <Detail
+                label="Pickup Time"
+                value={formatDateTime(getPickupTimeLabel(booking))}
+              />
+              <Detail label="Customer" value={booking.customerName || '—'} />
+              <Detail label="Phone" value={booking.customerPhone || '—'} />
+              <Detail label="Fare" value={formatPrice(booking.quotedPrice)} />
+              <Detail
+                label="Driver"
+                value={`${getDriverName(booking.driver)}${
+                  selectedDriverPosition
+                    ? ` • GPS ${selectedDriverPosition[0].toFixed(
+                        5,
+                      )}, ${selectedDriverPosition[1].toFixed(5)}`
+                    : ''
+                }`}
+              />
+            </div>
+          </section>
 
-          <DrawerPanel title="Driver">
-            <Detail
-              label="Assigned Driver"
-              value={getDriverName(booking.driver)}
-            />
-            <Detail
-              label="Vehicle"
-              value={getVehicleLabel(booking.driver?.vehicle ?? null)}
-            />
-            <Detail label="Driver Status" value={booking.driver?.status || '—'} />
-            <Detail
-              label="Driver GPS"
-              value={
-                selectedDriverPosition
-                  ? `${selectedDriverPosition[0]}, ${selectedDriverPosition[1]}`
-                  : 'Not available'
-              }
-            />
-            <Detail
-              label="GPS Age"
-              value={formatGpsAge(booking.driver?.lastLocationAt, now)}
-            />
-          </DrawerPanel>
+          {isAirportBookingFromData(booking) ? (
+            <section className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.06] p-5">
+              <h3 className="text-lg font-bold text-white">Airport Details</h3>
 
-          <DrawerPanel title="Dispatch Actions">
-            <div className="grid gap-3 md:grid-cols-2">
+              <div className="mt-4 space-y-4">
+                <Detail
+                  label="Airport"
+                  value={
+                    booking.airportName || booking.airportCode
+                      ? `${booking.airportName || 'Airport'}${
+                          booking.airportCode ? ` (${booking.airportCode})` : ''
+                        }`
+                      : '—'
+                  }
+                />
+                <Detail
+                  label="Terminal"
+                  value={getAirportTerminalLabel(booking.airportTerminal) || '—'}
+                />
+                <Detail
+                  label="Direction"
+                  value={getAirportDirectionLabel(booking.flightDirection)}
+                />
+                <Detail label="Flight" value={booking.flightNumber || '—'} />
+                <Detail label="Airline" value={booking.airline || '—'} />
+                <Detail
+                  label="Flight Time"
+                  value={formatDateTime(booking.flightDateTime)}
+                />
+                <Detail
+                  label="Meet & Greet"
+                  value={booking.meetAndGreet ? 'Yes' : 'No'}
+                />
+                <Detail
+                  label="Airport Notes"
+                  value={booking.airportNotes || '—'}
+                />
+              </div>
+            </section>
+          ) : null}
+
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <h3 className="text-lg font-bold text-white">Actions</h3>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
               <button
+                disabled={!canDispatch || isFinalStatus}
                 onClick={() => onAutoDispatch(booking.id)}
-                disabled={autoDispatchingId === booking.id || isFinalStatus || !canDispatch}
-                className="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+                className="rounded-xl border border-blue-500/20 bg-blue-500/10 px-4 py-3 text-sm font-semibold text-blue-200 hover:bg-blue-500/20 disabled:opacity-50"
               >
                 {autoDispatchingId === booking.id
                   ? 'Running...'
-                  : status === 'OFFERED'
-                    ? 'Cancel & Re-offer'
-                    : 'Auto Dispatch'}
+                  : 'Auto Dispatch'}
               </button>
+
+              <button
+                disabled={isFinalStatus}
+                onClick={() => onCancelBooking(booking.id)}
+                className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50"
+              >
+                Cancel Booking
+              </button>
+
+              {['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'].includes(
+                status,
+              ) ? (
+                <StatusButtons
+                  booking={booking}
+                  statusBusy={statusBusy}
+                  onUpdateStatus={onUpdateStatus}
+                />
+              ) : null}
 
               <button
                 onClick={onTimeline}
-                className="rounded-2xl bg-purple-600 px-4 py-3 text-sm font-semibold text-white hover:bg-purple-500"
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10"
               >
-                Open Timeline
-              </button>
-
-              <button
-                onClick={() => onUpdateStatus(booking.id, 'EN_ROUTE')}
-                disabled={Boolean(statusBusy) || isFinalStatus}
-                className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
-              >
-                {statusBusy === 'EN_ROUTE' ? 'Updating...' : 'Mark En Route'}
-              </button>
-
-              <button
-                onClick={() => onUpdateStatus(booking.id, 'ARRIVED')}
-                disabled={Boolean(statusBusy) || isFinalStatus}
-                className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-200 hover:bg-amber-500/20 disabled:opacity-50"
-              >
-                {statusBusy === 'ARRIVED' ? 'Updating...' : 'Mark Arrived'}
-              </button>
-
-              <button
-                onClick={() => onUpdateStatus(booking.id, 'ON_JOB')}
-                disabled={Boolean(statusBusy) || isFinalStatus}
-                className="rounded-2xl border border-violet-500/20 bg-violet-500/10 px-4 py-3 text-sm font-semibold text-violet-200 hover:bg-violet-500/20 disabled:opacity-50"
-              >
-                {statusBusy === 'ON_JOB' ? 'Updating...' : 'Mark On Job'}
-              </button>
-
-              <button
-                onClick={() => onUpdateStatus(booking.id, 'COMPLETED')}
-                disabled={Boolean(statusBusy) || isFinalStatus}
-                className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
-              >
-                {statusBusy === 'COMPLETED' ? 'Updating...' : 'Complete Job'}
-              </button>
-
-              <button
-                onClick={() => onCancelBooking(booking.id)}
-                disabled={Boolean(statusBusy) || isFinalStatus}
-                className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200 hover:bg-red-500/20 disabled:opacity-50 md:col-span-2"
-              >
-                {statusBusy === 'CANCELLED'
-                  ? 'Cancelling...'
-                  : 'Cancel Booking'}
+                View Timeline
               </button>
             </div>
-          </DrawerPanel>
+          </section>
 
-          <DrawerPanel title="Assign Driver">
-            {availableDrivers.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/55">
-                No available drivers found.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {availableDrivers.map((driver) => {
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <h3 className="text-lg font-bold text-white">Assign Driver</h3>
+
+            <div className="mt-4 space-y-3">
+              {availableDrivers.length === 0 ? (
+                <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
+                  No available drivers.
+                </div>
+              ) : (
+                availableDrivers.map((driver) => {
                   const key = `${booking.id}:${driver.id}`;
 
                   return (
                     <button
                       key={driver.id}
-                      onClick={() => onAssignDriver(booking.id, driver.id)}
                       disabled={assigningKey === key || isFinalStatus}
-                      className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-left hover:bg-white/10 disabled:opacity-50"
+                      onClick={() => onAssignDriver(booking.id, driver.id)}
+                      className="block w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-left text-sm text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
                     >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="font-semibold text-white">
-                          {getDriverName(driver)}
-                        </div>
-
-                        <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${driverStatusTone(driver)}`}>
-                          {(driver.status || 'UNKNOWN').replace(/_/g, ' ')}
-                        </span>
-                      </div>
-
-                      <div className="mt-1 text-xs text-white/45">
-                        {getVehicleLabel(driver.vehicle ?? null)} · GPS {formatGpsAge(driver.lastLocationAt, now)}
+                      <div className="font-bold">{getDriverName(driver)}</div>
+                      <div className="mt-1 text-xs text-emerald-100/70">
+                        {(driver.status || 'UNKNOWN').replace(/_/g, ' ')} •{' '}
+                        {getVehicleLabel(driver.vehicle ?? null)} • GPS{' '}
+                        {formatGpsAge(driver.lastLocationAt, now)}
                       </div>
                     </button>
                   );
-                })}
-              </div>
-            )}
-          </DrawerPanel>
-
-          <DrawerPanel title="Notes">
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/70">
-              {booking.notes || 'No notes added.'}
+                })
+              )}
             </div>
-          </DrawerPanel>
+          </section>
 
-          <DrawerPanel title="Latest Timeline">
-            {timeline.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/55">
-                No timeline entries found.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {timeline.slice(0, 5).map((event) => (
-                  <div
-                    key={event.id}
-                    className="rounded-2xl border border-white/10 bg-black/20 p-4"
-                  >
-                    <div className="text-xs uppercase tracking-[0.18em] text-white/35">
-                      {formatDateTime(event.createdAt)}
-                    </div>
+          {(booking.notes || booking.airportNotes) ? (
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+              <h3 className="text-lg font-bold text-white">Notes</h3>
 
-                    <div className="mt-2 text-sm text-white">
-                      {event.message || event.type || 'Event'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </DrawerPanel>
+              {booking.airportNotes ? (
+                <p className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-100">
+                  {booking.airportNotes}
+                </p>
+              ) : null}
+
+              {booking.notes ? (
+                <p className="mt-4 whitespace-pre-wrap rounded-xl border border-white/10 bg-[#0b1728] p-4 text-sm text-white/80">
+                  {booking.notes}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
         </div>
       </div>
     </div>
+  );
+}
+
+function StatusButtons({
+  booking,
+  statusBusy,
+  onUpdateStatus,
+}: {
+  booking: Booking;
+  statusBusy: string | null;
+  onUpdateStatus: (bookingId: string, status: string) => void;
+}) {
+  const status = (booking.status || '').toUpperCase();
+
+  const next =
+    status === 'ACCEPTED'
+      ? 'EN_ROUTE'
+      : status === 'EN_ROUTE'
+        ? 'ARRIVED'
+        : status === 'ARRIVED'
+          ? 'ON_JOB'
+          : status === 'ON_JOB'
+            ? 'COMPLETED'
+            : null;
+
+  if (!next) return null;
+
+  return (
+    <button
+      disabled={statusBusy === next}
+      onClick={() => onUpdateStatus(booking.id, next)}
+      className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+    >
+      {statusBusy === next ? 'Updating...' : `Mark ${next.replace(/_/g, ' ')}`}
+    </button>
   );
 }
 
@@ -2628,56 +2883,57 @@ function TimelineModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[1000] bg-black/80 p-4 md:p-8">
-      <div className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-[#0b1220] p-6">
-        <div className="mb-5 flex items-center justify-between gap-4">
+    <div className="fixed inset-0 z-[950] bg-black/70 p-4">
+      <div className="mx-auto max-h-[90vh] max-w-3xl overflow-y-auto rounded-3xl border border-white/10 bg-[#07101d] p-6 text-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold text-white">
-              Timeline · {booking.reference}
-            </h2>
-
-            <p className="mt-1 text-sm text-white/55">
-              Booking history, status changes and dispatch events.
-            </p>
+            <div className="text-xs uppercase tracking-[0.22em] text-white/35">
+              Timeline
+            </div>
+            <h2 className="mt-2 text-2xl font-black">{booking.reference}</h2>
           </div>
 
           <button
             onClick={onClose}
-            className="rounded-2xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
+            className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-white hover:bg-white/10"
           >
             Close
           </button>
         </div>
 
-        <div className="max-h-[70vh] space-y-3 overflow-y-auto">
+        <div className="mt-6 space-y-3">
           {timeline.length === 0 ? (
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-white/55">
-              No timeline entries found.
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-sm text-white/55">
+              No timeline events.
             </div>
           ) : (
             timeline.map((event) => (
               <div
                 key={event.id}
-                className="rounded-2xl border border-white/10 bg-black/20 p-4"
+                className="rounded-2xl border border-white/10 bg-white/5 p-4"
               >
-                <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+                <div className="text-sm text-white">
+                  {event.message || event.note || 'Timeline event'}
+                </div>
+                <div className="mt-2 text-xs text-white/40">
                   {formatDateTime(event.createdAt)}
                 </div>
-
-                <div className="mt-2 text-sm text-white">
-                  {event.message || event.type || 'Event'}
-                </div>
-
-                {event.note ? (
-                  <div className="mt-2 text-sm text-white/60">
-                    {event.note}
-                  </div>
-                ) : null}
               </div>
             ))
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border-b border-white/5 pb-3 last:border-b-0">
+      <div className="text-xs uppercase tracking-[0.18em] text-white/35">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-semibold text-white">{value}</div>
     </div>
   );
 }
@@ -2689,47 +2945,23 @@ function Card({
   urgent,
 }: {
   label: string;
-  value: string | number;
-  hint?: string;
+  value: number;
+  hint: string;
   urgent?: boolean;
 }) {
   return (
     <div
       className={`rounded-3xl border p-5 ${
         urgent
-          ? 'animate-pulse border-amber-400/30 bg-amber-500/10'
-          : 'border-white/10 bg-white/5'
+          ? 'border-amber-400/40 bg-amber-500/10'
+          : 'border-white/10 bg-[#0b1220]'
       }`}
     >
-      <div className="text-sm text-white/55">{label}</div>
-      <div className="mt-3 text-3xl font-bold text-white">{value}</div>
-      {hint ? <div className="mt-2 text-xs text-white/35">{hint}</div> : null}
-    </div>
-  );
-}
-
-function DrawerPanel({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
-      <h3 className="mb-4 text-lg font-bold text-white">{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-white/5 py-2 last:border-b-0">
-      <span className="text-sm text-white/45">{label}</span>
-      <span className="max-w-[62%] text-right text-sm text-white/85">
-        {value}
-      </span>
+      <div className="text-xs uppercase tracking-[0.2em] text-white/35">
+        {label}
+      </div>
+      <div className="mt-3 text-3xl font-black text-white">{value}</div>
+      <div className="mt-1 text-xs text-white/45">{hint}</div>
     </div>
   );
 }
@@ -2746,13 +2978,13 @@ function Field({
   placeholder?: string;
 }) {
   return (
-    <label className="space-y-2">
-      <span className="block text-sm text-white/70">{label}</span>
+    <label className="block">
+      <div className="mb-2 text-sm font-medium text-white/70">{label}</div>
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50"
+        className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50"
       />
     </label>
   );
@@ -2768,14 +3000,39 @@ function NumberField({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="space-y-2">
-      <span className="block text-sm text-white/70">{label}</span>
+    <label className="block">
+      <div className="mb-2 text-sm font-medium text-white/70">{label}</div>
       <input
         type="number"
         min={1}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
-        className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition focus:border-cyan-500/50"
+        className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50"
+      />
+    </label>
+  );
+}
+
+function DateTimeField({
+  label,
+  value,
+  onChange,
+  min,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  min?: string;
+}) {
+  return (
+    <label className="block">
+      <div className="mb-2 text-sm font-medium text-white/70">{label}</div>
+      <input
+        type="datetime-local"
+        value={value}
+        min={min}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50"
       />
     </label>
   );
@@ -2793,15 +3050,15 @@ function SelectField({
   options: Array<{ label: string; value: string }>;
 }) {
   return (
-    <label className="space-y-2">
-      <span className="block text-sm text-white/70">{label}</span>
+    <label className="block">
+      <div className="mb-2 text-sm font-medium text-white/70">{label}</div>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition focus:border-cyan-500/50"
+        className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-sm text-white outline-none transition focus:border-cyan-500/50"
       >
         {options.map((option) => (
-          <option key={`${option.value}-${option.label}`} value={option.value}>
+          <option key={`${option.label}-${option.value}`} value={option.value}>
             {option.label}
           </option>
         ))}
@@ -2810,36 +3067,11 @@ function SelectField({
   );
 }
 
-function DateTimeField({
-  label,
-  value,
-  onChange,
-  min,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  min?: string;
-}) {
-  return (
-    <label className="space-y-2">
-      <span className="block text-sm text-white/70">{label}</span>
-      <input
-        type="datetime-local"
-        value={value}
-        min={min}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition focus:border-cyan-500/50"
-      />
-    </label>
-  );
-}
-
 function InfoField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="space-y-2">
-      <span className="block text-sm text-white/70">{label}</span>
-      <div className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white">
+    <div>
+      <div className="mb-2 text-sm font-medium text-white/70">{label}</div>
+      <div className="rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-sm text-white/60">
         {value}
       </div>
     </div>
@@ -2858,15 +3090,39 @@ function TextAreaField({
   placeholder?: string;
 }) {
   return (
-    <label className="space-y-2">
-      <span className="block text-sm text-white/70">{label}</span>
+    <label className="block">
+      <div className="mb-2 text-sm font-medium text-white/70">{label}</div>
       <textarea
+        rows={4}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        rows={4}
-        className="w-full rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50"
+        className="w-full resize-none rounded-2xl border border-white/10 bg-[#08101d] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-cyan-500/50"
       />
     </label>
+  );
+}
+
+function Toggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={`rounded-full border px-4 py-2 text-xs font-black ${
+        checked
+          ? 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200'
+          : 'border-white/10 bg-white/5 text-white/50'
+      }`}
+    >
+      {label}: {checked ? 'YES' : 'NO'}
+    </button>
   );
 }
