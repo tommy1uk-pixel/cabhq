@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/api';
 import {
   MapContainer,
   Marker,
+  Polyline,
   Popup,
   TileLayer,
   useMap,
@@ -19,6 +20,10 @@ type TrackingData = {
   status: string;
   pickup: string;
   dropoff: string;
+  pickupLat?: number | null;
+  pickupLng?: number | null;
+  dropoffLat?: number | null;
+  dropoffLng?: number | null;
   pickupTime: string;
   quotedPrice?: number | null;
   pricingMode?: string | null;
@@ -50,6 +55,8 @@ type TrackingData = {
   }>;
 };
 
+type LatLngPoint = [number, number];
+
 function formatDateTime(value?: string | null) {
   if (!value) return '—';
 
@@ -76,49 +83,93 @@ function getTrackingReference(raw: unknown) {
   return '';
 }
 
+function isValidCoordinate(lat?: number | null, lng?: number | null) {
+  return (
+    typeof lat === 'number' &&
+    typeof lng === 'number' &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
+
 function makeCarIcon(heading?: number | null) {
   return L.divIcon({
     className: '',
     html: `
       <div style="
-        width: 46px;
-        height: 46px;
+        width: 48px;
+        height: 48px;
         border-radius: 999px;
         background: linear-gradient(135deg, #06b6d4, #0f172a);
         border: 3px solid white;
-        box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+        box-shadow: 0 14px 34px rgba(0,0,0,0.5);
         display: flex;
         align-items: center;
         justify-content: center;
         transform: rotate(${heading ?? 0}deg);
       ">
         <div style="
-          font-size: 24px;
+          font-size: 25px;
           line-height: 1;
           transform: rotate(${-(heading ?? 0)}deg);
         ">🚕</div>
       </div>
     `,
-    iconSize: [46, 46],
-    iconAnchor: [23, 23],
-    popupAnchor: [0, -22],
+    iconSize: [48, 48],
+    iconAnchor: [24, 24],
+    popupAnchor: [0, -24],
   });
 }
 
-function RecenterMap({
-  latitude,
-  longitude,
-}: {
-  latitude: number;
-  longitude: number;
-}) {
+function makePinIcon(label: string, colour: string) {
+  return L.divIcon({
+    className: '',
+    html: `
+      <div style="
+        width: 42px;
+        height: 42px;
+        border-radius: 999px;
+        background: ${colour};
+        border: 3px solid white;
+        box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 21px;
+      ">
+        ${label}
+      </div>
+    `,
+    iconSize: [42, 42],
+    iconAnchor: [21, 21],
+    popupAnchor: [0, -21],
+  });
+}
+
+function FitMapBounds({ points }: { points: LatLngPoint[] }) {
   const map = useMap();
 
   useEffect(() => {
-    map.setView([latitude, longitude], map.getZoom() || 15, {
+    if (points.length === 0) return;
+
+    if (points.length === 1) {
+      map.setView(points[0], 15, {
+        animate: true,
+      });
+      return;
+    }
+
+    const bounds = L.latLngBounds(points);
+    map.fitBounds(bounds, {
+      padding: [45, 45],
       animate: true,
+      maxZoom: 15,
     });
-  }, [latitude, longitude, map]);
+  }, [points, map]);
 
   return null;
 }
@@ -130,18 +181,54 @@ function LiveDriverMap({
   data: TrackingData;
   vehicle: string;
 }) {
-  const latitude = data.driver?.latitude;
-  const longitude = data.driver?.longitude;
-  const heading = data.driver?.heading ?? null;
+  const driverLat = data.driver?.latitude ?? null;
+  const driverLng = data.driver?.longitude ?? null;
+  const pickupLat = data.pickupLat ?? null;
+  const pickupLng = data.pickupLng ?? null;
+  const dropoffLat = data.dropoffLat ?? null;
+  const dropoffLng = data.dropoffLng ?? null;
 
-  const carIcon = useMemo(() => makeCarIcon(heading), [heading]);
+  const hasDriver = isValidCoordinate(driverLat, driverLng);
+  const hasPickup = isValidCoordinate(pickupLat, pickupLng);
+  const hasDropoff = isValidCoordinate(dropoffLat, dropoffLng);
 
-  if (latitude == null || longitude == null) {
+  const driverPoint: LatLngPoint | null = hasDriver
+    ? [driverLat as number, driverLng as number]
+    : null;
+
+  const pickupPoint: LatLngPoint | null = hasPickup
+    ? [pickupLat as number, pickupLng as number]
+    : null;
+
+  const dropoffPoint: LatLngPoint | null = hasDropoff
+    ? [dropoffLat as number, dropoffLng as number]
+    : null;
+
+  const mapPoints = useMemo(() => {
+    return [driverPoint, pickupPoint, dropoffPoint].filter(Boolean) as LatLngPoint[];
+  }, [driverPoint, pickupPoint, dropoffPoint]);
+
+  const routePoints = useMemo(() => {
+    return [driverPoint, pickupPoint, dropoffPoint].filter(Boolean) as LatLngPoint[];
+  }, [driverPoint, pickupPoint, dropoffPoint]);
+
+  const carIcon = useMemo(
+    () => makeCarIcon(data.driver?.heading ?? null),
+    [data.driver?.heading],
+  );
+
+  const pickupIcon = useMemo(() => makePinIcon('📍', '#0891b2'), []);
+  const dropoffIcon = useMemo(() => makePinIcon('🏁', '#059669'), []);
+
+  const fallbackCenter: LatLngPoint =
+    driverPoint || pickupPoint || dropoffPoint || [51.5072, -0.1276];
+
+  if (!hasDriver && !hasPickup && !hasDropoff) {
     return (
       <section className="rounded-3xl border border-white/10 bg-[#0b1220] p-6">
         <h2 className="text-xl font-black">Live map</h2>
         <p className="mt-3 text-white/60">
-          Waiting for the driver app to send GPS location.
+          Waiting for GPS and journey coordinates.
         </p>
       </section>
     );
@@ -151,9 +238,9 @@ function LiveDriverMap({
     <section className="overflow-hidden rounded-3xl border border-cyan-500/20 bg-[#0b1220]">
       <div className="flex items-center justify-between gap-4 p-6">
         <div>
-          <h2 className="text-xl font-black">Live map</h2>
+          <h2 className="text-xl font-black">Live journey map</h2>
           <p className="mt-1 text-sm text-white/50">
-            Updates automatically every 10 seconds
+            Driver, pickup and dropoff shown live
           </p>
         </div>
 
@@ -162,10 +249,10 @@ function LiveDriverMap({
         </div>
       </div>
 
-      <div className="h-[360px] w-full overflow-hidden bg-black md:h-[430px]">
+      <div className="h-[390px] w-full overflow-hidden bg-black md:h-[460px]">
         <MapContainer
-          center={[latitude, longitude]}
-          zoom={15}
+          center={fallbackCenter}
+          zoom={14}
           scrollWheelZoom={false}
           className="h-full w-full"
         >
@@ -174,29 +261,77 @@ function LiveDriverMap({
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          <RecenterMap latitude={latitude} longitude={longitude} />
+          <FitMapBounds points={mapPoints} />
 
-          <Marker position={[latitude, longitude]} icon={carIcon}>
-            <Popup>
-              <div>
-                <strong>{data.driver?.name || 'Driver'}</strong>
-                <br />
-                {vehicle}
-                <br />
-                Last update: {formatDateTime(data.driver?.lastLocationAt)}
-              </div>
-            </Popup>
-          </Marker>
+          {routePoints.length >= 2 ? (
+            <Polyline
+              positions={routePoints}
+              pathOptions={{
+                color: '#06b6d4',
+                weight: 5,
+                opacity: 0.85,
+              }}
+            />
+          ) : null}
+
+          {pickupPoint ? (
+            <Marker position={pickupPoint} icon={pickupIcon}>
+              <Popup>
+                <div>
+                  <strong>Pickup</strong>
+                  <br />
+                  {data.pickup}
+                </div>
+              </Popup>
+            </Marker>
+          ) : null}
+
+          {dropoffPoint ? (
+            <Marker position={dropoffPoint} icon={dropoffIcon}>
+              <Popup>
+                <div>
+                  <strong>Dropoff</strong>
+                  <br />
+                  {data.dropoff}
+                </div>
+              </Popup>
+            </Marker>
+          ) : null}
+
+          {driverPoint ? (
+            <Marker position={driverPoint} icon={carIcon}>
+              <Popup>
+                <div>
+                  <strong>{data.driver?.name || 'Driver'}</strong>
+                  <br />
+                  {vehicle}
+                  <br />
+                  Last update: {formatDateTime(data.driver?.lastLocationAt)}
+                </div>
+              </Popup>
+            </Marker>
+          ) : null}
         </MapContainer>
       </div>
 
-      <div className="grid gap-3 p-6 text-sm text-white/60 md:grid-cols-2">
+      <div className="grid gap-3 p-6 text-sm text-white/60 md:grid-cols-3">
         <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
           <div className="text-xs font-black uppercase tracking-[0.18em] text-white/35">
-            Current Coordinates
+            Driver
           </div>
           <div className="mt-2 font-bold text-white">
-            {latitude.toFixed(5)}, {longitude.toFixed(5)}
+            {driverPoint
+              ? `${driverPoint[0].toFixed(5)}, ${driverPoint[1].toFixed(5)}`
+              : 'Waiting for GPS'}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="text-xs font-black uppercase tracking-[0.18em] text-white/35">
+            Pickup Pin
+          </div>
+          <div className="mt-2 font-bold text-white">
+            {pickupPoint ? 'Available' : 'No coordinates'}
           </div>
         </div>
 
@@ -210,16 +345,18 @@ function LiveDriverMap({
         </div>
       </div>
 
-      <div className="px-6 pb-6">
-        <a
-          href={`https://www.google.com/maps?q=${latitude},${longitude}`}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-5 py-3 text-sm font-bold text-cyan-200"
-        >
-          Open driver location in Google Maps
-        </a>
-      </div>
+      {driverPoint ? (
+        <div className="px-6 pb-6">
+          <a
+            href={`https://www.google.com/maps?q=${driverPoint[0]},${driverPoint[1]}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-5 py-3 text-sm font-bold text-cyan-200"
+          >
+            Open driver location in Google Maps
+          </a>
+        </div>
+      ) : null}
     </section>
   );
 }
