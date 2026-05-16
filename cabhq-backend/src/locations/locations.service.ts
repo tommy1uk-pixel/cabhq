@@ -258,7 +258,7 @@ export class LocationsService {
       .filter(Boolean)
       .join(', ');
 
-    const fallbackCoords = await this.geocodeWithMapbox(fullAddress);
+    const fallbackCoords = await this.geocodeAddress(fullAddress);
 
     const result: RetrievedAddress = {
       id: cleanId,
@@ -269,9 +269,7 @@ export class LocationsService {
       town: address.posttown || null,
       county: address.county || null,
       postcode: address.postcode || null,
-      latitude: address.latitude
-        ? Number(address.latitude)
-        : fallbackCoords.latitude,
+      latitude: address.latitude ? Number(address.latitude) : fallbackCoords.latitude,
       longitude: address.longitude
         ? Number(address.longitude)
         : fallbackCoords.longitude,
@@ -281,6 +279,81 @@ export class LocationsService {
     this.retrieveCache.set(cleanId, result);
 
     return result;
+  }
+
+  async geocodeAddress(address: string) {
+    const cleanAddress = address?.trim();
+
+    if (!cleanAddress) {
+      return {
+        latitude: null,
+        longitude: null,
+      };
+    }
+
+    const airport = AIRPORTS.find((item) => {
+      const normalisedAddress = cleanAddress.toLowerCase();
+
+      return item.keywords.some(
+        (keyword) =>
+          normalisedAddress.includes(keyword) ||
+          keyword.includes(normalisedAddress),
+      );
+    });
+
+    if (airport) {
+      return {
+        latitude: airport.latitude,
+        longitude: airport.longitude,
+      };
+    }
+
+    const token = process.env.MAPBOX_ACCESS_TOKEN;
+
+    if (!token) {
+      return {
+        latitude: null,
+        longitude: null,
+      };
+    }
+
+    try {
+      const url =
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/` +
+        `${encodeURIComponent(cleanAddress)}.json` +
+        `?access_token=${encodeURIComponent(token)}` +
+        `&country=gb` +
+        `&limit=1`;
+
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        return {
+          latitude: null,
+          longitude: null,
+        };
+      }
+
+      const data = (await response.json()) as MapboxGeocodeResponse;
+      const center = data.features?.[0]?.center;
+
+      if (!center) {
+        return {
+          latitude: null,
+          longitude: null,
+        };
+      }
+
+      return {
+        longitude: center[0],
+        latitude: center[1],
+      };
+    } catch {
+      return {
+        latitude: null,
+        longitude: null,
+      };
+    }
   }
 
   async getRoute(input: RouteInput) {
@@ -325,54 +398,5 @@ export class LocationsService {
         route.geometry?.coordinates?.map((coord) => [coord[1], coord[0]]) ||
         [],
     };
-  }
-
-  private async geocodeWithMapbox(address: string) {
-    const token = process.env.MAPBOX_ACCESS_TOKEN;
-
-    if (!token || !address.trim()) {
-      return {
-        latitude: null,
-        longitude: null,
-      };
-    }
-
-    try {
-      const url =
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/` +
-        `${encodeURIComponent(address)}.json` +
-        `?access_token=${encodeURIComponent(token)}` +
-        `&country=gb` +
-        `&limit=1`;
-
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        return {
-          latitude: null,
-          longitude: null,
-        };
-      }
-
-      const data = (await response.json()) as MapboxGeocodeResponse;
-      const center = data.features?.[0]?.center;
-
-      if (!center) {
-        return {
-          latitude: null,
-          longitude: null,
-        };
-      }
-
-      return {
-        longitude: center[0],
-        latitude: center[1],
-      };
-    } catch {
-      return {
-        latitude: null,
-        longitude: null,
-      };
-    }
   }
 }

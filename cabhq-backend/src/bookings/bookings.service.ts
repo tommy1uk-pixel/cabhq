@@ -6,6 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AutoDispatchService } from '../dispatch/auto-dispatch.service';
+import { LocationsService } from '../locations/locations.service';
 
 type CreateBookingInput = {
   companyId: string;
@@ -87,6 +88,7 @@ export class BookingsService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeService,
     private readonly autoDispatchService: AutoDispatchService,
+    private readonly locationsService: LocationsService,
   ) {}
 
   async list(companyId: string) {
@@ -289,6 +291,29 @@ export class BookingsService {
       ? input.passengerPhone?.trim() || null
       : input.passengerPhone?.trim() || bookerPhone;
 
+    let pickupLat = input.pickupLat ?? null;
+    let pickupLng = input.pickupLng ?? null;
+    let dropoffLat = input.dropoffLat ?? null;
+    let dropoffLng = input.dropoffLng ?? null;
+
+    if (pickupLat === null || pickupLng === null) {
+      const pickupCoords = await this.locationsService.geocodeAddress(
+        input.pickup.trim(),
+      );
+
+      pickupLat = pickupCoords.latitude ?? null;
+      pickupLng = pickupCoords.longitude ?? null;
+    }
+
+    if (dropoffLat === null || dropoffLng === null) {
+      const dropoffCoords = await this.locationsService.geocodeAddress(
+        input.dropoff.trim(),
+      );
+
+      dropoffLat = dropoffCoords.latitude ?? null;
+      dropoffLng = dropoffCoords.longitude ?? null;
+    }
+
     const booking = await this.prisma.booking.create({
       data: {
         companyId: input.companyId,
@@ -296,10 +321,10 @@ export class BookingsService {
         reference,
         pickup: input.pickup.trim(),
         dropoff: input.dropoff.trim(),
-        pickupLat: input.pickupLat ?? null,
-        pickupLng: input.pickupLng ?? null,
-        dropoffLat: input.dropoffLat ?? null,
-        dropoffLng: input.dropoffLng ?? null,
+        pickupLat,
+        pickupLng,
+        dropoffLat,
+        dropoffLng,
         pickupTime,
         status: 'BOOKED',
         pricingMode: input.pricingMode ?? null,
