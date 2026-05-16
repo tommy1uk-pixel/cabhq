@@ -16,6 +16,8 @@ type Suggestion = {
   address: string;
   latitude?: number | null;
   longitude?: number | null;
+  lat?: number | null;
+  lng?: number | null;
   type?: string;
 };
 
@@ -30,6 +32,8 @@ type RetrievedAddress = {
   postcode?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  lat?: number | null;
+  lng?: number | null;
 };
 
 type AddressAutofillInputInnerProps = {
@@ -40,6 +44,26 @@ type AddressAutofillInputInnerProps = {
   onChangeValue: (value: string) => void;
   onSelectAddress: (address: SelectedAddress) => void;
 };
+
+function toNumberOrNull(value: unknown) {
+  if (value === null || value === undefined || value === '') return null;
+
+  const numberValue =
+    typeof value === 'number' ? value : Number(String(value).trim());
+
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function isValidLatLng(lat: number | null, lng: number | null) {
+  return (
+    lat !== null &&
+    lng !== null &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
 
 async function searchBackendAddresses(query: string): Promise<Suggestion[]> {
   const data = await apiFetch<Suggestion[]>(
@@ -68,6 +92,7 @@ export default function AddressAutofillInputInner({
   onSelectAddress,
 }: AddressAutofillInputInnerProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const selectingRef = useRef(false);
 
   const [items, setItems] = useState<Suggestion[]>([]);
   const [open, setOpen] = useState(false);
@@ -93,6 +118,8 @@ export default function AddressAutofillInputInner({
   }, []);
 
   useEffect(() => {
+    if (selectingRef.current) return;
+
     const query = value.trim();
 
     if (query.length < 3) {
@@ -136,6 +163,7 @@ export default function AddressAutofillInputInner({
 
   async function selectItem(item: Suggestion) {
     try {
+      selectingRef.current = true;
       setSelecting(true);
       setError('');
 
@@ -147,11 +175,34 @@ export default function AddressAutofillInputInner({
         console.warn('Address retrieve failed, using suggestion fallback:', err);
       }
 
-      const label = selected?.address || item.address;
-      const lat = selected?.latitude ?? item.latitude ?? null;
-      const lng = selected?.longitude ?? item.longitude ?? null;
+      const label =
+        selected?.address?.trim() ||
+        [
+          selected?.line1,
+          selected?.line2,
+          selected?.line3,
+          selected?.town,
+          selected?.county,
+          selected?.postcode,
+        ]
+          .filter(Boolean)
+          .join(', ')
+          .trim() ||
+        item.address;
 
-      onChangeValue(label);
+      const lat = toNumberOrNull(
+        selected?.latitude ?? selected?.lat ?? item.latitude ?? item.lat,
+      );
+
+      const lng = toNumberOrNull(
+        selected?.longitude ?? selected?.lng ?? item.longitude ?? item.lng,
+      );
+
+      if (!isValidLatLng(lat, lng)) {
+        throw new Error(
+          'Selected address has no GPS coordinates. Please choose another result.',
+        );
+      }
 
       onSelectAddress({
         label,
@@ -161,6 +212,8 @@ export default function AddressAutofillInputInner({
         placeName: selected?.line1 ?? item.address,
       });
 
+      onChangeValue(label);
+
       setItems([]);
       setOpen(false);
       setHighlightedIndex(-1);
@@ -169,6 +222,10 @@ export default function AddressAutofillInputInner({
       console.error('Address resolve failed:', err);
       setError(err instanceof Error ? err.message : 'Failed to select address');
     } finally {
+      window.setTimeout(() => {
+        selectingRef.current = false;
+      }, 0);
+
       setSelecting(false);
     }
   }
@@ -217,6 +274,7 @@ export default function AddressAutofillInputInner({
         autoComplete={autoComplete}
         placeholder={placeholder}
         onChange={(event) => {
+          selectingRef.current = false;
           onChangeValue(event.target.value);
           setOpen(true);
         }}
@@ -246,6 +304,9 @@ export default function AddressAutofillInputInner({
           {items.map((item, index) => {
             const active = index === highlightedIndex;
 
+            const itemLat = toNumberOrNull(item.latitude ?? item.lat);
+            const itemLng = toNumberOrNull(item.longitude ?? item.lng);
+
             return (
               <button
                 key={`${item.id}-${index}`}
@@ -264,8 +325,8 @@ export default function AddressAutofillInputInner({
                 </div>
 
                 <div className="mt-1 text-xs text-cyan-300/80">
-                  {item.latitude != null && item.longitude != null
-                    ? `${item.latitude.toFixed(5)}, ${item.longitude.toFixed(5)}`
+                  {isValidLatLng(itemLat, itemLng)
+                    ? `${itemLat.toFixed(5)}, ${itemLng.toFixed(5)}`
                     : 'Click to load full address'}
                 </div>
               </button>
