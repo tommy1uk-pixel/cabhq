@@ -144,7 +144,7 @@ export default function AddressAutofillInputInner({
         setHighlightedIndex(nextItems.length > 0 ? 0 : -1);
 
         if (nextItems.length === 0) {
-          setError('No addresses found');
+          setError('No addresses found. Try adding village/town and postcode.');
         }
       } catch (err) {
         console.error('Address lookup failed:', err);
@@ -203,7 +203,7 @@ export default function AddressAutofillInputInner({
 
       if (!coords) {
         throw new Error(
-          'Selected address has no GPS coordinates. Please choose another result.',
+          'This result has no reliable GPS coordinates. Please select a full address from the dropdown.',
         );
       }
 
@@ -238,20 +238,12 @@ export default function AddressAutofillInputInner({
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-
-      setHighlightedIndex((prev) => {
-        if (prev >= items.length - 1) return 0;
-        return prev + 1;
-      });
+      setHighlightedIndex((prev) => (prev >= items.length - 1 ? 0 : prev + 1));
     }
 
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-
-      setHighlightedIndex((prev) => {
-        if (prev <= 0) return items.length - 1;
-        return prev - 1;
-      });
+      setHighlightedIndex((prev) => (prev <= 0 ? items.length - 1 : prev - 1));
     }
 
     if (event.key === 'Enter') {
@@ -269,9 +261,11 @@ export default function AddressAutofillInputInner({
 
   return (
     <div ref={wrapperRef} className="relative">
-      <label className="mb-2 block text-sm font-medium text-white">
-        {label}
-      </label>
+      {label ? (
+        <label className="mb-2 block text-sm font-medium text-white">
+          {label}
+        </label>
+      ) : null}
 
       <input
         type="text"
@@ -335,7 +329,7 @@ export default function AddressAutofillInputInner({
                     ? `${itemCoords.lat.toFixed(5)}, ${itemCoords.lng.toFixed(
                         5,
                       )}`
-                    : 'Click to load full address'}
+                    : 'Select to load full GPS address'}
                 </div>
               </button>
             );
