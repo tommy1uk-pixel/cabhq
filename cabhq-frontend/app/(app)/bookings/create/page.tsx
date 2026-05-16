@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import AdminShell from '@/components/AdminShell';
-import AddressAutocomplete from '@/components/AddressAutocomplete';
+import AddressAutofillInput, {
+  type SelectedAddress,
+} from '@/components/AddressAutofillInput';
 import { apiFetch } from '@/lib/api';
 
 type Account = {
@@ -20,7 +22,11 @@ type BookingResponse = {
 
 type FormState = {
   pickup: string;
+  pickupLat: number | null;
+  pickupLng: number | null;
   dropoff: string;
+  dropoffLat: number | null;
+  dropoffLng: number | null;
   pickupTime: string;
   quotedPrice: string;
   passengerCount: string;
@@ -40,7 +46,11 @@ type FormState = {
 
 const initialForm: FormState = {
   pickup: '',
+  pickupLat: null,
+  pickupLng: null,
   dropoff: '',
+  dropoffLat: null,
+  dropoffLng: null,
   pickupTime: '',
   quotedPrice: '',
   passengerCount: '1',
@@ -57,6 +67,9 @@ const initialForm: FormState = {
   passengerNotes: '',
   autoDispatch: false,
 };
+
+const inputClassName =
+  'w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50';
 
 export default function CreateBookingPage() {
   const router = useRouter();
@@ -86,10 +99,36 @@ export default function CreateBookingPage() {
     }));
   }
 
+  function setPickupAddress(address: SelectedAddress) {
+    setForm((prev) => ({
+      ...prev,
+      pickup: address.label,
+      pickupLat: address.lat,
+      pickupLng: address.lng,
+    }));
+  }
+
+  function setDropoffAddress(address: SelectedAddress) {
+    setForm((prev) => ({
+      ...prev,
+      dropoff: address.label,
+      dropoffLat: address.lat,
+      dropoffLng: address.lng,
+    }));
+  }
+
   function validate() {
     if (!form.pickup.trim()) return 'Pickup is required';
     if (!form.dropoff.trim()) return 'Dropoff is required';
     if (!form.pickupTime.trim()) return 'Pickup time is required';
+
+    if (form.pickupLat == null || form.pickupLng == null) {
+      return 'Please select a pickup address from the dropdown so GPS coordinates are saved';
+    }
+
+    if (form.dropoffLat == null || form.dropoffLng == null) {
+      return 'Please select a dropoff address from the dropdown so GPS coordinates are saved';
+    }
 
     if (form.isThirdPartyBooking) {
       if (!form.bookerName.trim()) return 'Booker name is required';
@@ -126,7 +165,23 @@ export default function CreateBookingPage() {
       const payload = {
         pickup: form.pickup.trim(),
         dropoff: form.dropoff.trim(),
+
+        pickupAddress: form.pickup.trim(),
+        dropoffAddress: form.dropoff.trim(),
+
+        pickupLat: form.pickupLat,
+        pickupLng: form.pickupLng,
+        dropoffLat: form.dropoffLat,
+        dropoffLng: form.dropoffLng,
+
+        pickupLatitude: form.pickupLat,
+        pickupLongitude: form.pickupLng,
+        dropoffLatitude: form.dropoffLat,
+        dropoffLongitude: form.dropoffLng,
+
         pickupTime: pickupTime.toISOString(),
+        pickupAt: pickupTime.toISOString(),
+
         quotedPrice: form.quotedPrice.trim() ? Number(form.quotedPrice) : null,
         passengerCount: form.passengerCount.trim()
           ? Number(form.passengerCount)
@@ -221,10 +276,20 @@ export default function CreateBookingPage() {
                 <Field
                   label="Pickup Address"
                   input={
-                    <AddressAutocomplete
+                    <AddressAutofillInput
+                      label=""
                       value={form.pickup}
-                      onChange={(value) => setField('pickup', value)}
                       placeholder="Start typing pickup address"
+                      autoComplete="off"
+                      onChangeValue={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          pickup: value,
+                          pickupLat: null,
+                          pickupLng: null,
+                        }))
+                      }
+                      onSelectAddress={setPickupAddress}
                     />
                   }
                 />
@@ -232,10 +297,20 @@ export default function CreateBookingPage() {
                 <Field
                   label="Dropoff Address"
                   input={
-                    <AddressAutocomplete
+                    <AddressAutofillInput
+                      label=""
                       value={form.dropoff}
-                      onChange={(value) => setField('dropoff', value)}
                       placeholder="Start typing dropoff address"
+                      autoComplete="off"
+                      onChangeValue={(value) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          dropoff: value,
+                          dropoffLat: null,
+                          dropoffLng: null,
+                        }))
+                      }
+                      onSelectAddress={setDropoffAddress}
                     />
                   }
                 />
@@ -533,6 +608,26 @@ export default function CreateBookingPage() {
                   <SummaryRow label="Pickup" value={form.pickup || '—'} />
                   <SummaryRow label="Dropoff" value={form.dropoff || '—'} />
                   <SummaryRow
+                    label="Pickup GPS"
+                    value={
+                      form.pickupLat != null && form.pickupLng != null
+                        ? `${form.pickupLat.toFixed(5)}, ${form.pickupLng.toFixed(
+                            5,
+                          )}`
+                        : 'Not selected'
+                    }
+                  />
+                  <SummaryRow
+                    label="Dropoff GPS"
+                    value={
+                      form.dropoffLat != null && form.dropoffLng != null
+                        ? `${form.dropoffLat.toFixed(
+                            5,
+                          )}, ${form.dropoffLng.toFixed(5)}`
+                        : 'Not selected'
+                    }
+                  />
+                  <SummaryRow
                     label="Pickup Time"
                     value={
                       form.pickupTime
@@ -575,10 +670,10 @@ export default function CreateBookingPage() {
                 subtitle="Powered by CabHQ Mapbox search."
               >
                 <div className="space-y-3 text-sm text-white/60">
-                  <p>• Searches UK addresses</p>
-                  <p>• Supports house numbers</p>
-                  <p>• Supports places and businesses</p>
-                  <p>• Ready for coordinates and pricing next</p>
+                  <p>• Search and select addresses from dropdown</p>
+                  <p>• GPS coordinates are required</p>
+                  <p>• Pickup/dropoff pins appear on live tracking</p>
+                  <p>• Route lines use saved coordinates</p>
                 </div>
               </Panel>
             </div>
@@ -620,7 +715,9 @@ function Field({
 }) {
   return (
     <label className="block">
-      <div className="mb-2 text-sm font-medium text-white/70">{label}</div>
+      {label ? (
+        <div className="mb-2 text-sm font-medium text-white/70">{label}</div>
+      ) : null}
       {input}
     </label>
   );
@@ -711,6 +808,3 @@ function formatLocalDateTime(value: string) {
     minute: '2-digit',
   });
 }
-
-const inputClassName =
-  'w-full rounded-2xl border border-white/10 bg-[#0b1728] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-cyan-500/50';
