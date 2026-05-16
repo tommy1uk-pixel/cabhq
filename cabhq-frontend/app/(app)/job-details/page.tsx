@@ -11,11 +11,14 @@ type JobStatus =
   | 'ARRIVED'
   | 'ON_JOB'
   | 'COMPLETED'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  | 'NO_SHOW'
+  | 'NO_DRIVER';
 
 type JobTimelineItem = {
   id: string;
-  time: string;
+  time?: string | null;
+  createdAt?: string | null;
   message: string;
 };
 
@@ -23,19 +26,41 @@ type JobDetail = {
   id: string;
   reference: string;
   status: JobStatus;
-  customerName: string;
-  customerPhone: string;
-  pickup: string;
-  dropoff: string;
-  pickupAt: string;
-  quotedPrice: number;
-  passengerCount: number;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  pickup?: string | null;
+  pickupAddress?: string | null;
+  dropoff?: string | null;
+  dropoffAddress?: string | null;
+  pickupAt?: string | null;
+  pickupTime?: string | null;
+  quotedPrice?: number | null;
+  calculatedFare?: number | null;
+  fare?: number | null;
+  price?: number | null;
+  pricing?: {
+    quotedPrice?: number | null;
+    calculatedFare?: number | null;
+  } | null;
+  passengerCount?: number | null;
   notes?: string | null;
   driverName?: string | null;
+  driver?: {
+    name?: string | null;
+    vehicle?: {
+      reg?: string | null;
+      registration?: string | null;
+      make?: string | null;
+      model?: string | null;
+    } | null;
+  } | null;
   vehicle?: string | null;
   accountName?: string | null;
-  createdAt: string;
-  timeline: JobTimelineItem[];
+  account?: {
+    name?: string | null;
+  } | null;
+  createdAt?: string | null;
+  timeline?: JobTimelineItem[];
 };
 
 const initialJobs: JobDetail[] = [
@@ -143,6 +168,54 @@ const initialJobs: JobDetail[] = [
   },
 ];
 
+function getBookingPrice(job: JobDetail | null | undefined) {
+  return (
+    job?.quotedPrice ??
+    job?.pricing?.quotedPrice ??
+    job?.calculatedFare ??
+    job?.pricing?.calculatedFare ??
+    job?.fare ??
+    job?.price ??
+    null
+  );
+}
+
+function getPickup(job: JobDetail) {
+  return job.pickupAddress || job.pickup || '—';
+}
+
+function getDropoff(job: JobDetail) {
+  return job.dropoffAddress || job.dropoff || '—';
+}
+
+function getPickupTime(job: JobDetail) {
+  return job.pickupAt || job.pickupTime || null;
+}
+
+function getDriverName(job: JobDetail) {
+  return job.driverName || job.driver?.name || null;
+}
+
+function getAccountName(job: JobDetail) {
+  return job.accountName || job.account?.name || null;
+}
+
+function getVehicle(job: JobDetail) {
+  if (job.vehicle) return job.vehicle;
+
+  const vehicle = job.driver?.vehicle;
+  if (!vehicle) return null;
+
+  const reg = vehicle.registration || vehicle.reg || '';
+  const details = [vehicle.make, vehicle.model].filter(Boolean).join(' ');
+
+  if (reg && details) return `${reg} • ${details}`;
+  if (reg) return reg;
+  if (details) return details;
+
+  return null;
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) return '—';
   const d = new Date(value);
@@ -159,19 +232,22 @@ function formatDateTime(value?: string | null) {
 
 function formatCurrency(value?: number | null) {
   if (value == null) return '—';
-  return `£${value.toFixed(2)}`;
+  return `£${Number(value).toFixed(2)}`;
 }
 
 function statusClass(status: JobStatus) {
   if (status === 'COMPLETED') {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
   }
-  if (status === 'CANCELLED') {
+
+  if (status === 'CANCELLED' || status === 'NO_SHOW') {
     return 'border-red-500/30 bg-red-500/10 text-red-300';
   }
-  if (status === 'BOOKED' || status === 'OFFERED') {
+
+  if (status === 'BOOKED' || status === 'OFFERED' || status === 'NO_DRIVER') {
     return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
   }
+
   return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-300';
 }
 
@@ -189,12 +265,12 @@ export default function JobDetailsPage() {
     return jobs.filter((job) =>
       [
         job.reference,
-        job.customerName,
-        job.customerPhone,
-        job.pickup,
-        job.dropoff,
-        job.driverName ?? '',
-        job.accountName ?? '',
+        job.customerName ?? '',
+        job.customerPhone ?? '',
+        getPickup(job),
+        getDropoff(job),
+        getDriverName(job) ?? '',
+        getAccountName(job) ?? '',
         job.status,
       ]
         .join(' ')
@@ -216,7 +292,7 @@ export default function JobDetailsPage() {
       ).length,
       completed: jobs.filter((job) => job.status === 'COMPLETED').length,
       booked: jobs.filter((job) => job.status === 'BOOKED').length,
-      value: jobs.reduce((sum, job) => sum + job.quotedPrice, 0),
+      value: jobs.reduce((sum, job) => sum + Number(getBookingPrice(job) ?? 0), 0),
     };
   }, [jobs]);
 
@@ -282,14 +358,17 @@ export default function JobDetailsPage() {
                         </span>
                       </div>
 
-                      <p className="mt-2 text-sm text-white/75">{job.customerName}</p>
+                      <p className="mt-2 text-sm text-white/75">
+                        {job.customerName || 'No customer name'}
+                      </p>
+
                       <p className="mt-2 text-sm text-white/55">
-                        {job.pickup} → {job.dropoff}
+                        {getPickup(job)} → {getDropoff(job)}
                       </p>
 
                       <div className="mt-3 flex flex-wrap gap-4 text-xs text-white/45">
-                        <span>{formatDateTime(job.pickupAt)}</span>
-                        <span>{job.driverName || 'Unassigned'}</span>
+                        <span>{formatDateTime(getPickupTime(job))}</span>
+                        <span>{getDriverName(job) || 'Unassigned'}</span>
                         <span>{formatCurrency(getBookingPrice(job))}</span>
                       </div>
                     </div>
@@ -313,7 +392,9 @@ export default function JobDetailsPage() {
               <div className="mt-5 space-y-4">
                 <div className="rounded-2xl border border-white/10 bg-[#0b1728] p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-xl font-bold text-white">{selectedJob.reference}</h3>
+                    <h3 className="text-xl font-bold text-white">
+                      {selectedJob.reference}
+                    </h3>
                     <span
                       className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(
                         selectedJob.status,
@@ -328,15 +409,21 @@ export default function JobDetailsPage() {
                   <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
                     Customer
                   </h4>
-                  <DetailRow label="Name" value={selectedJob.customerName} />
-                  <DetailRow label="Phone" value={selectedJob.customerPhone} />
+                  <DetailRow
+                    label="Name"
+                    value={selectedJob.customerName || '—'}
+                  />
+                  <DetailRow
+                    label="Phone"
+                    value={selectedJob.customerPhone || '—'}
+                  />
                   <DetailRow
                     label="Passengers"
-                    value={String(selectedJob.passengerCount)}
+                    value={String(selectedJob.passengerCount ?? '—')}
                   />
                   <DetailRow
                     label="Account"
-                    value={selectedJob.accountName || 'Private booking'}
+                    value={getAccountName(selectedJob) || 'Private booking'}
                   />
                 </div>
 
@@ -344,15 +431,15 @@ export default function JobDetailsPage() {
                   <h4 className="mb-3 text-sm font-semibold uppercase tracking-wide text-white/70">
                     Journey
                   </h4>
-                  <DetailRow label="Pickup" value={selectedJob.pickup} />
-                  <DetailRow label="Dropoff" value={selectedJob.dropoff} />
+                  <DetailRow label="Pickup" value={getPickup(selectedJob)} />
+                  <DetailRow label="Dropoff" value={getDropoff(selectedJob)} />
                   <DetailRow
                     label="Pickup Time"
-                    value={formatDateTime(selectedJob.pickupAt)}
+                    value={formatDateTime(getPickupTime(selectedJob))}
                   />
                   <DetailRow
                     label="Quoted Price"
-                    value={formatCurrency(selectedJob.quotedPrice)}
+                    value={formatCurrency(getBookingPrice(selectedJob))}
                   />
                 </div>
 
@@ -362,11 +449,11 @@ export default function JobDetailsPage() {
                   </h4>
                   <DetailRow
                     label="Driver"
-                    value={selectedJob.driverName || 'Unassigned'}
+                    value={getDriverName(selectedJob) || 'Unassigned'}
                   />
                   <DetailRow
                     label="Vehicle"
-                    value={selectedJob.vehicle || 'No vehicle assigned'}
+                    value={getVehicle(selectedJob) || 'No vehicle assigned'}
                   />
                   <DetailRow
                     label="Created"
@@ -379,19 +466,27 @@ export default function JobDetailsPage() {
                     Timeline
                   </h4>
 
-                  <div className="space-y-3">
-                    {selectedJob.timeline.map((item) => (
-                      <div
-                        key={item.id}
-                        className="rounded-xl border border-white/10 bg-black/20 p-3"
-                      >
-                        <div className="text-xs text-white/45">
-                          {formatDateTime(item.time)}
+                  {selectedJob.timeline?.length ? (
+                    <div className="space-y-3">
+                      {selectedJob.timeline.map((item) => (
+                        <div
+                          key={item.id}
+                          className="rounded-xl border border-white/10 bg-black/20 p-3"
+                        >
+                          <div className="text-xs text-white/45">
+                            {formatDateTime(item.time || item.createdAt)}
+                          </div>
+                          <div className="mt-1 text-sm text-white/80">
+                            {item.message}
+                          </div>
                         </div>
-                        <div className="mt-1 text-sm text-white/80">{item.message}</div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-white/50">
+                      No timeline entries.
+                    </div>
+                  )}
                 </div>
 
                 {selectedJob.notes ? (
