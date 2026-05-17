@@ -104,6 +104,16 @@ type UpdateBookingStatusInput = {
   status: string;
 };
 
+type BookingTrackingMeta = {
+  trackingUrl: string;
+  driverDistanceMiles: number | null;
+  etaMinutes: number | null;
+  etaConfidence: 'LIVE_GPS' | 'ESTIMATED' | 'UNAVAILABLE';
+  driverGpsAgeSeconds: number | null;
+  customerTrackingMessage: string;
+};
+
+
 @Injectable()
 export class BookingsService {
   constructor(
@@ -138,24 +148,12 @@ export class BookingsService {
             )
           : [];
 
-        const trackingUrl = this.getTrackingUrl(booking.reference);
-
-        const driverDistanceMiles =
-          booking.driver && booking.pickupLat != null && booking.pickupLng != null
-            ? this.getDriverDistanceMiles(booking)
-            : null;
-
-        const etaMinutes =
-          booking.driver && booking.pickupLat != null && booking.pickupLng != null
-            ? this.getBookingEtaMinutes(booking)
-            : null;
+        const trackingMeta = this.buildTrackingMeta(booking);
 
         return {
           ...booking,
           suggestedDrivers,
-          trackingUrl,
-          driverDistanceMiles,
-          etaMinutes,
+          ...trackingMeta,
           pickupLatitude: booking.pickupLat ?? null,
           pickupLongitude: booking.pickupLng ?? null,
           dropoffLatitude: booking.dropoffLat ?? null,
@@ -196,17 +194,7 @@ export class BookingsService {
       throw new NotFoundException('Booking not found');
     }
 
-    const trackingUrl = this.getTrackingUrl(booking.reference);
-
-    const driverDistanceMiles =
-      booking.driver && booking.pickupLat != null && booking.pickupLng != null
-        ? this.getDriverDistanceMiles(booking)
-        : null;
-
-    const etaMinutes =
-      booking.driver && booking.pickupLat != null && booking.pickupLng != null
-        ? this.getBookingEtaMinutes(booking)
-        : null;
+    const trackingMeta = this.buildTrackingMeta(booking);
 
     return {
       reference: booking.reference,
@@ -220,9 +208,12 @@ export class BookingsService {
       pickupTime: booking.pickupTime,
       quotedPrice: booking.quotedPrice,
       pricingMode: booking.pricingMode,
-      trackingUrl,
-      driverDistanceMiles,
-      etaMinutes,
+      trackingUrl: trackingMeta.trackingUrl,
+      driverDistanceMiles: trackingMeta.driverDistanceMiles,
+      etaMinutes: trackingMeta.etaMinutes,
+      etaConfidence: trackingMeta.etaConfidence,
+      driverGpsAgeSeconds: trackingMeta.driverGpsAgeSeconds,
+      customerTrackingMessage: trackingMeta.customerTrackingMessage,
 
       isAirportBooking: booking.isAirportBooking ?? false,
       airportCode: booking.airportCode ?? null,
@@ -459,7 +450,7 @@ export class BookingsService {
     if (accountName) {
       await this.appendTimeline(
         booking.id,
-        `ACCOUNT LINKED · ${accountName} [${accountId}]`,
+        `Account linked · ${accountName}`,
       );
     }
 
@@ -504,19 +495,19 @@ export class BookingsService {
     if (input.notes?.trim()) {
       await this.appendTimeline(
         booking.id,
-        `BOOKING NOTES · ${input.notes.trim()}`,
+        `Booking notes · ${input.notes.trim()}`,
       );
     }
 
     if (input.passengerNotes?.trim()) {
       await this.appendTimeline(
         booking.id,
-        `PASSENGER NOTES · ${input.passengerNotes.trim()}`,
+        `Passenger notes · ${input.passengerNotes.trim()}`,
       );
     }
 
     if (airportNotes) {
-      await this.appendTimeline(booking.id, `AIRPORT NOTES · ${airportNotes}`);
+      await this.appendTimeline(booking.id, `Airport notes · ${airportNotes}`);
     }
 
     if (booking.quotedPrice != null) {
@@ -547,13 +538,13 @@ export class BookingsService {
 
       return {
         ...autoDispatched,
-        trackingUrl: this.getTrackingUrl(autoDispatched.reference),
+        ...this.buildTrackingMeta(autoDispatched),
       };
     }
 
     return {
       ...refreshed,
-      trackingUrl: this.getTrackingUrl(refreshed.reference),
+      ...this.buildTrackingMeta(refreshed),
     };
   }
 
@@ -1299,6 +1290,36 @@ export class BookingsService {
     return date;
   }
 
+  private buildTrackingMeta(booking: any): BookingTrackingMeta {
+    const trackingUrl = this.getTrackingUrl(booking.reference);
+    const driverDistanceMiles = this.getDriverDistanceMiles(booking);
+    const driverGpsAgeSeconds = this.getDriverGpsAgeSeconds(booking);
+    const etaMinutes = this.calculateEtaMinutes(
+      driverDistanceMiles,
+      driverGpsAgeSeconds,
+    );
+
+    const etaConfidence =
+      etaMinutes === null
+        ? 'UNAVAILABLE'
+        : driverGpsAgeSeconds !== null && driverGpsAgeSeconds <= 90
+          ? 'LIVE_GPS'
+          : 'ESTIMATED';
+
+    return {
+      trackingUrl,
+      driverDistanceMiles,
+      etaMinutes,
+      etaConfidence,
+      driverGpsAgeSeconds,
+      customerTrackingMessage: this.buildCustomerTrackingMessage({
+        booking,
+        trackingUrl,
+        etaMinutes,
+      }),
+    };
+  }
+
   private getTrackingUrl(reference: string) {
     const frontend =
       process.env.FRONTEND_URL?.replace(/\/$/, '') || 'https://cabhq.co.uk';
@@ -1306,16 +1327,59 @@ export class BookingsService {
     return `${frontend}/track/${encodeURIComponent(reference)}`;
   }
 
-  private getBookingEtaMinutes(booking: any) {
-    const distanceMiles = this.getDriverDistanceMiles(booking);
+  private buildCustomerTrackingMessage(input: {
+    booking: any;
+    trackingUrl: string;
+    etaMinutes: number | null;
+  }) {
+    const booking = input.booking;
 
-    if (distanceMiles === null) {
-      return null;
+    const lines = [
+      `Booking ${booking.reference}`,
+      `Pickup: ${booking.pickup}`,
+      `Dropoff: ${booking.dropoff}`,
+      `Pickup time: ${this.formatDateTime(booking.pickupTime)}`,
+    ];
+
+    if (input.etaMinutes !== null && booking.driver) {
+      lines.push(`Driver ETA: approx ${input.etaMinutes} mins`);
     }
 
-    const averageMph = 22;
+    if (booking.driver?.name) {
+      lines.push(`Driver: ${booking.driver.name}`);
+    }
 
-    return Math.max(1, Math.round((distanceMiles / averageMph) * 60));
+    lines.push(`Track live: ${input.trackingUrl}`);
+
+    return lines.join('\n');
+  }
+
+  private getBookingEtaMinutes(booking: any) {
+    return this.calculateEtaMinutes(
+      this.getDriverDistanceMiles(booking),
+      this.getDriverGpsAgeSeconds(booking),
+    );
+  }
+
+  private calculateEtaMinutes(
+    distanceMiles: number | null,
+    gpsAgeSeconds: number | null = null,
+  ) {
+    if (distanceMiles == null) return null;
+
+    const staleGpsPenalty =
+      gpsAgeSeconds === null ? 2 : gpsAgeSeconds > 300 ? 5 : gpsAgeSeconds > 90 ? 2 : 0;
+
+    if (distanceMiles <= 0.15) return 1;
+    if (distanceMiles <= 0.5) return 2 + staleGpsPenalty;
+    if (distanceMiles <= 1) return 3 + staleGpsPenalty;
+    if (distanceMiles <= 2) return 5 + staleGpsPenalty;
+    if (distanceMiles <= 3) return 7 + staleGpsPenalty;
+    if (distanceMiles <= 5) return 11 + staleGpsPenalty;
+    if (distanceMiles <= 8) return 16 + staleGpsPenalty;
+    if (distanceMiles <= 12) return 23 + staleGpsPenalty;
+
+    return Math.max(25, Math.round(distanceMiles * 2.2) + staleGpsPenalty);
   }
 
   private getDriverDistanceMiles(booking: any) {
@@ -1328,12 +1392,40 @@ export class BookingsService {
       return null;
     }
 
-    return this.haversineMiles(
-      Number(booking.driver.latitude),
-      Number(booking.driver.longitude),
-      Number(booking.pickupLat),
-      Number(booking.pickupLng),
+    return Number(
+      this.haversineMiles(
+        Number(booking.driver.latitude),
+        Number(booking.driver.longitude),
+        Number(booking.pickupLat),
+        Number(booking.pickupLng),
+      ).toFixed(2),
     );
+  }
+
+  private getDriverGpsAgeSeconds(booking: any) {
+    if (!booking.driver?.lastLocationAt) return null;
+
+    const last = new Date(booking.driver.lastLocationAt).getTime();
+
+    if (Number.isNaN(last)) return null;
+
+    return Math.max(0, Math.round((Date.now() - last) / 1000));
+  }
+
+  private formatDateTime(value?: Date | string | null) {
+    if (!value) return '—';
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) return '—';
+
+    return date.toLocaleString('en-GB', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
 
   private haversineMiles(
