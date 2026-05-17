@@ -137,6 +137,13 @@ type Booking = {
   createdAt?: string;
   updatedAt?: string;
 
+  trackingUrl?: string | null;
+  driverDistanceMiles?: number | null;
+  etaMinutes?: number | null;
+  etaConfidence?: 'LIVE_GPS' | 'ESTIMATED' | 'UNAVAILABLE' | string | null;
+  driverGpsAgeSeconds?: number | null;
+  customerTrackingMessage?: string | null;
+
   isAirportBooking?: boolean;
   airportCode?: string | null;
   airportName?: string | null;
@@ -578,7 +585,31 @@ function getDriverPickupInsight(
   };
 }
 
-function getTrackingUrl(reference?: string | null) {
+function etaConfidenceTone(value?: string | null) {
+  const normalised = (value || '').toUpperCase();
+
+  if (normalised === 'LIVE_GPS') {
+    return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200';
+  }
+
+  if (normalised === 'ESTIMATED') {
+    return 'border-amber-500/25 bg-amber-500/10 text-amber-200';
+  }
+
+  return 'border-slate-500/25 bg-slate-500/10 text-slate-300';
+}
+
+function etaConfidenceLabel(value?: string | null) {
+  const normalised = (value || '').toUpperCase();
+
+  if (normalised === 'LIVE_GPS') return 'Live GPS ETA';
+  if (normalised === 'ESTIMATED') return 'Estimated ETA';
+
+  return 'ETA unavailable';
+}
+
+function getTrackingUrl(reference?: string | null, explicitUrl?: string | null) {
+  if (explicitUrl?.trim()) return explicitUrl.trim();
   if (!reference) return '';
 
   if (typeof window === 'undefined') {
@@ -628,9 +659,13 @@ function normalisePhoneForWhatsApp(value?: string | null) {
 }
 
 function buildCustomerTrackingMessage(booking: Booking) {
-  const trackingUrl = getTrackingUrl(booking.reference);
+  if (booking.customerTrackingMessage?.trim()) {
+    return booking.customerTrackingMessage.trim();
+  }
 
-  return [
+  const trackingUrl = getTrackingUrl(booking.reference, booking.trackingUrl);
+
+  const lines = [
     `Hi ${booking.customerName || 'there'},`,
     '',
     `Your taxi booking ${booking.reference} is confirmed.`,
@@ -638,10 +673,15 @@ function buildCustomerTrackingMessage(booking: Booking) {
     `Pickup: ${getPickupLabel(booking)}`,
     `Dropoff: ${getDropoffLabel(booking)}`,
     `Pickup time: ${formatDateTime(getPickupTimeLabel(booking))}`,
-    '',
-    'Live tracking link:',
-    trackingUrl,
-  ].join('\n');
+  ];
+
+  if (booking.etaMinutes != null && booking.driver) {
+    lines.push('', `Driver ETA: approx ${booking.etaMinutes} mins`);
+  }
+
+  lines.push('', 'Live tracking link:', trackingUrl);
+
+  return lines.join('\n');
 }
 
 function getOfferInfo(booking: Booking, now = Date.now()) {
@@ -795,6 +835,63 @@ function airportCodeFromName(name?: string | null) {
 function selectedAirportFromCode(code: string) {
   return AIRPORTS.find((airport) => airport.code === code) ?? null;
 }
+
+function TrackingIntelligenceStrip({
+  booking,
+  now,
+}: {
+  booking: Booking;
+  now: number;
+}) {
+  const liveEta = getLiveEtaMinutes(
+    booking.etaMinutes,
+    booking.driver?.lastLocationAt,
+    now,
+  );
+
+  const hasTrackingMeta =
+    booking.trackingUrl ||
+    booking.driverDistanceMiles != null ||
+    booking.etaMinutes != null ||
+    booking.etaConfidence ||
+    booking.driverGpsAgeSeconds != null;
+
+  if (!hasTrackingMeta) return null;
+
+  const insight = getDriverPickupInsight(
+    booking.etaMinutes,
+    booking.driverDistanceMiles,
+    booking.driver?.lastLocationAt,
+    now,
+  );
+
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {liveEta != null ? (
+        <span className={`rounded-full border px-3 py-1 text-xs font-black ${insight.tone}`}>
+          {insight.label}
+        </span>
+      ) : null}
+
+      {booking.etaConfidence ? (
+        <span
+          className={`rounded-full border px-3 py-1 text-xs font-black ${etaConfidenceTone(
+            booking.etaConfidence,
+          )}`}
+        >
+          {etaConfidenceLabel(booking.etaConfidence)}
+        </span>
+      ) : null}
+
+      {booking.driverGpsAgeSeconds != null ? (
+        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/60">
+          GPS {booking.driverGpsAgeSeconds}s old
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 
 export default function DispatchPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -1737,6 +1834,7 @@ export default function DispatchPage() {
         Boolean(booking.accountId || booking.account),
       ).length,
       airportJobs: bookings.filter(isAirportBookingFromData).length,
+      liveEta: bookings.filter((booking) => booking.etaMinutes != null).length,
     };
   }, [bookings, drivers, liveDrivers.length]);
 
@@ -1897,7 +1995,7 @@ export default function DispatchPage() {
           </div>
         ) : null}
 
-        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-9">
+        <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-10">
           <Card label="Bookings" value={stats.bookings} hint="Total jobs" />
           <Card label="Live Jobs" value={stats.live} hint="Dispatch active" />
           <Card
@@ -1915,6 +2013,7 @@ export default function DispatchPage() {
           <Card label="Drivers" value={stats.drivers} hint="Driver records" />
           <Card label="Available" value={stats.available} hint="Dispatch ready" />
           <Card label="GPS Live" value={stats.liveGps} hint="Live positions" />
+          <Card label="Live ETAs" value={stats.liveEta} hint="Tracking ready" />
           <Card
             label="Account Jobs"
             value={stats.accountLinked}
