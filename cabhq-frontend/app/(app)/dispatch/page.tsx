@@ -2844,6 +2844,35 @@ function BookingDrawer({
   const canDispatch =
     !hasAssignedDriver &&
     ['BOOKED', 'NO_DRIVER', 'OFFERED'].includes(status);
+  const [trackingCopied, setTrackingCopied] = useState(false);
+
+  const trackingPath = `/track/${encodeURIComponent(booking.reference)}`;
+  const trackingUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}${trackingPath}`
+      : trackingPath;
+
+  async function copyTrackingLink() {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(trackingUrl);
+      } else if (typeof window !== 'undefined') {
+        window.prompt('Copy tracking link', trackingUrl);
+      }
+
+      setTrackingCopied(true);
+
+      window.setTimeout(() => {
+        setTrackingCopied(false);
+      }, 2500);
+    } catch (error) {
+      console.error('Failed to copy tracking link:', error);
+
+      if (typeof window !== 'undefined') {
+        window.prompt('Copy tracking link', trackingUrl);
+      }
+    }
+  }
 
   const drawerMapPoints = [
     selectedDriverPosition,
@@ -2932,6 +2961,49 @@ function BookingDrawer({
             </div>
           </section>
 
+          <section className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-5">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-white">Customer Tracking Link</h3>
+                <p className="mt-1 text-sm text-emerald-100/65">
+                  Share this link with the customer so they can track booking status, driver details and live GPS updates.
+                </p>
+              </div>
+
+              <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-emerald-200">
+                Live Tracking
+              </span>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-[#07111f] p-4 text-xs text-white/65 break-all">
+              {trackingUrl}
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => void copyTrackingLink()}
+                className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-bold text-emerald-200 transition hover:bg-emerald-500/20"
+              >
+                {trackingCopied ? 'Tracking Link Copied' : 'Copy Tracking Link'}
+              </button>
+
+              <a
+                href={trackingPath}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-center text-sm font-bold text-cyan-200 transition hover:bg-cyan-500/20"
+              >
+                Open Tracking Page
+              </a>
+            </div>
+
+            {trackingCopied ? (
+              <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-200">
+                Tracking link copied. You can now paste it into SMS, WhatsApp or email.
+              </div>
+            ) : null}
+          </section>
 
           <section className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.06] p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
