@@ -33,11 +33,37 @@ type DispatchCheck = {
   blockedReasons: string[];
 };
 
+type DriverScoreInput = {
+  status: string;
+  distanceMiles: number;
+  lastLocationAt: Date | null;
+  hasCoordinates: boolean;
+  rejectedRecently: boolean;
+  activeWorkload: number;
+};
+
+const FINAL_BOOKING_STATUSES = ['COMPLETED', 'CANCELLED', 'NO_SHOW'];
+const ACTIVE_BOOKING_STATUSES = [
+  'OFFERED',
+  'ACCEPTED',
+  'EN_ROUTE',
+  'ARRIVED',
+  'ON_JOB',
+];
+const DRIVER_READY_STATUSES = ['AVAILABLE', 'ONLINE', 'ON_DUTY'];
+const DRIVER_READY_OR_OFFERED_STATUSES = [
+  'AVAILABLE',
+  'ONLINE',
+  'ON_DUTY',
+  'OFFERED',
+];
+
 @Injectable()
 export class AutoDispatchService {
   private readonly logger = new Logger(AutoDispatchService.name);
   private readonly offerTimeoutMs = 20_000;
   private readonly maxOfferRounds = 25;
+  private readonly rejectCooldownMs = 5 * 60 * 1000;
   private readonly timers = new Map<string, NodeJS.Timeout>();
 
   constructor(
@@ -63,7 +89,7 @@ export class AutoDispatchService {
       throw new NotFoundException('Booking not found');
     }
 
-    if (['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(booking.status)) {
+    if (FINAL_BOOKING_STATUSES.includes(booking.status)) {
       return this.findBookingWithRelations(booking.id, booking.companyId);
     }
 
@@ -108,6 +134,7 @@ export class AutoDispatchService {
       booking.pickupLat ?? null,
       booking.pickupLng ?? null,
       offeredDriverIds,
+      booking.id,
     );
 
     const nextDriver = rankedDrivers[0] ?? null;
@@ -145,7 +172,7 @@ export class AutoDispatchService {
 
     await this.appendTimeline(
       booking.id,
-      `Auto dispatch offered to ${nextDriver.name}`,
+      `Auto dispatch offered to ${nextDriver.name} [${nextDriver.id}]`,
     );
 
     const refreshed = await this.findBookingWithRelations(
@@ -219,7 +246,7 @@ export class AutoDispatchService {
 
     await this.appendTimeline(
       booking.id,
-      `${driver.name} accepted the booking`,
+      `${driver.name} accepted the booking [${driver.id}]`,
     );
 
     const refreshed = await this.findBookingWithRelations(
@@ -265,7 +292,7 @@ export class AutoDispatchService {
 
     await this.appendTimeline(
       booking.id,
-      `${driverName} rejected the booking`,
+      `${driverName} rejected the booking [${driverId}]`,
     );
 
     await this.clearBookingDriverAndRelease({
@@ -347,6 +374,7 @@ export class AutoDispatchService {
       booking.pickupLat ?? null,
       booking.pickupLng ?? null,
       offeredDriverIds,
+      booking.id,
     );
 
     return rankedDrivers.slice(0, limit).map((driver) => ({
@@ -386,7 +414,7 @@ export class AutoDispatchService {
 
         await this.appendTimeline(
           booking.id,
-          `${driverName} did not respond in time`,
+          `${driverName} did not respond in time [${driverId}]`,
         );
 
         await this.clearBookingDriverAndRelease({
@@ -433,7 +461,7 @@ export class AutoDispatchService {
 
     for (const event of events) {
       const matches = event.message.match(
-        /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+        /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
       );
 
       if (!matches?.length) continue;
@@ -467,7 +495,7 @@ export class AutoDispatchService {
 
     const blockedReasons: string[] = [];
 
-    if (!['AVAILABLE', 'ONLINE', 'ON_DUTY', 'OFFERED'].includes(driver.status)) {
+    if (!DRIVER_READY_OR_OFFERED_STATUSES.includes(driver.status)) {
       blockedReasons.push(`Driver status is ${driver.status}`);
     }
 
@@ -476,7 +504,7 @@ export class AutoDispatchService {
         companyId,
         driverId: driver.id,
         status: {
-          in: ['OFFERED', 'ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'],
+          in: ACTIVE_BOOKING_STATUSES,
         },
         NOT: options?.allowCurrentOfferedBookingId
           ? {
@@ -582,6 +610,7 @@ export class AutoDispatchService {
     pickupLat: number | null,
     pickupLng: number | null,
     excludeDriverIds: string[],
+    bookingId: string,
   ): Promise<EligibleDriver[]> {
     const drivers = await this.prisma.driver.findMany({
       where: { companyId },
@@ -596,7 +625,7 @@ export class AutoDispatchService {
         continue;
       }
 
-      if (!['AVAILABLE', 'ONLINE', 'ON_DUTY'].includes(driver.status)) {
+      if (!DRIVER_READY_STATUSES.includes(driver.status)) {
         continue;
       }
 
@@ -612,6 +641,24 @@ export class AutoDispatchService {
           driverId: driver.id,
         },
       });
+
+      const activeWorkload = await this.prisma.booking.count({
+        where: {
+          companyId,
+          driverId: driver.id,
+          status: {
+            in: ACTIVE_BOOKING_STATUSES,
+          },
+          NOT: {
+            id: bookingId,
+          },
+        },
+      });
+
+      const rejectedRecently = await this.hasRejectedRecently(
+        bookingId,
+        driver.id,
+      );
 
       const distanceMiles =
         pickupLat != null &&
@@ -631,6 +678,8 @@ export class AutoDispatchService {
         distanceMiles,
         lastLocationAt: driver.lastLocationAt,
         hasCoordinates: driver.latitude != null && driver.longitude != null,
+        rejectedRecently,
+        activeWorkload,
       });
 
       eligible.push({
@@ -668,77 +717,108 @@ export class AutoDispatchService {
     return eligible;
   }
 
-  private calculateDriverScore(input: {
-    status: string;
-    distanceMiles: number;
-    lastLocationAt: Date | null;
-    hasCoordinates: boolean;
-  }) {
+  private calculateDriverScore(input: DriverScoreInput) {
     let score = 0;
     const scoreBreakdown: string[] = [];
 
     if (input.status === 'AVAILABLE') {
-      score += 60;
-      scoreBreakdown.push('+60 AVAILABLE');
+      score += 70;
+      scoreBreakdown.push('available');
     } else if (input.status === 'ON_DUTY') {
-      score += 50;
-      scoreBreakdown.push('+50 ON_DUTY');
+      score += 60;
+      scoreBreakdown.push('on duty');
     } else if (input.status === 'ONLINE') {
-      score += 45;
-      scoreBreakdown.push('+45 ONLINE');
+      score += 55;
+      scoreBreakdown.push('online');
     }
 
     if (input.hasCoordinates) {
-      score += 25;
-      scoreBreakdown.push('+25 GPS_PRESENT');
+      score += 30;
+      scoreBreakdown.push('gps live');
     } else {
-      score -= 50;
-      scoreBreakdown.push('-50 NO_GPS');
+      score -= 70;
+      scoreBreakdown.push('no gps');
     }
 
     const minutesSinceGps = this.getMinutesSince(input.lastLocationAt);
 
     if (minutesSinceGps <= 2) {
-      score += 30;
-      scoreBreakdown.push('+30 GPS_<=2M');
+      score += 35;
+      scoreBreakdown.push('fresh gps');
     } else if (minutesSinceGps <= 5) {
-      score += 20;
-      scoreBreakdown.push('+20 GPS_<=5M');
+      score += 25;
+      scoreBreakdown.push('recent gps');
     } else if (minutesSinceGps <= 15) {
-      score += 5;
-      scoreBreakdown.push('+5 GPS_<=15M');
+      score += 8;
+      scoreBreakdown.push('gps ageing');
     } else {
-      score -= 30;
-      scoreBreakdown.push('-30 STALE_GPS');
+      score -= 45;
+      scoreBreakdown.push('stale gps');
     }
 
     if (input.distanceMiles !== Number.MAX_SAFE_INTEGER) {
-      if (input.distanceMiles <= 1) {
-        score += 45;
-        scoreBreakdown.push('+45 DIST_<=1MI');
+      if (input.distanceMiles <= 0.5) {
+        score += 65;
+        scoreBreakdown.push('very close');
+      } else if (input.distanceMiles <= 1) {
+        score += 55;
+        scoreBreakdown.push('within 1 mile');
       } else if (input.distanceMiles <= 3) {
-        score += 35;
-        scoreBreakdown.push('+35 DIST_<=3MI');
+        score += 40;
+        scoreBreakdown.push('within 3 miles');
       } else if (input.distanceMiles <= 5) {
-        score += 20;
-        scoreBreakdown.push('+20 DIST_<=5MI');
+        score += 25;
+        scoreBreakdown.push('within 5 miles');
       } else if (input.distanceMiles <= 10) {
-        score += 5;
-        scoreBreakdown.push('+5 DIST_<=10MI');
+        score += 8;
+        scoreBreakdown.push('within 10 miles');
       } else {
-        const penalty = Math.min(45, Math.round(input.distanceMiles));
+        const penalty = Math.min(60, Math.round(input.distanceMiles * 1.5));
         score -= penalty;
-        scoreBreakdown.push(`-${penalty} DIST_FAR`);
+        scoreBreakdown.push('further away');
       }
     } else {
-      score -= 20;
-      scoreBreakdown.push('-20 DIST_UNKNOWN');
+      score -= 30;
+      scoreBreakdown.push('distance unknown');
+    }
+
+    if (input.rejectedRecently) {
+      score -= 80;
+      scoreBreakdown.push('recently rejected');
+    }
+
+    if (input.activeWorkload > 0) {
+      score -= input.activeWorkload * 40;
+      scoreBreakdown.push(`${input.activeWorkload} active job(s)`);
     }
 
     return {
       score,
       scoreBreakdown,
     };
+  }
+
+  private async hasRejectedRecently(bookingId: string, driverId: string) {
+    const since = new Date(Date.now() - this.rejectCooldownMs);
+
+    const event = await this.prisma.bookingEvent.findFirst({
+      where: {
+        bookingId,
+        createdAt: {
+          gte: since,
+        },
+        message: {
+          contains: driverId,
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    if (!event) return false;
+
+    return /rejected the booking|did not respond in time/i.test(event.message);
   }
 
   private getMinutesSince(value: Date | null) {
@@ -807,7 +887,11 @@ export class AutoDispatchService {
     return this.prisma.booking.findFirstOrThrow({
       where: { id: bookingId, companyId },
       include: {
-        driver: true,
+        driver: {
+          include: {
+            vehicle: true,
+          },
+        },
         company: true,
         events: {
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -821,7 +905,7 @@ export class AutoDispatchService {
       where: {
         driverId,
         status: {
-          in: ['OFFERED', 'ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'],
+          in: ACTIVE_BOOKING_STATUSES,
         },
       },
     });
