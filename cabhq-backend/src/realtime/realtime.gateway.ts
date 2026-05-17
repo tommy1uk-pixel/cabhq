@@ -23,12 +23,15 @@ type SocketUser = {
 
 type DriverLocationBody = {
   driverId?: string;
+  bookingId?: string;
   latitude?: number;
   longitude?: number;
   lat?: number;
   lng?: number;
   heading?: number | null;
   speed?: number | null;
+  etaMinutes?: number | null;
+  distanceMiles?: number | null;
 };
 
 @Injectable()
@@ -96,6 +99,8 @@ export class RealtimeGateway
         driverId,
         companyId,
         socketId: client.id,
+        trackingEnabled: true,
+        airportTrackingEnabled: true,
         ts: new Date().toISOString(),
       });
 
@@ -167,6 +172,46 @@ export class RealtimeGateway
     }
   }
 
+  @SubscribeMessage('tracking:join')
+  async handleTrackingJoin(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: {
+      bookingId?: string;
+    },
+  ) {
+    if (!body?.bookingId) {
+      return;
+    }
+
+    await client.join(`tracking:${body.bookingId}`);
+
+    client.emit('tracking:joined', {
+      bookingId: body.bookingId,
+      ts: new Date().toISOString(),
+    });
+  }
+
+  @SubscribeMessage('tracking:leave')
+  async handleTrackingLeave(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: {
+      bookingId?: string;
+    },
+  ) {
+    if (!body?.bookingId) {
+      return;
+    }
+
+    await client.leave(`tracking:${body.bookingId}`);
+
+    client.emit('tracking:left', {
+      bookingId: body.bookingId,
+      ts: new Date().toISOString(),
+    });
+  }
+
   @SubscribeMessage('driver:location')
   async handleDriverLocation(
     @ConnectedSocket() client: Socket,
@@ -191,15 +236,50 @@ export class RealtimeGateway
     return this.updateDriverLocation(client, body, 'driver:update-location');
   }
 
+  @SubscribeMessage('tracking:viewed')
+  async handleTrackingViewed(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    body: {
+      bookingId?: string;
+    },
+  ) {
+    if (!body?.bookingId) {
+      return;
+    }
+
+    const socketCompanyId = client.data?.user?.companyId;
+
+    if (!socketCompanyId) {
+      return;
+    }
+
+    this.server
+      .to(`company:${socketCompanyId}`)
+      .emit('tracking:customer_viewed', {
+        bookingId: body.bookingId,
+        ts: new Date().toISOString(),
+      });
+  }
+
   @SubscribeMessage('ping')
   handlePing(@ConnectedSocket() client: Socket) {
     client.emit('pong', {
       ts: new Date().toISOString(),
+      alive: true,
     });
   }
 
   emitToCompany(companyId: string, event: string, payload: unknown) {
     this.server.to(`company:${companyId}`).emit(event, payload);
+  }
+
+  emitToBookingTracking(
+    bookingId: string,
+    event: string,
+    payload: unknown,
+  ) {
+    this.server.to(`tracking:${bookingId}`).emit(event, payload);
   }
 
   emitToUser(userId: string, event: string, payload: unknown) {
@@ -313,6 +393,9 @@ export class RealtimeGateway
         heading: updatedDriver.heading ?? null,
         speed: updatedDriver.speed ?? null,
         lastLocationAt: updatedDriver.lastLocationAt ?? null,
+        etaMinutes: body.etaMinutes ?? null,
+        distanceMiles: body.distanceMiles ?? null,
+        bookingId: body.bookingId ?? null,
         vehicle: updatedDriver.vehicle
           ? {
               id: updatedDriver.vehicle.id,
@@ -326,7 +409,28 @@ export class RealtimeGateway
       };
 
       this.server.to(`company:${companyId}`).emit('driver:location', payload);
+
       this.server.to(`company:${companyId}`).emit('driver:updated', payload);
+
+      this.server
+        .to(`company:${companyId}`)
+        .emit('driver:map_updated', payload);
+
+      if (body.bookingId) {
+        this.server.to(`tracking:${body.bookingId}`).emit(
+          'tracking:updated',
+          {
+            bookingId: body.bookingId,
+            driverId: updatedDriver.id,
+            latitude,
+            longitude,
+            etaMinutes: body.etaMinutes ?? null,
+            distanceMiles: body.distanceMiles ?? null,
+            ts: new Date().toISOString(),
+          },
+        );
+      }
+
       this.server.to(`driver:${driver.id}`).emit('driver:location:saved', {
         ok: true,
         sourceEvent,
@@ -380,7 +484,11 @@ export class RealtimeGateway
     max: number,
   ) {
     const numberValue =
-      typeof value === 'string' ? Number(value) : typeof value === 'number' ? value : NaN;
+      typeof value === 'string'
+        ? Number(value)
+        : typeof value === 'number'
+          ? value
+          : NaN;
 
     if (!Number.isFinite(numberValue)) return null;
     if (numberValue < min || numberValue > max) return null;
