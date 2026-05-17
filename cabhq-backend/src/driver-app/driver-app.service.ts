@@ -52,6 +52,23 @@ type EndShiftInput = {
   endStatus?: 'OFF_DUTY' | 'AVAILABLE' | null;
 };
 
+type LatLngPoint = {
+  latitude: number;
+  longitude: number;
+};
+
+const ACTIVE_JOB_STATUSES = [
+  'ACCEPTED',
+  'EN_ROUTE',
+  'ARRIVED',
+  'ON_JOB',
+  'OFFERED',
+] as const;
+
+const DRIVER_BUSY_STATUSES = ['EN_ROUTE', 'ARRIVED', 'ON_JOB'] as const;
+
+const AUTO_ARRIVED_DISTANCE_MILES = 0.05;
+
 @Injectable()
 export class DriverAppService {
   constructor(
@@ -130,6 +147,13 @@ export class DriverAppService {
       activeJobs,
       currentJob,
       currentShift,
+      map: {
+        driver,
+        activeJob: currentJob,
+        activeOffer: offer,
+        activeJobs,
+        updatedAt: new Date().toISOString(),
+      },
       home: {
         hasActiveOffer: Boolean(offer),
         hasActiveJob: Boolean(currentJob),
@@ -235,28 +259,7 @@ export class DriverAppService {
       },
     });
 
-    const payload = {
-      id: updatedDriver.id,
-      companyId: updatedDriver.companyId,
-      name: updatedDriver.name,
-      phone: updatedDriver.phone ?? null,
-      status: updatedDriver.status,
-      latitude: updatedDriver.latitude ?? null,
-      longitude: updatedDriver.longitude ?? null,
-      heading: updatedDriver.heading ?? null,
-      speed: updatedDriver.speed ?? null,
-      lastLocationAt: updatedDriver.lastLocationAt ?? null,
-      vehicle: updatedDriver.vehicle
-        ? {
-            id: updatedDriver.vehicle.id,
-            reg: updatedDriver.vehicle.reg ?? null,
-            plateNumber: updatedDriver.vehicle.plateNumber ?? null,
-            make: updatedDriver.vehicle.make ?? null,
-            model: updatedDriver.vehicle.model ?? null,
-            colour: updatedDriver.vehicle.colour ?? null,
-          }
-        : null,
-    };
+    const payload = this.mapDriverLocationPayload(updatedDriver);
 
     this.realtime.driverLocation(updatedDriver.companyId, {
       driverId: updatedDriver.id,
@@ -269,6 +272,13 @@ export class DriverAppService {
 
     this.realtime.driverUpdated(updatedDriver.companyId, payload);
 
+    const autoArrivedResult = await this.autoMarkArrivedIfClose({
+      driverId: updatedDriver.id,
+      companyId: updatedDriver.companyId,
+      latitude,
+      longitude,
+    });
+
     return {
       success: true,
       driver: payload,
@@ -279,6 +289,7 @@ export class DriverAppService {
         speed,
         lastLocationAt: updatedDriver.lastLocationAt,
       },
+      autoArrived: autoArrivedResult,
       bootstrap: await this.bootstrap(driver.id),
     };
   }
@@ -338,7 +349,7 @@ export class DriverAppService {
         where: { id: input.driverId },
         data: { status: 'AVAILABLE' },
       });
-    } else if (['EN_ROUTE', 'ARRIVED', 'ON_JOB'].includes(input.nextStatus)) {
+    } else if (DRIVER_BUSY_STATUSES.includes(input.nextStatus as any)) {
       await this.prisma.driver.update({
         where: { id: input.driverId },
         data: { status: 'BUSY' },
@@ -442,7 +453,7 @@ export class DriverAppService {
       where: {
         driverId: input.driverId,
         status: {
-          in: ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB', 'OFFERED'],
+          in: [...ACTIVE_JOB_STATUSES],
         },
       },
       take: 1,
@@ -523,6 +534,90 @@ export class DriverAppService {
     };
   }
 
+  private async autoMarkArrivedIfClose(input: {
+    driverId: string;
+    companyId: string;
+    latitude: number;
+    longitude: number;
+  }) {
+    const booking = await this.prisma.booking.findFirst({
+      where: {
+        companyId: input.companyId,
+        driverId: input.driverId,
+        status: 'EN_ROUTE',
+      },
+      orderBy: {
+        pickupTime: 'asc',
+      },
+    });
+
+    if (!booking) {
+      return {
+        changed: false,
+        reason: 'No en-route job',
+      };
+    }
+
+    const pickup = this.getBookingPickupPoint(booking);
+
+    if (!pickup) {
+      return {
+        changed: false,
+        reason: 'Pickup coordinates missing',
+      };
+    }
+
+    const distanceMiles = this.haversineMiles(
+      input.latitude,
+      input.longitude,
+      pickup.latitude,
+      pickup.longitude,
+    );
+
+    if (distanceMiles > AUTO_ARRIVED_DISTANCE_MILES) {
+      return {
+        changed: false,
+        distanceMiles,
+        reason: 'Driver not close enough',
+      };
+    }
+
+    await this.prisma.booking.update({
+      where: { id: booking.id },
+      data: { status: 'ARRIVED' },
+    });
+
+    await this.prisma.bookingEvent.create({
+      data: {
+        bookingId: booking.id,
+        message: 'DRIVER UPDATE · driver auto-marked job as ARRIVED',
+      },
+    });
+
+    const refreshed = await this.prisma.booking.findFirstOrThrow({
+      where: {
+        id: booking.id,
+      },
+      include: {
+        driver: true,
+        company: true,
+        events: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        },
+      },
+    });
+
+    this.realtime.bookingStatusChanged(refreshed.companyId, refreshed);
+    this.realtime.bookingUpdated(refreshed.companyId, refreshed);
+
+    return {
+      changed: true,
+      bookingId: booking.id,
+      distanceMiles,
+      status: 'ARRIVED',
+    };
+  }
+
   private async mapShiftWithSummary(shiftId: string) {
     const shift = await this.prisma.driverShift.findUnique({
       where: { id: shiftId },
@@ -570,7 +665,7 @@ export class DriverAppService {
       where: {
         driverId: shift.driverId,
         status: {
-          in: ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB', 'OFFERED'],
+          in: [...ACTIVE_JOB_STATUSES],
         },
       },
     });
@@ -629,18 +724,113 @@ export class DriverAppService {
   ) {
     switch (nextStatus) {
       case 'EN_ROUTE':
-        return 'DRIVER UPDATE · driver marked job as EN_ROUTE';
+        return 'Driver marked job as en route';
       case 'ARRIVED':
-        return 'DRIVER UPDATE · driver marked job as ARRIVED';
+        return 'Driver arrived at pickup';
       case 'ON_JOB':
-        return 'DRIVER UPDATE · driver marked passenger as ON_JOB';
+        return 'Passenger onboard';
       case 'COMPLETED':
-        return 'DRIVER UPDATE · driver marked job as COMPLETED';
+        return 'Journey completed';
       case 'NO_SHOW':
-        return 'DRIVER UPDATE · driver marked passenger as NO_SHOW';
+        return 'Passenger no-show';
       default:
-        return `DRIVER UPDATE · ${nextStatus}`;
+        return `Driver updated job to ${nextStatus}`;
     }
+  }
+
+  private getBookingPickupPoint(booking: {
+    pickupLat?: number | null;
+    pickupLng?: number | null;
+    pickupLatitude?: number | null;
+    pickupLongitude?: number | null;
+  }) {
+    const latitude = this.toNumberOrNull(
+      booking.pickupLat ?? booking.pickupLatitude ?? null,
+    );
+
+    const longitude = this.toNumberOrNull(
+      booking.pickupLng ?? booking.pickupLongitude ?? null,
+    );
+
+    if (!this.isValidLatLng(latitude, longitude)) {
+      return null;
+    }
+
+    return {
+      latitude: latitude as number,
+      longitude: longitude as number,
+    };
+  }
+
+  private mapDriverLocationPayload(driver: any) {
+    return {
+      id: driver.id,
+      companyId: driver.companyId,
+      name: driver.name,
+      phone: driver.phone ?? null,
+      status: driver.status,
+      latitude: driver.latitude ?? null,
+      longitude: driver.longitude ?? null,
+      heading: driver.heading ?? null,
+      speed: driver.speed ?? null,
+      lastLocationAt: driver.lastLocationAt ?? null,
+      vehicle: driver.vehicle
+        ? {
+            id: driver.vehicle.id,
+            reg: driver.vehicle.reg ?? null,
+            plateNumber: driver.vehicle.plateNumber ?? null,
+            make: driver.vehicle.make ?? null,
+            model: driver.vehicle.model ?? null,
+            colour: driver.vehicle.colour ?? null,
+          }
+        : null,
+    };
+  }
+
+  private toNumberOrNull(value: unknown) {
+    if (value === null || value === undefined || value === '') return null;
+
+    const numberValue =
+      typeof value === 'number' ? value : Number(String(value).trim());
+
+    return Number.isFinite(numberValue) ? numberValue : null;
+  }
+
+  private isValidLatLng(lat: number | null, lng: number | null) {
+    return (
+      lat !== null &&
+      lng !== null &&
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lng >= -180 &&
+      lng <= 180
+    );
+  }
+
+  private haversineMiles(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ) {
+    const toRad = (value: number) => (value * Math.PI) / 180;
+    const earthRadiusMiles = 3958.8;
+
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) *
+        Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return earthRadiusMiles * c;
   }
 
   private async ensureDriver(driverId: string) {
