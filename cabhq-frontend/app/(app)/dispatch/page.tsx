@@ -11,6 +11,12 @@ import AddressAutofillInput, {
   type SelectedAddress,
 } from '@/components/AddressAutofillInput';
 
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
 const MapContainer = dynamic(
   () => import('react-leaflet').then((mod) => mod.MapContainer),
   { ssr: false },
@@ -190,6 +196,12 @@ type PricingQuote = {
 type RouteResponse = {
   distanceMiles: number;
   durationMinutes: number;
+  coordinates: LatLngTuple[];
+};
+
+type RouteResult = {
+  distanceMiles: number | null;
+  durationMinutes: number | null;
   coordinates: LatLngTuple[];
 };
 
@@ -671,6 +683,10 @@ export default function DispatchPage() {
   const [pricingResult, setPricingResult] = useState<PricingQuote | null>(null);
   const [driverPickupRoute, setDriverPickupRoute] = useState<LatLngTuple[]>([]);
   const [pickupDropoffRoute, setPickupDropoffRoute] = useState<LatLngTuple[]>([]);
+  const [driverPickupEtaMinutes, setDriverPickupEtaMinutes] = useState<number | null>(null);
+  const [driverPickupDistanceMiles, setDriverPickupDistanceMiles] = useState<number | null>(null);
+  const [pickupDropoffEtaMinutes, setPickupDropoffEtaMinutes] = useState<number | null>(null);
+  const [pickupDropoffDistanceMiles, setPickupDropoffDistanceMiles] = useState<number | null>(null);
   const [timelineOpen, setTimelineOpen] = useState(false);
   const [statusBusy, setStatusBusy] = useState<string | null>(null);
   const [driverIconFactory, setDriverIconFactory] =
@@ -680,8 +696,13 @@ export default function DispatchPage() {
   const [form, setForm] = useState<BookingFormState>(initialForm);
   const [search, setSearch] = useState('');
   const [now, setNow] = useState(() => Date.now());
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [alertsUnlocked, setAlertsUnlocked] = useState(false);
+  const [latestDispatchAlert, setLatestDispatchAlert] = useState<string | null>(null);
 
   const mapRef = useRef<LeafletMap | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const alertedBookingIdsRef = useRef<Set<string>>(new Set());
 
   const token =
     typeof window !== 'undefined' ? localStorage.getItem('token') : null;
@@ -702,6 +723,81 @@ export default function DispatchPage() {
 
     return () => window.clearInterval(interval);
   }, []);
+
+  const playDispatchAlert = useCallback(
+    (message: string) => {
+      setLatestDispatchAlert(message);
+
+      window.setTimeout(() => {
+        setLatestDispatchAlert((current) =>
+          current === message ? null : current,
+        );
+      }, 9000);
+
+      if (!soundEnabled || typeof window === 'undefined') return;
+
+      try {
+        const AudioCtor = window.AudioContext || window.webkitAudioContext;
+
+        if (!AudioCtor) return;
+
+        const audioContext = audioContextRef.current ?? new AudioCtor();
+        audioContextRef.current = audioContext;
+
+        if (audioContext.state === 'suspended') {
+          void audioContext.resume();
+        }
+
+        const firstOscillator = audioContext.createOscillator();
+        const secondOscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        const nowTime = audioContext.currentTime;
+
+        firstOscillator.type = 'sine';
+        firstOscillator.frequency.setValueAtTime(880, nowTime);
+        firstOscillator.frequency.setValueAtTime(1046, nowTime + 0.16);
+
+        secondOscillator.type = 'triangle';
+        secondOscillator.frequency.setValueAtTime(440, nowTime);
+        secondOscillator.frequency.setValueAtTime(523, nowTime + 0.16);
+
+        gain.gain.setValueAtTime(0.0001, nowTime);
+        gain.gain.exponentialRampToValueAtTime(0.18, nowTime + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, nowTime + 0.42);
+
+        firstOscillator.connect(gain);
+        secondOscillator.connect(gain);
+        gain.connect(audioContext.destination);
+
+        firstOscillator.start(nowTime);
+        secondOscillator.start(nowTime);
+        firstOscillator.stop(nowTime + 0.45);
+        secondOscillator.stop(nowTime + 0.45);
+      } catch (error) {
+        console.error('Dispatch alert sound failed:', error);
+      }
+    },
+    [soundEnabled],
+  );
+
+  const unlockDispatchAudio = useCallback(() => {
+    try {
+      const AudioCtor = window.AudioContext || window.webkitAudioContext;
+
+      if (AudioCtor && !audioContextRef.current) {
+        audioContextRef.current = new AudioCtor();
+      }
+
+      if (audioContextRef.current?.state === 'suspended') {
+        void audioContextRef.current.resume();
+      }
+
+      setAlertsUnlocked(true);
+      playDispatchAlert('Dispatch alerts enabled');
+    } catch {
+      setAlertsUnlocked(true);
+    }
+  }, [playDispatchAlert]);
 
   useEffect(() => {
     let mounted = true;
@@ -1064,6 +1160,14 @@ export default function DispatchPage() {
     const handleBookingCreated = (payload: SocketBookingPayload) => {
       if (payload?.booking) {
         syncBooking(payload.booking);
+
+        if (!alertedBookingIdsRef.current.has(payload.booking.id)) {
+          alertedBookingIdsRef.current.add(payload.booking.id);
+          playDispatchAlert(
+            `New booking ${payload.booking.reference || ''} created`,
+          );
+        }
+
         void loadBookings();
       }
     };
@@ -1071,6 +1175,16 @@ export default function DispatchPage() {
     const handleBookingUpdated = (payload: SocketBookingPayload) => {
       if (payload?.booking) {
         syncBooking(payload.booking);
+        void loadBookings();
+      }
+    };
+
+    const handleBookingOfferCreated = (payload: SocketBookingPayload) => {
+      if (payload?.booking) {
+        syncBooking(payload.booking);
+        playDispatchAlert(
+          `Driver offer sent for ${payload.booking.reference || 'booking'}`,
+        );
         void loadBookings();
       }
     };
@@ -1099,7 +1213,7 @@ export default function DispatchPage() {
     socket.on('booking:updated', handleBookingUpdated);
     socket.on('booking:assigned', handleBookingUpdated);
     socket.on('booking:status_changed', handleBookingUpdated);
-    socket.on('booking:offer_created', handleBookingUpdated);
+    socket.on('booking:offer_created', handleBookingOfferCreated);
 
     socket.on('driver:updated', handleDriverUpdated);
     socket.on('driver:location', handleDriverLocation);
@@ -1116,7 +1230,7 @@ export default function DispatchPage() {
       socket.off('booking:updated', handleBookingUpdated);
       socket.off('booking:assigned', handleBookingUpdated);
       socket.off('booking:status_changed', handleBookingUpdated);
-      socket.off('booking:offer_created', handleBookingUpdated);
+      socket.off('booking:offer_created', handleBookingOfferCreated);
 
       socket.off('driver:updated', handleDriverUpdated);
       socket.off('driver:location', handleDriverLocation);
@@ -1130,13 +1244,20 @@ export default function DispatchPage() {
     syncDriverLocation,
     loadBookings,
     loadDrivers,
+    playDispatchAlert,
   ]);
 
   async function fetchRoute(
     from: LatLngTuple | null,
     to: LatLngTuple | null,
-  ): Promise<LatLngTuple[]> {
-    if (!from || !to) return [];
+  ): Promise<RouteResult> {
+    if (!from || !to) {
+      return {
+        coordinates: [],
+        distanceMiles: null,
+        durationMinutes: null,
+      };
+    }
 
     try {
       const route = await apiFetch<RouteResponse>(
@@ -1145,10 +1266,21 @@ export default function DispatchPage() {
         )}&toLat=${encodeURIComponent(String(to[0]))}&toLng=${encodeURIComponent(String(to[1]))}`,
       );
 
-      return Array.isArray(route.coordinates) ? route.coordinates : [];
+      return {
+        coordinates: Array.isArray(route.coordinates) ? route.coordinates : [],
+        distanceMiles:
+          typeof route.distanceMiles === 'number' ? route.distanceMiles : null,
+        durationMinutes:
+          typeof route.durationMinutes === 'number' ? route.durationMinutes : null,
+      };
     } catch (error) {
       console.error('Failed to load route:', error);
-      return [];
+
+      return {
+        coordinates: [],
+        distanceMiles: null,
+        durationMinutes: null,
+      };
     }
   }
 
@@ -1163,8 +1295,12 @@ export default function DispatchPage() {
 
       if (cancelled) return;
 
-      setDriverPickupRoute(driverToPickup);
-      setPickupDropoffRoute(pickupToDropoff);
+      setDriverPickupRoute(driverToPickup.coordinates);
+      setPickupDropoffRoute(pickupToDropoff.coordinates);
+      setDriverPickupEtaMinutes(driverToPickup.durationMinutes);
+      setDriverPickupDistanceMiles(driverToPickup.distanceMiles);
+      setPickupDropoffEtaMinutes(pickupToDropoff.durationMinutes);
+      setPickupDropoffDistanceMiles(pickupToDropoff.distanceMiles);
     }
 
     void loadRoutes();
@@ -1566,6 +1702,29 @@ export default function DispatchPage() {
             </div>
 
             <button
+              type="button"
+              onClick={() => {
+                if (!alertsUnlocked) {
+                  unlockDispatchAudio();
+                  return;
+                }
+
+                setSoundEnabled((current) => !current);
+              }}
+              className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                soundEnabled
+                  ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20'
+                  : 'border-slate-500/20 bg-slate-500/10 text-slate-300 hover:bg-slate-500/20'
+              }`}
+            >
+              {!alertsUnlocked
+                ? 'Enable Alerts'
+                : soundEnabled
+                  ? 'Alerts On'
+                  : 'Alerts Muted'}
+            </button>
+
+            <button
               onClick={() => void refreshBoard()}
               className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/20"
             >
@@ -1573,6 +1732,29 @@ export default function DispatchPage() {
             </button>
           </div>
         </div>
+
+        {latestDispatchAlert ? (
+          <div className="mb-6 rounded-3xl border border-amber-400/30 bg-amber-500/15 px-5 py-4 shadow-[0_0_35px_rgba(245,158,11,0.16)]">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-amber-200">
+                  Dispatch Alert
+                </p>
+                <p className="mt-1 text-sm font-bold text-white">
+                  {latestDispatchAlert}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setLatestDispatchAlert(null)}
+                className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/10"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-9">
           <Card label="Bookings" value={stats.bookings} hint="Total jobs" />
@@ -2237,6 +2419,16 @@ export default function DispatchPage() {
             autoDispatchingId={autoDispatchingId}
             statusBusy={statusBusy}
             selectedDriverPosition={selectedDriverPosition}
+            selectedPickupPosition={selectedPickupPosition}
+            selectedDropoffPosition={selectedDropoffPosition}
+            driverPickupRoute={driverPickupRoute}
+            pickupDropoffRoute={pickupDropoffRoute}
+            driverPickupEtaMinutes={driverPickupEtaMinutes}
+            driverPickupDistanceMiles={driverPickupDistanceMiles}
+            pickupDropoffEtaMinutes={pickupDropoffEtaMinutes}
+            pickupDropoffDistanceMiles={pickupDropoffDistanceMiles}
+            driverIconFactory={driverIconFactory}
+            bookingIconFactory={bookingIconFactory}
             now={now}
             onClose={() => setDrawerOpen(false)}
             onTimeline={() => {
@@ -2600,6 +2792,16 @@ function BookingDrawer({
   autoDispatchingId,
   statusBusy,
   selectedDriverPosition,
+  selectedPickupPosition,
+  selectedDropoffPosition,
+  driverPickupRoute,
+  pickupDropoffRoute,
+  driverPickupEtaMinutes,
+  driverPickupDistanceMiles,
+  pickupDropoffEtaMinutes,
+  pickupDropoffDistanceMiles,
+  driverIconFactory,
+  bookingIconFactory,
   now,
   onClose,
   onTimeline,
@@ -2615,6 +2817,16 @@ function BookingDrawer({
   autoDispatchingId: string | null;
   statusBusy: string | null;
   selectedDriverPosition: LatLngTuple | null;
+  selectedPickupPosition: LatLngTuple | null;
+  selectedDropoffPosition: LatLngTuple | null;
+  driverPickupRoute: LatLngTuple[];
+  pickupDropoffRoute: LatLngTuple[];
+  driverPickupEtaMinutes: number | null;
+  driverPickupDistanceMiles: number | null;
+  pickupDropoffEtaMinutes: number | null;
+  pickupDropoffDistanceMiles: number | null;
+  driverIconFactory: ((driver: Driver) => DivIcon) | null;
+  bookingIconFactory: ((color: string, label: string) => DivIcon) | null;
   now: number;
   onClose: () => void;
   onTimeline: () => void;
@@ -2623,10 +2835,29 @@ function BookingDrawer({
   onUpdateStatus: (bookingId: string, status: string) => void;
   onCancelBooking: (bookingId: string) => void;
 }) {
-  const availableDrivers = drivers.filter(isDriverDispatchReady);
+  const hasAssignedDriver = Boolean(booking.driver || booking.driverId);
+  const availableDrivers = hasAssignedDriver
+    ? []
+    : drivers.filter(isDriverDispatchReady);
   const isFinalStatus = isCompleted(booking.status);
   const status = (booking.status || '').toUpperCase();
-  const canDispatch = ['BOOKED', 'NO_DRIVER', 'OFFERED'].includes(status);
+  const canDispatch =
+    !hasAssignedDriver &&
+    ['BOOKED', 'NO_DRIVER', 'OFFERED'].includes(status);
+
+  const drawerMapPoints = [
+    selectedDriverPosition,
+    selectedPickupPosition,
+    selectedDropoffPosition,
+    ...driverPickupRoute,
+    ...pickupDropoffRoute,
+  ].filter(Boolean) as LatLngTuple[];
+
+  const drawerMapCenter =
+    selectedPickupPosition ||
+    selectedDriverPosition ||
+    selectedDropoffPosition ||
+    ([51.5074, -0.1278] as LatLngTuple);
 
   return (
     <div className="fixed inset-0 z-[900] bg-black/70">
@@ -2698,6 +2929,182 @@ function BookingDrawer({
                     : ''
                 }`}
               />
+            </div>
+          </section>
+
+
+          <section className="rounded-2xl border border-cyan-500/20 bg-cyan-500/[0.06] p-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-white">Live Route Map</h3>
+                <p className="mt-1 text-xs text-cyan-100/60">
+                  Driver position, pickup, dropoff and route preview for this booking.
+                </p>
+              </div>
+
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-white/60">
+                {drawerMapPoints.length > 0 ? 'MAP READY' : 'NO GPS'}
+              </span>
+            </div>
+
+            {drawerMapPoints.length > 0 ? (
+              <div className="h-[300px] overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+                <MapContainer
+                  center={drawerMapCenter}
+                  zoom={13}
+                  scrollWheelZoom={false}
+                  className="h-full w-full"
+                  key={`${booking.id}-${selectedDriverPosition?.join(',') || 'no-driver'}-${selectedPickupPosition?.join(',') || 'no-pickup'}-${selectedDropoffPosition?.join(',') || 'no-dropoff'}-${driverPickupRoute.length}-${pickupDropoffRoute.length}`}
+                >
+                  <TileLayer
+                    attribution="&copy; OpenStreetMap contributors"
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+
+                  {driverIconFactory && booking.driver && selectedDriverPosition ? (
+                    <Marker
+                      position={selectedDriverPosition}
+                      icon={driverIconFactory(booking.driver)}
+                    >
+                      <Popup>
+                        <div className="min-w-[180px] text-black">
+                          <div className="font-bold">
+                            Driver: {getDriverName(booking.driver)}
+                          </div>
+                          <div className="mt-1 text-sm">
+                            {(booking.driver.status || 'UNKNOWN').replace(/_/g, ' ')}
+                          </div>
+                          <div className="mt-2 text-xs text-gray-600">
+                            GPS: {formatGpsAge(booking.driver.lastLocationAt, now)}
+                          </div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ) : null}
+
+                  {bookingIconFactory && selectedPickupPosition ? (
+                    <Marker
+                      position={selectedPickupPosition}
+                      icon={bookingIconFactory('#2563eb', 'P')}
+                    >
+                      <Popup>
+                        <div className="text-black">
+                          <div className="font-bold">Pickup</div>
+                          <div className="mt-1 text-sm">{getPickupLabel(booking)}</div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ) : null}
+
+                  {bookingIconFactory && selectedDropoffPosition ? (
+                    <Marker
+                      position={selectedDropoffPosition}
+                      icon={bookingIconFactory('#7c3aed', 'D')}
+                    >
+                      <Popup>
+                        <div className="text-black">
+                          <div className="font-bold">Dropoff</div>
+                          <div className="mt-1 text-sm">{getDropoffLabel(booking)}</div>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ) : null}
+
+                  {driverPickupRoute.length > 0 ? (
+                    <Polyline
+                      positions={driverPickupRoute}
+                      pathOptions={{
+                        color: '#22c55e',
+                        weight: 4,
+                        opacity: 0.9,
+                      }}
+                    />
+                  ) : selectedDriverPosition && selectedPickupPosition ? (
+                    <Polyline
+                      positions={[selectedDriverPosition, selectedPickupPosition]}
+                      pathOptions={{
+                        color: '#22c55e',
+                        weight: 4,
+                        opacity: 0.5,
+                        dashArray: '8 8',
+                      }}
+                    />
+                  ) : null}
+
+                  {pickupDropoffRoute.length > 0 ? (
+                    <Polyline
+                      positions={pickupDropoffRoute}
+                      pathOptions={{
+                        color: '#8b5cf6',
+                        weight: 4,
+                        opacity: 0.9,
+                      }}
+                    />
+                  ) : selectedPickupPosition && selectedDropoffPosition ? (
+                    <Polyline
+                      positions={[selectedPickupPosition, selectedDropoffPosition]}
+                      pathOptions={{
+                        color: '#8b5cf6',
+                        weight: 4,
+                        opacity: 0.5,
+                        dashArray: '8 8',
+                      }}
+                    />
+                  ) : null}
+                </MapContainer>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-100">
+                Map unavailable until this booking has pickup/dropoff coordinates or assigned driver GPS.
+              </div>
+            )}
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <MiniMapStat
+                label="Driver GPS"
+                value={selectedDriverPosition ? 'Live' : 'Missing'}
+                tone={selectedDriverPosition ? 'green' : 'amber'}
+              />
+              <MiniMapStat
+                label="Pickup ETA"
+                value={
+                  driverPickupEtaMinutes != null
+                    ? `${driverPickupEtaMinutes} mins`
+                    : selectedPickupPosition
+                      ? 'Calculating'
+                      : 'Missing'
+                }
+                tone={driverPickupEtaMinutes != null ? 'green' : 'amber'}
+              />
+              <MiniMapStat
+                label="Trip Route"
+                value={
+                  pickupDropoffDistanceMiles != null
+                    ? `${pickupDropoffDistanceMiles.toFixed(1)} mi`
+                    : selectedDropoffPosition
+                      ? 'Calculating'
+                      : 'Missing'
+                }
+                tone={pickupDropoffDistanceMiles != null ? 'green' : 'amber'}
+              />
+            </div>
+
+            <div className="mt-3 rounded-2xl border border-white/10 bg-[#07111f] p-4 text-xs text-white/55">
+              Route refreshes automatically when driver GPS changes.
+              {driverPickupDistanceMiles != null ? (
+                <span className="text-cyan-200">
+                  {' '}Driver to pickup: {driverPickupDistanceMiles.toFixed(2)} mi
+                  {driverPickupEtaMinutes != null
+                    ? ` / ${driverPickupEtaMinutes} mins`
+                    : ''}
+                  .
+                </span>
+              ) : null}
+              {pickupDropoffEtaMinutes != null ? (
+                <span className="text-purple-200">
+                  {' '}Pickup to dropoff: {pickupDropoffEtaMinutes} mins.
+                </span>
+              ) : null}
             </div>
           </section>
 
@@ -2783,37 +3190,39 @@ function BookingDrawer({
             </div>
           </section>
 
-          <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <h3 className="text-lg font-bold text-white">Assign Driver</h3>
+          {!hasAssignedDriver && !isFinalStatus ? (
+            <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+              <h3 className="text-lg font-bold text-white">Assign Driver</h3>
 
-            <div className="mt-4 space-y-3">
-              {availableDrivers.length === 0 ? (
-                <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
-                  No available drivers.
-                </div>
-              ) : (
-                availableDrivers.map((driver) => {
-                  const key = `${booking.id}:${driver.id}`;
+              <div className="mt-4 space-y-3">
+                {availableDrivers.length === 0 ? (
+                  <div className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
+                    No available drivers.
+                  </div>
+                ) : (
+                  availableDrivers.map((driver) => {
+                    const key = `${booking.id}:${driver.id}`;
 
-                  return (
-                    <button
-                      key={driver.id}
-                      disabled={assigningKey === key || isFinalStatus}
-                      onClick={() => onAssignDriver(booking.id, driver.id)}
-                      className="block w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-left text-sm text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
-                    >
-                      <div className="font-bold">{getDriverName(driver)}</div>
-                      <div className="mt-1 text-xs text-emerald-100/70">
-                        {(driver.status || 'UNKNOWN').replace(/_/g, ' ')} •{' '}
-                        {getVehicleLabel(driver.vehicle ?? null)} • GPS{' '}
-                        {formatGpsAge(driver.lastLocationAt, now)}
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </section>
+                    return (
+                      <button
+                        key={driver.id}
+                        disabled={assigningKey === key || isFinalStatus}
+                        onClick={() => onAssignDriver(booking.id, driver.id)}
+                        className="block w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-left text-sm text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+                      >
+                        <div className="font-bold">{getDriverName(driver)}</div>
+                        <div className="mt-1 text-xs text-emerald-100/70">
+                          {(driver.status || 'UNKNOWN').replace(/_/g, ' ')} •{' '}
+                          {getVehicleLabel(driver.vehicle ?? null)} • GPS{' '}
+                          {formatGpsAge(driver.lastLocationAt, now)}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          ) : null}
 
           {(booking.notes || booking.airportNotes) ? (
             <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
@@ -2834,6 +3243,32 @@ function BookingDrawer({
           ) : null}
         </div>
       </div>
+    </div>
+  );
+}
+
+
+function MiniMapStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'green' | 'amber';
+}) {
+  return (
+    <div
+      className={`rounded-2xl border px-4 py-3 ${
+        tone === 'green'
+          ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+          : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+      }`}
+    >
+      <div className="text-[11px] font-black uppercase tracking-[0.18em] opacity-70">
+        {label}
+      </div>
+      <div className="mt-1 text-sm font-black">{value}</div>
     </div>
   );
 }

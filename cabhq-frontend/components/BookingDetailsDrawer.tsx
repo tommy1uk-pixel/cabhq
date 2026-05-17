@@ -22,20 +22,16 @@ type BookingEvent = {
 type Booking = {
   id: string;
   reference: string;
-
   pickup: string;
   dropoff: string;
   pickupLat?: number | null;
   pickupLng?: number | null;
   dropoffLat?: number | null;
   dropoffLng?: number | null;
-
   status: string;
   pickupTime: string;
-
   customerName?: string | null;
   customerPhone?: string | null;
-
   isThirdPartyBooking?: boolean;
   bookerName?: string | null;
   bookerPhone?: string | null;
@@ -43,16 +39,13 @@ type Booking = {
   passengerName?: string | null;
   passengerPhone?: string | null;
   passengerNotes?: string | null;
-
   passengerCount?: number | null;
   notes?: string | null;
-
   pricingMode?: string | null;
   quotedPrice?: number | null;
   calculatedFare?: number | null;
   distanceMiles?: number | null;
   durationMinutes?: number | null;
-
   createdAt: string;
   driver?: Driver | null;
   driverId?: string | null;
@@ -80,7 +73,10 @@ const STATUS_OPTIONS = [
   'ON_JOB',
   'COMPLETED',
   'CANCELLED',
+  'NO_SHOW',
 ] as const;
+
+const ACTIVE_DRIVER_STATUSES = ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'];
 
 export default function BookingDetailsDrawer({
   booking,
@@ -93,6 +89,13 @@ export default function BookingDetailsDrawer({
   onUnassignDriver,
 }: Props) {
   if (!booking) return null;
+
+  const hasAssignedDriver = Boolean(booking.driver || booking.driverId);
+  const canAutoDispatch = !hasAssignedDriver && !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(booking.status);
+  const canUnassign =
+    hasAssignedDriver &&
+    onUnassignDriver &&
+    !['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(booking.status);
 
   const bookerName = booking.bookerName || booking.customerName || '—';
   const bookerPhone = booking.bookerPhone || booking.customerPhone || '—';
@@ -108,18 +111,23 @@ export default function BookingDetailsDrawer({
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-white/40">
-                Booking Details
+                Booking Drawer
               </p>
-              <h2 className="mt-2 text-2xl font-bold">{booking.reference}</h2>
-              <p className="mt-2 text-sm text-white/60">
-                {booking.pickup} → {booking.dropoff}
-              </p>
+              <h2 className="mt-2 text-2xl font-black">{booking.reference}</h2>
 
-              {booking.isThirdPartyBooking ? (
-                <div className="mt-3 inline-flex rounded-full border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold text-fuchsia-300">
-                  Booked for someone else
-                </div>
-              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-xs font-bold text-cyan-300">
+                  {booking.status}
+                </span>
+                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-white/70">
+                  {hasAssignedDriver ? 'Driver Assigned' : 'Unassigned'}
+                </span>
+                {booking.isThirdPartyBooking ? (
+                  <span className="rounded-full border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-1 text-xs font-bold text-fuchsia-300">
+                    Third-party
+                  </span>
+                ) : null}
+              </div>
             </div>
 
             <button
@@ -156,19 +164,23 @@ export default function BookingDetailsDrawer({
             </div>
           ) : null}
 
-          <section className="grid gap-4 md:grid-cols-2">
-            <Card label="Pickup Time" value={formatDateTime(booking.pickupTime)} />
-            <Card label="Status" value={booking.status} />
-            <Card
-              label="Quoted Price"
+          <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <h3 className="mb-4 text-lg font-bold">Journey</h3>
+
+            <InfoBlock label="Pickup" value={booking.pickup} />
+            <InfoBlock label="Dropoff" value={booking.dropoff} />
+            <InfoBlock label="Pickup Time" value={formatDateTime(booking.pickupTime)} />
+            <InfoBlock
+              label="Fare"
               value={
                 booking.quotedPrice != null
                   ? `£${booking.quotedPrice.toFixed(2)}`
-                  : 'No price'
+                  : booking.calculatedFare != null
+                    ? `£${booking.calculatedFare.toFixed(2)}`
+                    : 'No price'
               }
             />
-            <Card label="Pricing Mode" value={booking.pricingMode || 'Not set'} />
-            <Card
+            <InfoBlock
               label="Distance"
               value={
                 booking.distanceMiles != null
@@ -176,7 +188,7 @@ export default function BookingDetailsDrawer({
                   : 'Unknown'
               }
             />
-            <Card
+            <InfoBlock
               label="Duration"
               value={
                 booking.durationMinutes != null
@@ -187,39 +199,21 @@ export default function BookingDetailsDrawer({
           </section>
 
           <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h3 className="text-lg font-bold">People</h3>
-              <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/60">
-                {booking.isThirdPartyBooking ? 'Third-party booking' : 'Direct booking'}
-              </span>
-            </div>
+            <h3 className="mb-4 text-lg font-bold">People</h3>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-xl border border-white/10 bg-[#0b1728] p-4">
-                <p className="text-xs uppercase tracking-[0.15em] text-white/40">
-                  Booked By
-                </p>
-                <p className="mt-2 text-sm font-semibold text-white">{bookerName}</p>
-                <p className="mt-1 text-sm text-white/60">{bookerPhone}</p>
-                {booking.bookerEmail ? (
-                  <p className="mt-1 break-words text-xs text-white/45">
-                    {booking.bookerEmail}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="rounded-xl border border-white/10 bg-[#0b1728] p-4">
-                <p className="text-xs uppercase tracking-[0.15em] text-white/40">
-                  Passenger
-                </p>
-                <p className="mt-2 text-sm font-semibold text-white">
-                  {passengerName}
-                </p>
-                <p className="mt-1 text-sm text-white/60">{passengerPhone}</p>
-                <p className="mt-2 text-xs text-white/45">
-                  Passengers: {booking.passengerCount ?? '—'}
-                </p>
-              </div>
+              <PersonCard
+                label="Booked By"
+                name={bookerName}
+                phone={bookerPhone}
+                email={booking.bookerEmail}
+              />
+              <PersonCard
+                label="Passenger"
+                name={passengerName}
+                phone={passengerPhone}
+                extra={`Passengers: ${booking.passengerCount ?? '—'}`}
+              />
             </div>
 
             {booking.passengerNotes ? (
@@ -236,55 +230,60 @@ export default function BookingDetailsDrawer({
 
           <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <h3 className="text-lg font-bold">Assigned Driver</h3>
-              <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/60">
-                {booking.driver ? 'Assigned' : 'Unassigned'}
+              <h3 className="text-lg font-bold">Driver</h3>
+              <span
+                className={`rounded-full px-3 py-1 text-xs font-bold ${
+                  hasAssignedDriver
+                    ? 'bg-emerald-500/10 text-emerald-300'
+                    : 'bg-amber-500/10 text-amber-300'
+                }`}
+              >
+                {hasAssignedDriver ? 'Assigned' : 'Needs Driver'}
               </span>
             </div>
 
             {booking.driver ? (
-              <div className="space-y-3">
-                <div className="rounded-xl border border-white/10 bg-[#0b1728] p-4">
-                  <p className="font-semibold">{booking.driver.name}</p>
-                  <p className="mt-1 text-sm text-white/60">
-                    {booking.driver.phone || 'No phone'}
-                    {booking.driver.email ? ` · ${booking.driver.email}` : ''}
-                  </p>
-                  <p className="mt-2 text-xs text-cyan-300">
-                    Status: {booking.driver.status}
-                  </p>
-                  {booking.driver.lastLocationAt ? (
-                    <p className="mt-1 text-xs text-white/45">
-                      Last update: {formatDateTime(booking.driver.lastLocationAt)}
-                    </p>
-                  ) : null}
-                  {booking.driver.latitude != null &&
-                  booking.driver.longitude != null ? (
-                    <p className="mt-1 text-xs text-white/45">
-                      {booking.driver.latitude.toFixed(5)},{' '}
-                      {booking.driver.longitude.toFixed(5)}
-                    </p>
-                  ) : null}
-                  {etaMinutes != null ? (
-                    <p className="mt-2 text-sm font-semibold text-emerald-300">
-                      ETA: {etaMinutes} mins
-                    </p>
-                  ) : null}
-                </div>
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4">
+                <p className="text-lg font-black text-white">{booking.driver.name}</p>
+                <p className="mt-1 text-sm text-white/70">
+                  {booking.driver.phone || 'No phone'}
+                  {booking.driver.email ? ` · ${booking.driver.email}` : ''}
+                </p>
+                <p className="mt-2 text-xs font-bold text-cyan-300">
+                  Status: {booking.driver.status}
+                </p>
 
-                {onUnassignDriver ? (
+                {booking.driver.latitude != null && booking.driver.longitude != null ? (
+                  <p className="mt-1 text-xs text-white/50">
+                    GPS {booking.driver.latitude.toFixed(5)}, {booking.driver.longitude.toFixed(5)}
+                  </p>
+                ) : null}
+
+                {booking.driver.lastLocationAt ? (
+                  <p className="mt-1 text-xs text-white/50">
+                    Last update: {formatDateTime(booking.driver.lastLocationAt)}
+                  </p>
+                ) : null}
+
+                {etaMinutes != null ? (
+                  <p className="mt-3 text-sm font-bold text-emerald-300">
+                    ETA: {etaMinutes} mins
+                  </p>
+                ) : null}
+
+                {canUnassign ? (
                   <button
                     type="button"
                     onClick={() => void onUnassignDriver(booking.id)}
-                    className="w-full rounded-xl bg-slate-700 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-600"
+                    className="mt-4 w-full rounded-xl bg-slate-700 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-600"
                   >
                     Unassign Driver
                   </button>
                 ) : null}
               </div>
             ) : (
-              <div className="rounded-xl border border-white/10 bg-[#0b1728] p-4 text-white/50">
-                No driver assigned yet.
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-100">
+                No driver assigned yet. Use Auto Dispatch or assign from the main dispatch board.
               </div>
             )}
           </section>
@@ -296,9 +295,14 @@ export default function BookingDetailsDrawer({
               <button
                 type="button"
                 onClick={() => void onAutoDispatch(booking.id)}
-                className="rounded-xl bg-amber-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-amber-500"
+                disabled={!canAutoDispatch}
+                className={`rounded-xl px-4 py-3 text-sm font-bold transition ${
+                  canAutoDispatch
+                    ? 'bg-amber-600 text-white hover:bg-amber-500'
+                    : 'cursor-not-allowed bg-slate-700/60 text-white/35'
+                }`}
               >
-                Auto Dispatch
+                {hasAssignedDriver ? 'Driver Already Assigned' : 'Auto Dispatch'}
               </button>
 
               <select
@@ -313,36 +317,12 @@ export default function BookingDetailsDrawer({
                 ))}
               </select>
             </div>
-          </section>
 
-          <section className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <h3 className="mb-4 text-lg font-bold">Journey</h3>
-
-            <div className="space-y-3">
-              <div className="rounded-xl border border-white/10 bg-[#0b1728] p-4">
-                <p className="text-xs uppercase tracking-[0.15em] text-white/40">
-                  Pickup
-                </p>
-                <p className="mt-2 text-sm text-white/85">{booking.pickup}</p>
-                {booking.pickupLat != null && booking.pickupLng != null ? (
-                  <p className="mt-2 text-xs text-white/45">
-                    {booking.pickupLat}, {booking.pickupLng}
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="rounded-xl border border-white/10 bg-[#0b1728] p-4">
-                <p className="text-xs uppercase tracking-[0.15em] text-white/40">
-                  Dropoff
-                </p>
-                <p className="mt-2 text-sm text-white/85">{booking.dropoff}</p>
-                {booking.dropoffLat != null && booking.dropoffLng != null ? (
-                  <p className="mt-2 text-xs text-white/45">
-                    {booking.dropoffLat}, {booking.dropoffLng}
-                  </p>
-                ) : null}
-              </div>
-            </div>
+            {hasAssignedDriver && ACTIVE_DRIVER_STATUSES.includes(booking.status) ? (
+              <p className="mt-3 text-xs text-emerald-300">
+                This booking is already live with a driver. Assignment controls are hidden to prevent duplicate dispatch.
+              </p>
+            ) : null}
           </section>
 
           {booking.notes ? (
@@ -383,11 +363,35 @@ export default function BookingDetailsDrawer({
   );
 }
 
-function Card({ label, value }: { label: string; value: string }) {
+function InfoBlock({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-      <p className="text-sm text-white/50">{label}</p>
-      <p className="mt-2 text-lg font-semibold text-white">{value}</p>
+    <div className="border-b border-white/10 py-4 first:pt-0 last:border-b-0 last:pb-0">
+      <p className="text-xs uppercase tracking-[0.2em] text-white/40">{label}</p>
+      <p className="mt-2 text-sm font-semibold text-white">{value}</p>
+    </div>
+  );
+}
+
+function PersonCard({
+  label,
+  name,
+  phone,
+  email,
+  extra,
+}: {
+  label: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  extra?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-[#0b1728] p-4">
+      <p className="text-xs uppercase tracking-[0.15em] text-white/40">{label}</p>
+      <p className="mt-2 text-sm font-semibold text-white">{name}</p>
+      <p className="mt-1 text-sm text-white/60">{phone}</p>
+      {email ? <p className="mt-1 break-words text-xs text-white/45">{email}</p> : null}
+      {extra ? <p className="mt-2 text-xs text-white/45">{extra}</p> : null}
     </div>
   );
 }
