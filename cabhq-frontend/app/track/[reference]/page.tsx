@@ -238,6 +238,108 @@ function formatGpsAge(value?: string | null, now = Date.now()) {
   return `${hours}h ago`;
 }
 
+function cleanTimelineMessage(raw?: string | null) {
+  const message = (raw || '').trim();
+
+  if (!message) return 'Timeline updated';
+
+  const uuidPattern =
+    /\s*\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]/gi;
+
+  if (message.startsWith('AUTO DISPATCH OFFERED')) {
+    const driver = message
+      .replace('AUTO DISPATCH OFFERED ·', '')
+      .replace('AUTO DISPATCH OFFERED -', '')
+      .replace(uuidPattern, '')
+      .split('·')[0]
+      .split('- score')[0]
+      .trim();
+
+    return driver
+      ? `Auto dispatch offered to ${driver}`
+      : 'Auto dispatch offered';
+  }
+
+  if (message.startsWith('OFFER ACCEPTED')) {
+    const driver = message
+      .replace('OFFER ACCEPTED ·', '')
+      .replace('OFFER ACCEPTED -', '')
+      .replace(uuidPattern, '')
+      .trim();
+
+    return driver
+      ? `${driver} accepted the booking`
+      : 'Driver accepted the booking';
+  }
+
+  if (message.startsWith('OFFER REJECTED')) {
+    const driver = message
+      .replace('OFFER REJECTED ·', '')
+      .replace('OFFER REJECTED -', '')
+      .replace(uuidPattern, '')
+      .trim();
+
+    return driver
+      ? `${driver} rejected the booking`
+      : 'Driver rejected the booking';
+  }
+
+  if (message.startsWith('OFFER EXPIRED')) {
+    const driver = message
+      .replace('OFFER EXPIRED ·', '')
+      .replace('OFFER EXPIRED -', '')
+      .replace(uuidPattern, '')
+      .trim();
+
+    return driver
+      ? `${driver} did not respond in time`
+      : 'Driver did not respond in time';
+  }
+
+  if (message.startsWith('DRIVER UPDATE')) {
+    if (message.includes('EN_ROUTE')) return 'Driver marked job as en route';
+    if (message.includes('ARRIVED')) return 'Driver arrived at pickup';
+    if (message.includes('ON_JOB')) return 'Passenger onboard';
+    if (message.includes('COMPLETED')) return 'Journey completed';
+    return 'Driver updated the booking';
+  }
+
+  if (message.startsWith('PRICING CAPTURED')) {
+    const price = message.match(/£\s?\d+(\.\d{1,2})?/);
+
+    return price
+      ? `Price captured: ${price[0].replace(/\s/g, '')}`
+      : 'Price captured';
+  }
+
+  if (message.startsWith('PASSENGER CAPTURED')) {
+    return message
+      .replace(/^PASSENGER CAPTURED\s*[·-]\s*/i, 'Passenger captured: ')
+      .replace(uuidPattern, '')
+      .trim();
+  }
+
+  if (message.startsWith('CUSTOMER CAPTURED')) {
+    return message
+      .replace(/^CUSTOMER CAPTURED\s*[·-]\s*/i, 'Customer captured: ')
+      .replace(uuidPattern, '')
+      .trim();
+  }
+
+  if (message.startsWith('BOOKING CREATED')) {
+    return message
+      .replace(/^BOOKING CREATED\s*[·-]\s*/i, 'Booking created: ')
+      .replace(
+        /\s*-\s*\d{1,2}\/\d{1,2}\/\d{4},?\s*\d{1,2}:\d{2}(:\d{2})?$/i,
+        '',
+      )
+      .replace(uuidPattern, '')
+      .trim();
+  }
+
+  return message.replace(uuidPattern, '').trim();
+}
+
 function makeCarIcon(heading?: number | null) {
   const rotation = heading ?? 0;
 
@@ -386,7 +488,13 @@ function LiveDriverMap({
       ...route.driverToPickup,
       ...route.pickupToDropoff,
     ].filter(Boolean) as LatLngPoint[];
-  }, [driverPoint, pickupPoint, dropoffPoint, route.driverToPickup, route.pickupToDropoff]);
+  }, [
+    driverPoint,
+    pickupPoint,
+    dropoffPoint,
+    route.driverToPickup,
+    route.pickupToDropoff,
+  ]);
 
   const carIcon = useMemo(
     () => makeCarIcon(data.driver?.heading ?? null),
@@ -548,12 +656,18 @@ function LiveDriverMap({
                 ? `${data.durationMinutes} mins`
                 : 'Waiting'
           }
-          hint={formatDistance(route.pickupToDropoffDistance ?? data.distanceMiles)}
+          hint={formatDistance(
+            route.pickupToDropoffDistance ?? data.distanceMiles,
+          )}
         />
         <MetricTile
           label="Pickup pin"
           value={pickupPoint ? 'Ready' : 'Missing'}
-          hint={pickupPoint ? `${pickupPoint[0].toFixed(5)}, ${pickupPoint[1].toFixed(5)}` : 'No coordinates'}
+          hint={
+            pickupPoint
+              ? `${pickupPoint[0].toFixed(5)}, ${pickupPoint[1].toFixed(5)}`
+              : 'No coordinates'
+          }
         />
         <MetricTile
           label="GPS update"
@@ -870,7 +984,9 @@ export default function TrackingPage() {
               ) : null}
 
               <div className="mt-5 flex flex-wrap gap-3">
-                <div className={`inline-flex items-center gap-2 rounded-full border ${tone.border} ${tone.bg} px-4 py-2 text-sm font-black ${tone.text}`}>
+                <div
+                  className={`inline-flex items-center gap-2 rounded-full border ${tone.border} ${tone.bg} px-4 py-2 text-sm font-black ${tone.text}`}
+                >
                   <span className={`h-2.5 w-2.5 rounded-full ${tone.dot}`} />
                   {statusLabel(data.status)}
                 </div>
@@ -917,7 +1033,9 @@ export default function TrackingPage() {
           />
           <MetricTile
             label="Journey distance"
-            value={formatDistance(route.pickupToDropoffDistance ?? data.distanceMiles)}
+            value={formatDistance(
+              route.pickupToDropoffDistance ?? data.distanceMiles,
+            )}
             hint={
               route.pickupToDropoffEta != null
                 ? `${route.pickupToDropoffEta} mins estimated`
@@ -950,7 +1068,8 @@ export default function TrackingPage() {
                 <div className="mt-2 text-white/60">{vehicle}</div>
 
                 <div className="mt-4 rounded-2xl border border-white/10 bg-[#07111f] p-4 text-sm text-white/60">
-                  Last GPS update: {formatGpsAge(data.driver.lastLocationAt, now)}
+                  Last GPS update:{' '}
+                  {formatGpsAge(data.driver.lastLocationAt, now)}
                   <br />
                   <span className="text-xs text-white/35">
                     {formatDateTime(data.driver.lastLocationAt)}
@@ -982,7 +1101,8 @@ export default function TrackingPage() {
             </div>
           ) : (
             <p className="mt-4 text-white/60">
-              A driver has not been assigned yet. Tracking will update automatically.
+              A driver has not been assigned yet. Tracking will update
+              automatically.
             </p>
           )}
         </section>
@@ -998,7 +1118,7 @@ export default function TrackingPage() {
                   className="rounded-2xl border border-white/10 bg-black/20 p-4"
                 >
                   <p className="text-sm font-semibold text-white/85">
-                    {event.message}
+                    {cleanTimelineMessage(event.message)}
                   </p>
                   <p className="mt-2 text-xs text-white/40">
                     {formatDateTime(event.createdAt)}
