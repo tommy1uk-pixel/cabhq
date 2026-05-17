@@ -3,6 +3,7 @@
 import 'leaflet/dist/leaflet.css';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { io, type Socket } from 'socket.io-client';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 
@@ -80,10 +81,39 @@ type JourneyRoute = {
   pickupToDropoffDistance: number | null;
 };
 
+type TrackingRealtimePayload = {
+  bookingId?: string;
+  reference?: string | null;
+  status?: string | null;
+  driverId?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  heading?: number | null;
+  speed?: number | null;
+  etaMinutes?: number | null;
+  distanceMiles?: number | null;
+  driverDistanceMiles?: number | null;
+  etaConfidence?: string | null;
+  driverGpsAgeSeconds?: number | null;
+  trackingUrl?: string | null;
+  lastLocationAt?: string | null;
+};
+
+type BookingSocketPayload = {
+  booking?: Partial<TrackingData> & {
+    id?: string;
+  };
+};
+
 type LeafletModule = typeof import('leaflet');
 type ReactLeafletModule = typeof import('react-leaflet');
 
 const REFRESH_SECONDS = 10;
+
+const SOCKET_URL =
+  process.env.NEXT_PUBLIC_SOCKET_URL ||
+  process.env.NEXT_PUBLIC_API_URL ||
+  'https://cabhq-production.up.railway.app';
 
 function formatDateTime(value?: string | null) {
   if (!value) return '—';
@@ -973,6 +1003,8 @@ export default function TrackingPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [now, setNow] = useState(() => Date.now());
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [lastRealtimeAt, setLastRealtimeAt] = useState<string | null>(null);
 
   const loadTracking = useCallback(async () => {
     if (!reference) {
@@ -1018,6 +1050,178 @@ export default function TrackingPage() {
       window.clearInterval(interval);
     };
   }, [loadTracking]);
+
+  useEffect(() => {
+    if (!data?.reference) return;
+
+    let socket: Socket | null = null;
+    let cancelled = false;
+
+    function applyRealtimeUpdate(payload: TrackingRealtimePayload) {
+      if (!payload) return;
+
+      if (
+        payload.reference &&
+        data?.reference &&
+        payload.reference !== data.reference
+      ) {
+        return;
+      }
+
+      setLastRealtimeAt(new Date().toISOString());
+
+      setData((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          status: payload.status ?? current.status,
+          trackingUrl: payload.trackingUrl ?? current.trackingUrl,
+          etaMinutes:
+            payload.etaMinutes ??
+            payload.driverGpsAgeSeconds ??
+            current.etaMinutes,
+          driverDistanceMiles:
+            payload.driverDistanceMiles ??
+            payload.distanceMiles ??
+            current.driverDistanceMiles,
+          driver: current.driver
+            ? {
+                ...current.driver,
+                id: payload.driverId ?? current.driver.id,
+                latitude:
+                  typeof payload.latitude === 'number'
+                    ? payload.latitude
+                    : current.driver.latitude,
+                longitude:
+                  typeof payload.longitude === 'number'
+                    ? payload.longitude
+                    : current.driver.longitude,
+                heading:
+                  typeof payload.heading === 'number'
+                    ? payload.heading
+                    : current.driver.heading,
+                speed:
+                  typeof payload.speed === 'number'
+                    ? payload.speed
+                    : current.driver.speed,
+                lastLocationAt:
+                  payload.lastLocationAt ??
+                  (typeof payload.latitude === 'number' &&
+                  typeof payload.longitude === 'number'
+                    ? new Date().toISOString()
+                    : current.driver.lastLocationAt),
+              }
+            : current.driver,
+        };
+      });
+    }
+
+    async function connectSocket() {
+      socket = io(`${SOCKET_URL.replace(/\/$/, '')}/realtime`, {
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+      });
+
+      socket.on('connect', () => {
+        if (cancelled || !socket) return;
+
+        setSocketConnected(true);
+
+        socket.emit('tracking:join', {
+          bookingId: data.reference,
+        });
+
+        socket.emit('tracking:viewed', {
+          bookingId: data.reference,
+        });
+      });
+
+      socket.on('disconnect', () => {
+        if (cancelled) return;
+        setSocketConnected(false);
+      });
+
+      socket.on('tracking:updated', (payload: TrackingRealtimePayload) => {
+        applyRealtimeUpdate(payload);
+      });
+
+      socket.on('driver:location', (payload: TrackingRealtimePayload) => {
+        applyRealtimeUpdate(payload);
+      });
+
+      socket.on('booking:updated', (payload: BookingSocketPayload) => {
+        if (!payload?.booking) return;
+
+        if (
+          payload.booking.reference &&
+          payload.booking.reference !== data.reference
+        ) {
+          return;
+        }
+
+        setLastRealtimeAt(new Date().toISOString());
+
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                ...payload.booking,
+                driver: {
+                  ...current.driver,
+                  ...payload.booking?.driver,
+                },
+              }
+            : current,
+        );
+      });
+
+      socket.on('booking:status_changed', (payload: BookingSocketPayload) => {
+        if (!payload?.booking) return;
+
+        if (
+          payload.booking.reference &&
+          payload.booking.reference !== data.reference
+        ) {
+          return;
+        }
+
+        setLastRealtimeAt(new Date().toISOString());
+
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                ...payload.booking,
+                driver: {
+                  ...current.driver,
+                  ...payload.booking?.driver,
+                },
+              }
+            : current,
+        );
+      });
+    }
+
+    void connectSocket();
+
+    return () => {
+      cancelled = true;
+      setSocketConnected(false);
+
+      if (socket) {
+        socket.emit('tracking:leave', {
+          bookingId: data.reference,
+        });
+
+        socket.removeAllListeners();
+        socket.disconnect();
+      }
+    };
+  }, [data?.reference]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1214,8 +1418,14 @@ export default function TrackingPage() {
                   {statusLabel(data.status)}
                 </div>
 
-                <div className="inline-flex rounded-full border border-white/10 bg-black/20 px-4 py-2 text-sm font-bold text-white/70">
-                  Refreshes every {REFRESH_SECONDS}s
+                <div
+                  className={`inline-flex rounded-full border px-4 py-2 text-sm font-bold ${
+                    socketConnected
+                      ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+                      : 'border-white/10 bg-black/20 text-white/70'
+                  }`}
+                >
+                  {socketConnected ? 'Realtime live' : `Refreshes every ${REFRESH_SECONDS}s`}
                 </div>
 
                 {refreshing ? (
@@ -1275,6 +1485,12 @@ export default function TrackingPage() {
               <div className="mt-2 text-sm text-white/50">
                 Pickup {formatTimeOnly(data.pickupTime)}
               </div>
+
+              {lastRealtimeAt ? (
+                <div className="mt-2 text-xs font-semibold text-emerald-300/80">
+                  Realtime update {formatTimeOnly(lastRealtimeAt)}
+                </div>
+              ) : null}
             </div>
           </div>
         </section>
