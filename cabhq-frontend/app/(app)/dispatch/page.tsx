@@ -3308,6 +3308,123 @@ function StatusButtons({
   );
 }
 
+
+function cleanTimelineText(raw?: string | null) {
+  const message = (raw || '').trim();
+
+  if (!message) return 'Timeline event';
+
+  const withoutIds = message
+    .replace(/\s*\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]/gi, '')
+    .replace(/\s*·\s*score\s+\d+[\s\S]*$/i, '')
+    .replace(/\s*·\s*[+-]\d+\s+[A-Z0-9_<=]+[\s\S]*$/i, '')
+    .replace(/\s*\|\s*[+-]\d+\s+[A-Z0-9_<=]+[\s\S]*$/i, '')
+    .trim();
+
+  const upper = withoutIds.toUpperCase();
+
+  if (upper.startsWith('AUTO DISPATCH OFFERED')) {
+    const driver = withoutIds.split('·')[1]?.trim();
+    return driver ? `Auto dispatch offered to ${driver}` : 'Auto dispatch offered to nearest available driver';
+  }
+
+  if (upper.startsWith('OFFER ACCEPTED')) {
+    const driver = withoutIds.split('·')[1]?.trim();
+    return driver ? `${driver} accepted the booking` : 'Driver accepted the booking';
+  }
+
+  if (upper.startsWith('OFFER REJECTED')) {
+    const driver = withoutIds.split('·')[1]?.trim();
+    return driver ? `${driver} rejected the booking` : 'Driver rejected the booking';
+  }
+
+  if (upper.startsWith('OFFER EXPIRED')) {
+    const driver = withoutIds.split('·')[1]?.trim();
+    return driver ? `${driver} did not respond in time` : 'Driver did not respond in time';
+  }
+
+  if (upper.startsWith('OFFER CANCELLED')) {
+    return 'Offer cancelled by dispatcher';
+  }
+
+  if (upper.startsWith('AUTO DISPATCH FAILED')) {
+    const reason = withoutIds.split('·')[1]?.trim();
+    return reason || 'Auto dispatch could not find an available driver';
+  }
+
+  if (upper.startsWith('DRIVER UPDATE')) {
+    if (upper.includes('EN_ROUTE')) return 'Driver is en route to pickup';
+    if (upper.includes('ARRIVED')) return 'Driver has arrived at pickup';
+    if (upper.includes('ON_JOB')) return 'Passenger is on board';
+    if (upper.includes('COMPLETED')) return 'Journey completed';
+    return 'Driver updated the booking';
+  }
+
+  if (upper.startsWith('PRICING CAPTURED')) {
+    const priceMatch = withoutIds.match(/£\s*\d+(?:\.\d{1,2})?/);
+    return priceMatch ? `Price captured: ${priceMatch[0]}` : 'Price captured';
+  }
+
+  if (upper.startsWith('PASSENGER CAPTURED')) {
+    return withoutIds.replace(/^PASSENGER CAPTURED\s*·\s*/i, 'Passenger captured: ');
+  }
+
+  if (upper.startsWith('CUSTOMER CAPTURED')) {
+    return withoutIds.replace(/^CUSTOMER CAPTURED\s*·\s*/i, 'Customer captured: ');
+  }
+
+  if (upper.startsWith('BOOKING CREATED')) {
+    const parts = withoutIds.split('·').map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 3) return `Booking created: ${parts[2]}`;
+    return 'Booking created';
+  }
+
+  return withoutIds
+    .replace(/\s+/g, ' ')
+    .replace(/_/g, ' ')
+    .trim();
+}
+
+function getTimelineTitle(raw?: string | null) {
+  const message = (raw || '').toUpperCase();
+
+  if (message.startsWith('BOOKING CREATED')) return 'Booking created';
+  if (message.startsWith('CUSTOMER CAPTURED')) return 'Customer captured';
+  if (message.startsWith('PASSENGER CAPTURED')) return 'Passenger captured';
+  if (message.startsWith('PRICING CAPTURED')) return 'Pricing captured';
+  if (message.startsWith('AUTO DISPATCH OFFERED')) return 'Auto dispatch offered';
+  if (message.startsWith('AUTO DISPATCH FAILED')) return 'Auto dispatch failed';
+  if (message.startsWith('OFFER ACCEPTED')) return 'Offer accepted';
+  if (message.startsWith('OFFER REJECTED')) return 'Offer rejected';
+  if (message.startsWith('OFFER EXPIRED')) return 'Offer expired';
+  if (message.startsWith('OFFER CANCELLED')) return 'Offer cancelled';
+  if (message.startsWith('DRIVER UPDATE')) return 'Driver update';
+
+  return 'Timeline update';
+}
+
+function getTimelineTone(raw?: string | null) {
+  const message = (raw || '').toUpperCase();
+
+  if (message.includes('FAILED') || message.includes('REJECTED') || message.includes('EXPIRED')) {
+    return 'border-red-500/20 bg-red-500/10 text-red-200';
+  }
+
+  if (message.includes('ACCEPTED') || message.includes('COMPLETED')) {
+    return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200';
+  }
+
+  if (message.includes('AUTO DISPATCH') || message.includes('OFFER')) {
+    return 'border-amber-500/20 bg-amber-500/10 text-amber-200';
+  }
+
+  if (message.includes('DRIVER')) {
+    return 'border-cyan-500/20 bg-cyan-500/10 text-cyan-200';
+  }
+
+  return 'border-white/10 bg-white/5 text-white';
+}
+
 function TimelineModal({
   booking,
   timeline,
@@ -3347,9 +3464,14 @@ function TimelineModal({
                 key={event.id}
                 className="rounded-2xl border border-white/10 bg-white/5 p-4"
               >
-                <div className="text-sm text-white">
-                  {event.message || event.note || 'Timeline event'}
+                <div className={`mb-3 inline-flex rounded-full border px-3 py-1 text-xs font-black ${getTimelineTone(event.message || event.note)}`}>
+                  {getTimelineTitle(event.message || event.note)}
                 </div>
+
+                <div className="text-sm font-semibold text-white">
+                  {cleanTimelineText(event.message || event.note)}
+                </div>
+
                 <div className="mt-2 text-xs text-white/40">
                   {formatDateTime(event.createdAt)}
                 </div>
