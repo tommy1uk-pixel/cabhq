@@ -227,6 +227,32 @@ type SocketDriverLocationPayload = {
   heading?: number | null;
   speed?: number | null;
   lastLocationAt?: string | null;
+  bookingId?: string | null;
+  etaMinutes?: number | null;
+  distanceMiles?: number | null;
+  driverDistanceMiles?: number | null;
+};
+
+type SocketTrackingPayload = {
+  bookingId?: string;
+  reference?: string | null;
+  status?: string | null;
+  driverId?: string | null;
+  etaMinutes?: number | null;
+  driverDistanceMiles?: number | null;
+  distanceMiles?: number | null;
+  etaConfidence?: string | null;
+  driverGpsAgeSeconds?: number | null;
+  trackingUrl?: string | null;
+};
+
+type SocketDispatchIntelligencePayload = {
+  bookingId?: string;
+  driverId?: string;
+  state: string;
+  message?: string;
+  score?: number;
+  confidence?: string;
 };
 
 type AirportOption = {
@@ -930,6 +956,11 @@ export default function DispatchPage() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [alertsUnlocked, setAlertsUnlocked] = useState(false);
   const [latestDispatchAlert, setLatestDispatchAlert] = useState<string | null>(null);
+  const [latestDispatchIntelligence, setLatestDispatchIntelligence] =
+    useState<string | null>(null);
+  const [lastRealtimeEventAt, setLastRealtimeEventAt] = useState<string | null>(
+    null,
+  );
   const [copiedAction, setCopiedAction] = useState<string | null>(null);
 
   const mapRef = useRef<LeafletMap | null>(null);
@@ -1259,6 +1290,8 @@ export default function DispatchPage() {
   }, []);
 
   const syncDriverLocation = useCallback((payload: SocketDriverLocationPayload) => {
+    const lastLocationAt = payload.lastLocationAt ?? new Date().toISOString();
+
     setDrivers((prev) =>
       prev.map((driver) =>
         driver.id === payload.driverId
@@ -1268,11 +1301,39 @@ export default function DispatchPage() {
               longitude: payload.longitude,
               heading: payload.heading ?? driver.heading ?? null,
               speed: payload.speed ?? driver.speed ?? null,
-              lastLocationAt:
-                payload.lastLocationAt ?? new Date().toISOString(),
+              lastLocationAt,
             }
           : driver,
       ),
+    );
+
+    setBookings((prev) =>
+      prev.map((booking) => {
+        const matchesBooking =
+          Boolean(payload.bookingId && booking.id === payload.bookingId) ||
+          Boolean(booking.driverId && booking.driverId === payload.driverId);
+
+        if (!matchesBooking) return booking;
+
+        return {
+          ...booking,
+          etaMinutes: payload.etaMinutes ?? booking.etaMinutes,
+          driverDistanceMiles:
+            payload.driverDistanceMiles ??
+            payload.distanceMiles ??
+            booking.driverDistanceMiles,
+          driver: booking.driver
+            ? {
+                ...booking.driver,
+                latitude: payload.latitude,
+                longitude: payload.longitude,
+                heading: payload.heading ?? booking.driver.heading ?? null,
+                speed: payload.speed ?? booking.driver.speed ?? null,
+                lastLocationAt,
+              }
+            : booking.driver,
+        };
+      }),
     );
 
     setSelectedBooking((current) => {
@@ -1282,18 +1343,76 @@ export default function DispatchPage() {
 
       return {
         ...current,
+        etaMinutes: payload.etaMinutes ?? current.etaMinutes,
+        driverDistanceMiles:
+          payload.driverDistanceMiles ??
+          payload.distanceMiles ??
+          current.driverDistanceMiles,
         driver: {
           ...current.driver,
           latitude: payload.latitude,
           longitude: payload.longitude,
           heading: payload.heading ?? current.driver.heading ?? null,
           speed: payload.speed ?? current.driver.speed ?? null,
-          lastLocationAt:
-            payload.lastLocationAt ?? new Date().toISOString(),
+          lastLocationAt,
         },
       };
     });
   }, []);
+
+
+  const syncTrackingPayload = useCallback((payload: SocketTrackingPayload) => {
+    if (!payload?.bookingId && !payload?.reference) return;
+
+    setLastRealtimeEventAt(new Date().toISOString());
+
+    const updateBooking = (booking: Booking): Booking => {
+      const matches =
+        Boolean(payload.bookingId && booking.id === payload.bookingId) ||
+        Boolean(payload.reference && booking.reference === payload.reference);
+
+      if (!matches) return booking;
+
+      return {
+        ...booking,
+        status: payload.status ?? booking.status,
+        trackingUrl: payload.trackingUrl ?? booking.trackingUrl,
+        etaMinutes: payload.etaMinutes ?? booking.etaMinutes,
+        driverDistanceMiles:
+          payload.driverDistanceMiles ??
+          payload.distanceMiles ??
+          booking.driverDistanceMiles,
+        etaConfidence: payload.etaConfidence ?? booking.etaConfidence,
+        driverGpsAgeSeconds:
+          payload.driverGpsAgeSeconds ?? booking.driverGpsAgeSeconds,
+      };
+    };
+
+    setBookings((prev) => prev.map(updateBooking));
+
+    setSelectedBooking((current) => (current ? updateBooking(current) : current));
+  }, []);
+
+  const handleDispatchIntelligence = useCallback(
+    (payload: SocketDispatchIntelligencePayload) => {
+      const message =
+        payload?.message ||
+        (payload?.state
+          ? `Dispatch intelligence: ${payload.state}`
+          : 'Dispatch intelligence updated');
+
+      setLastRealtimeEventAt(new Date().toISOString());
+      setLatestDispatchIntelligence(message);
+
+      window.setTimeout(() => {
+        setLatestDispatchIntelligence((current) =>
+          current === message ? null : current,
+        );
+      }, 9000);
+    },
+    [],
+  );
+
 
   const loadBookings = useCallback(async () => {
     const data = await apiFetch<Booking[]>('/bookings/dispatch-board');
@@ -1434,8 +1553,45 @@ export default function DispatchPage() {
         typeof payload.latitude === 'number' &&
         typeof payload.longitude === 'number'
       ) {
+        setLastRealtimeEventAt(new Date().toISOString());
         syncDriverLocation(payload);
       }
+    };
+
+    const handleTrackingUpdated = (payload: SocketTrackingPayload) => {
+      syncTrackingPayload(payload);
+    };
+
+    const handleNoDriver = () => {
+      setLastRealtimeEventAt(new Date().toISOString());
+      void loadBookings();
+    };
+
+    const handleOfferSkipped = () => {
+      setLastRealtimeEventAt(new Date().toISOString());
+      void loadBookings();
+    };
+
+    const handleAutoDispatchStarted = (payload: SocketDispatchIntelligencePayload) => {
+      setLastRealtimeEventAt(new Date().toISOString());
+      setLatestDispatchIntelligence(
+        payload?.message || 'Auto dispatch started',
+      );
+      void loadBookings();
+    };
+
+    const handleAutoDispatchCompleted = (payload: SocketDispatchIntelligencePayload) => {
+      setLastRealtimeEventAt(new Date().toISOString());
+      setLatestDispatchIntelligence(
+        payload?.message || 'Auto dispatch completed',
+      );
+      void loadBookings();
+      void loadDrivers(false);
+    };
+
+    const handleDispatchRefresh = () => {
+      setLastRealtimeEventAt(new Date().toISOString());
+      void refreshBoard();
     };
 
     socket.on('connect', handleConnect);
@@ -1449,6 +1605,24 @@ export default function DispatchPage() {
 
     socket.on('driver:updated', handleDriverUpdated);
     socket.on('driver:location', handleDriverLocation);
+    socket.on('driver:map_updated', handleDriverUpdated);
+
+    socket.on('booking:offer_accepted', handleBookingUpdated);
+    socket.on('booking:offer_rejected', handleBookingUpdated);
+    socket.on('booking:offer_expired', handleBookingUpdated);
+    socket.on('booking:no_driver', handleNoDriver);
+    socket.on('booking:offer_skipped', handleOfferSkipped);
+
+    socket.on('autodispatch:started', handleAutoDispatchStarted);
+    socket.on('autodispatch:completed', handleAutoDispatchCompleted);
+    socket.on('autodispatch:failed', handleAutoDispatchStarted);
+
+    socket.on('tracking:updated', handleTrackingUpdated);
+    socket.on('tracking:airport_updated', handleTrackingUpdated);
+    socket.on('tracking:customer_viewed', handleTrackingUpdated);
+
+    socket.on('dispatch:intelligence', handleDispatchIntelligence);
+    socket.on('dispatch:refresh', handleDispatchRefresh);
 
     if (socket.connected) {
       setConnected(true);
@@ -1466,6 +1640,24 @@ export default function DispatchPage() {
 
       socket.off('driver:updated', handleDriverUpdated);
       socket.off('driver:location', handleDriverLocation);
+      socket.off('driver:map_updated', handleDriverUpdated);
+
+      socket.off('booking:offer_accepted', handleBookingUpdated);
+      socket.off('booking:offer_rejected', handleBookingUpdated);
+      socket.off('booking:offer_expired', handleBookingUpdated);
+      socket.off('booking:no_driver', handleNoDriver);
+      socket.off('booking:offer_skipped', handleOfferSkipped);
+
+      socket.off('autodispatch:started', handleAutoDispatchStarted);
+      socket.off('autodispatch:completed', handleAutoDispatchCompleted);
+      socket.off('autodispatch:failed', handleAutoDispatchStarted);
+
+      socket.off('tracking:updated', handleTrackingUpdated);
+      socket.off('tracking:airport_updated', handleTrackingUpdated);
+      socket.off('tracking:customer_viewed', handleTrackingUpdated);
+
+      socket.off('dispatch:intelligence', handleDispatchIntelligence);
+      socket.off('dispatch:refresh', handleDispatchRefresh);
 
       closeSocket();
     };
@@ -1474,8 +1666,11 @@ export default function DispatchPage() {
     syncBooking,
     syncDriver,
     syncDriverLocation,
+    syncTrackingPayload,
+    handleDispatchIntelligence,
     loadBookings,
     loadDrivers,
+    refreshBoard,
     playDispatchAlert,
   ]);
 
@@ -1981,6 +2176,34 @@ export default function DispatchPage() {
               <button
                 type="button"
                 onClick={() => setLatestDispatchAlert(null)}
+                className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/10"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {latestDispatchIntelligence ? (
+          <div className="mb-6 rounded-3xl border border-cyan-400/25 bg-cyan-500/10 px-5 py-4 shadow-[0_0_35px_rgba(6,182,212,0.12)]">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-200">
+                  Dispatch Intelligence
+                </p>
+                <p className="mt-1 text-sm font-bold text-white">
+                  {latestDispatchIntelligence}
+                </p>
+                {lastRealtimeEventAt ? (
+                  <p className="mt-1 text-xs text-cyan-100/60">
+                    Realtime update {formatTimeOnly(lastRealtimeEventAt)}
+                  </p>
+                ) : null}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setLatestDispatchIntelligence(null)}
                 className="rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-white/80 hover:bg-white/10"
               >
                 Dismiss
