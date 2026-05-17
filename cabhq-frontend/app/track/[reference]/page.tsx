@@ -102,6 +102,7 @@ type TrackingRealtimePayload = {
 type BookingSocketPayload = {
   booking?: Partial<TrackingData> & {
     id?: string;
+    reference?: string;
   };
 };
 
@@ -1063,7 +1064,7 @@ export default function TrackingPage() {
       if (
         payload.reference &&
         data?.reference &&
-        payload.reference !== data.reference
+        payload.reference !== (data?.reference || reference)
       ) {
         return;
       }
@@ -1077,10 +1078,7 @@ export default function TrackingPage() {
           ...current,
           status: payload.status ?? current.status,
           trackingUrl: payload.trackingUrl ?? current.trackingUrl,
-          etaMinutes:
-            payload.etaMinutes ??
-            payload.driverGpsAgeSeconds ??
-            current.etaMinutes,
+          etaMinutes: payload.etaMinutes ?? current.etaMinutes,
           driverDistanceMiles:
             payload.driverDistanceMiles ??
             payload.distanceMiles ??
@@ -1158,7 +1156,7 @@ export default function TrackingPage() {
 
         if (
           payload.booking.reference &&
-          payload.booking.reference !== data.reference
+          payload.booking.reference !== (data?.reference || reference)
         ) {
           return;
         }
@@ -1170,10 +1168,12 @@ export default function TrackingPage() {
             ? {
                 ...current,
                 ...payload.booking,
-                driver: {
-                  ...current.driver,
-                  ...payload.booking?.driver,
-                },
+                driver: current.driver || payload.booking?.driver
+                  ? {
+                      ...(current.driver ?? {}),
+                      ...(payload.booking?.driver ?? {}),
+                    }
+                  : current.driver,
               }
             : current,
         );
@@ -1184,7 +1184,7 @@ export default function TrackingPage() {
 
         if (
           payload.booking.reference &&
-          payload.booking.reference !== data.reference
+          payload.booking.reference !== (data?.reference || reference)
         ) {
           return;
         }
@@ -1196,10 +1196,12 @@ export default function TrackingPage() {
             ? {
                 ...current,
                 ...payload.booking,
-                driver: {
-                  ...current.driver,
-                  ...payload.booking?.driver,
-                },
+                driver: current.driver || payload.booking?.driver
+                  ? {
+                      ...(current.driver ?? {}),
+                      ...(payload.booking?.driver ?? {}),
+                    }
+                  : current.driver,
               }
             : current,
         );
