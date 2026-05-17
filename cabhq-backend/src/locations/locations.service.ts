@@ -38,6 +38,7 @@ type RetrievedAddress = {
 
 type MapboxGeocodeResponse = {
   features?: Array<{
+    id?: string;
     place_name?: string;
     text?: string;
     center?: [number, number];
@@ -86,19 +87,105 @@ const KNOWN_PLACES = [
       'longfleet road hospital',
     ],
   },
+  {
+    id: 'PLACE:POOLE_STATION',
+    address: 'Poole Railway Station, Serpentine Road, Poole, BH15 2BQ',
+    postcode: 'BH15 2BQ',
+    latitude: 50.71937,
+    longitude: -1.98339,
+    keywords: [
+      'poole train',
+      'poole train station',
+      'poole railway',
+      'poole railway station',
+      'poole station',
+      'train station poole',
+      'railway station poole',
+    ],
+  },
 ];
 
 const AIRPORTS = [
-  { id: 'AIRPORT:HEATHROW', address: 'Heathrow Airport, Hounslow, TW6', postcode: 'TW6', latitude: 51.47, longitude: -0.4543, keywords: ['heathrow', 'lhr', 'heathrow airport'] },
-  { id: 'AIRPORT:GATWICK', address: 'Gatwick Airport, Horley, RH6', postcode: 'RH6', latitude: 51.1537, longitude: -0.1821, keywords: ['gatwick', 'lgw', 'gatwick airport'] },
-  { id: 'AIRPORT:BOURNEMOUTH', address: 'Bournemouth Airport, Christchurch, BH23', postcode: 'BH23', latitude: 50.78, longitude: -1.8425, keywords: ['bournemouth airport', 'bournemouth', 'boh'] },
-  { id: 'AIRPORT:SOUTHAMPTON', address: 'Southampton Airport, Southampton, SO18', postcode: 'SO18', latitude: 50.9503, longitude: -1.3568, keywords: ['southampton airport', 'southampton', 'sou'] },
-  { id: 'AIRPORT:BRISTOL', address: 'Bristol Airport, Bristol, BS48', postcode: 'BS48', latitude: 51.3837, longitude: -2.7191, keywords: ['bristol airport', 'bristol', 'brs'] },
-  { id: 'AIRPORT:EXETER', address: 'Exeter Airport, Exeter, EX5', postcode: 'EX5', latitude: 50.7344, longitude: -3.4139, keywords: ['exeter airport', 'exeter', 'ext'] },
-  { id: 'AIRPORT:LUTON', address: 'London Luton Airport, Luton, LU2', postcode: 'LU2', latitude: 51.8747, longitude: -0.3683, keywords: ['luton airport', 'luton', 'ltn'] },
-  { id: 'AIRPORT:STANSTED', address: 'London Stansted Airport, Stansted, CM24', postcode: 'CM24', latitude: 51.885, longitude: 0.235, keywords: ['stansted airport', 'stansted', 'stn'] },
-  { id: 'AIRPORT:BIRMINGHAM', address: 'Birmingham Airport, Birmingham, B26', postcode: 'B26', latitude: 52.4539, longitude: -1.748, keywords: ['birmingham airport', 'birmingham', 'bhx'] },
-  { id: 'AIRPORT:MANCHESTER', address: 'Manchester Airport, Manchester, M90', postcode: 'M90', latitude: 53.365, longitude: -2.2722, keywords: ['manchester airport', 'manchester', 'man'] },
+  {
+    id: 'AIRPORT:HEATHROW',
+    address: 'Heathrow Airport, Hounslow, TW6',
+    postcode: 'TW6',
+    latitude: 51.47,
+    longitude: -0.4543,
+    keywords: ['heathrow', 'lhr', 'heathrow airport', 'heathrow terminal'],
+  },
+  {
+    id: 'AIRPORT:GATWICK',
+    address: 'Gatwick Airport, Horley, RH6',
+    postcode: 'RH6',
+    latitude: 51.1537,
+    longitude: -0.1821,
+    keywords: ['gatwick', 'lgw', 'gatwick airport'],
+  },
+  {
+    id: 'AIRPORT:BOURNEMOUTH',
+    address: 'Bournemouth Airport, Christchurch, BH23',
+    postcode: 'BH23',
+    latitude: 50.78,
+    longitude: -1.8425,
+    keywords: ['bournemouth airport', 'bournemouth', 'boh'],
+  },
+  {
+    id: 'AIRPORT:SOUTHAMPTON',
+    address: 'Southampton Airport, Southampton, SO18',
+    postcode: 'SO18',
+    latitude: 50.9503,
+    longitude: -1.3568,
+    keywords: ['southampton airport', 'southampton', 'sou'],
+  },
+  {
+    id: 'AIRPORT:BRISTOL',
+    address: 'Bristol Airport, Bristol, BS48',
+    postcode: 'BS48',
+    latitude: 51.3837,
+    longitude: -2.7191,
+    keywords: ['bristol airport', 'bristol', 'brs'],
+  },
+  {
+    id: 'AIRPORT:EXETER',
+    address: 'Exeter Airport, Exeter, EX5',
+    postcode: 'EX5',
+    latitude: 50.7344,
+    longitude: -3.4139,
+    keywords: ['exeter airport', 'exeter', 'ext'],
+  },
+  {
+    id: 'AIRPORT:LUTON',
+    address: 'London Luton Airport, Luton, LU2',
+    postcode: 'LU2',
+    latitude: 51.8747,
+    longitude: -0.3683,
+    keywords: ['luton airport', 'luton', 'ltn'],
+  },
+  {
+    id: 'AIRPORT:STANSTED',
+    address: 'London Stansted Airport, Stansted, CM24',
+    postcode: 'CM24',
+    latitude: 51.885,
+    longitude: 0.235,
+    keywords: ['stansted airport', 'stansted', 'stn'],
+  },
+  {
+    id: 'AIRPORT:BIRMINGHAM',
+    address: 'Birmingham Airport, Birmingham, B26',
+    postcode: 'B26',
+    latitude: 52.4539,
+    longitude: -1.748,
+    keywords: ['birmingham airport', 'birmingham', 'bhx'],
+  },
+  {
+    id: 'AIRPORT:MANCHESTER',
+    address: 'Manchester Airport, Manchester, M90',
+    postcode: 'M90',
+    latitude: 53.365,
+    longitude: -2.2722,
+    keywords: ['manchester airport', 'manchester', 'man'],
+  },
 ];
 
 @Injectable()
@@ -111,28 +198,33 @@ export class LocationsService {
     }
 
     const cleanQuery = this.cleanSearchQuery(query);
+    const looksLikePostcode = this.looksLikePostcode(cleanQuery);
 
-    const knownPlaceResults = this.findKnownPlaceSuggestions(cleanQuery);
-    const airportResults = this.findAirportSuggestions(cleanQuery);
-    const postcoderResults = await this.searchPostcoder(cleanQuery);
+    const [knownPlaceResults, airportResults, mapboxResults, postcoderResults] =
+      await Promise.all([
+        Promise.resolve(this.findKnownPlaceSuggestions(cleanQuery)),
+        Promise.resolve(this.findAirportSuggestions(cleanQuery)),
+        this.searchMapboxPlaces(cleanQuery),
+        this.searchPostcoder(cleanQuery),
+      ]);
 
-    const shouldUseMapbox =
-      knownPlaceResults.length === 0 &&
-      postcoderResults.length < 4 &&
-      cleanQuery.length >= 4;
-
-    const mapboxResults = shouldUseMapbox
-      ? await this.searchMapboxPlaces(cleanQuery)
-      : [];
+    const orderedResults = looksLikePostcode
+      ? [
+          ...knownPlaceResults,
+          ...airportResults,
+          ...postcoderResults,
+          ...mapboxResults,
+        ]
+      : [
+          ...knownPlaceResults,
+          ...airportResults,
+          ...mapboxResults,
+          ...postcoderResults,
+        ];
 
     const seen = new Set<string>();
 
-    return [
-      ...knownPlaceResults,
-      ...airportResults,
-      ...postcoderResults,
-      ...mapboxResults,
-    ].filter((item) => {
+    return orderedResults.filter((item) => {
       const key = this.normalise(item.address);
 
       if (!key || seen.has(key)) return false;
@@ -162,22 +254,11 @@ export class LocationsService {
     const airport = AIRPORTS.find((item) => item.id === cleanId);
 
     if (airport) {
-      return {
-        id: airport.id,
-        address: airport.address,
-        line1: airport.address,
-        line2: null,
-        line3: null,
-        town: null,
-        county: null,
-        postcode: airport.postcode,
-        latitude: airport.latitude,
-        longitude: airport.longitude,
-        raw: airport,
-      };
+      return this.mapAirport(airport);
     }
 
     const cached = this.retrieveCache.get(cleanId);
+
     if (cached) return cached;
 
     const apiKey = process.env.POSTCODER_API_KEY;
@@ -229,7 +310,10 @@ export class LocationsService {
     const cleanAddress = this.cleanSearchQuery(address);
 
     if (!cleanAddress) {
-      return { latitude: null, longitude: null };
+      return {
+        latitude: null,
+        longitude: null,
+      };
     }
 
     const knownPlace = this.findKnownPlace(cleanAddress);
@@ -262,7 +346,10 @@ export class LocationsService {
       return mapboxCoords;
     }
 
-    return { latitude: null, longitude: null };
+    return {
+      latitude: null,
+      longitude: null,
+    };
   }
 
   async getRoute(input: RouteInput) {
@@ -270,6 +357,13 @@ export class LocationsService {
 
     if (!token) {
       throw new Error('MAPBOX_ACCESS_TOKEN missing');
+    }
+
+    if (
+      !this.isValidLatLng(input.fromLat, input.fromLng) ||
+      !this.isValidLatLng(input.toLat, input.toLng)
+    ) {
+      throw new BadRequestException('Invalid route coordinates');
     }
 
     const coordinates =
@@ -362,7 +456,10 @@ export class LocationsService {
     const results = await this.searchPostcoder(address);
 
     if (results.length === 0) {
-      return { latitude: null, longitude: null };
+      return {
+        latitude: null,
+        longitude: null,
+      };
     }
 
     const first = results[0];
@@ -381,12 +478,21 @@ export class LocationsService {
       const lng = this.toNumberOrNull(retrieved.longitude);
 
       if (!this.isValidLatLng(lat, lng)) {
-        return { latitude: null, longitude: null };
+        return {
+          latitude: null,
+          longitude: null,
+        };
       }
 
-      return { latitude: lat, longitude: lng };
+      return {
+        latitude: lat,
+        longitude: lng,
+      };
     } catch {
-      return { latitude: null, longitude: null };
+      return {
+        latitude: null,
+        longitude: null,
+      };
     }
   }
 
@@ -395,7 +501,7 @@ export class LocationsService {
   ): Promise<AddressSuggestion[]> {
     const token = process.env.MAPBOX_ACCESS_TOKEN;
 
-    if (!token) return [];
+    if (!token || query.length < 2) return [];
 
     try {
       const url =
@@ -403,10 +509,9 @@ export class LocationsService {
         `${encodeURIComponent(query)}.json` +
         `?access_token=${encodeURIComponent(token)}` +
         `&country=gb` +
-        `&limit=4` +
+        `&limit=10` +
         `&autocomplete=true` +
-        `&types=address,poi,postcode` +
-        `&proximity=-2.1650,50.8570`;
+        `&types=poi,address,postcode,place,locality,neighborhood,district,region`;
 
       const response = await fetch(url);
 
@@ -583,7 +688,10 @@ export class LocationsService {
     const token = process.env.MAPBOX_ACCESS_TOKEN;
 
     if (!token) {
-      return { latitude: null, longitude: null };
+      return {
+        latitude: null,
+        longitude: null,
+      };
     }
 
     try {
@@ -593,32 +701,46 @@ export class LocationsService {
         `?access_token=${encodeURIComponent(token)}` +
         `&country=gb` +
         `&limit=1` +
-        `&types=address,poi,postcode,place,locality` +
-        `&proximity=-2.1650,50.8570`;
+        `&types=poi,address,postcode,place,locality,neighborhood,district,region`;
 
       const response = await fetch(url);
 
       if (!response.ok) {
-        return { latitude: null, longitude: null };
+        return {
+          latitude: null,
+          longitude: null,
+        };
       }
 
       const data = (await response.json()) as MapboxGeocodeResponse;
       const center = data.features?.[0]?.center;
 
       if (!center) {
-        return { latitude: null, longitude: null };
+        return {
+          latitude: null,
+          longitude: null,
+        };
       }
 
       const longitude = center[0];
       const latitude = center[1];
 
       if (!this.isValidLatLng(latitude, longitude)) {
-        return { latitude: null, longitude: null };
+        return {
+          latitude: null,
+          longitude: null,
+        };
       }
 
-      return { longitude, latitude };
+      return {
+        longitude,
+        latitude,
+      };
     } catch {
-      return { latitude: null, longitude: null };
+      return {
+        latitude: null,
+        longitude: null,
+      };
     }
   }
 
@@ -705,6 +827,22 @@ export class LocationsService {
     };
   }
 
+  private mapAirport(airport: (typeof AIRPORTS)[number]): RetrievedAddress {
+    return {
+      id: airport.id,
+      address: airport.address,
+      line1: airport.address,
+      line2: null,
+      line3: null,
+      town: null,
+      county: null,
+      postcode: airport.postcode,
+      latitude: airport.latitude,
+      longitude: airport.longitude,
+      raw: airport,
+    };
+  }
+
   private cleanSearchQuery(value: string) {
     return value.trim().replace(/\s+/g, ' ');
   }
@@ -737,6 +875,12 @@ export class LocationsService {
 
   private normalise(value: string) {
     return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  private looksLikePostcode(value: string) {
+    const compact = value.toUpperCase().replace(/\s+/g, '');
+
+    return /^[A-Z]{1,2}\d[A-Z\d]?\d?[A-Z]{0,2}$/.test(compact);
   }
 
   private toNumberOrNull(value: unknown) {
