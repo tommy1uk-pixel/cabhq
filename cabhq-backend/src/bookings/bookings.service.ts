@@ -138,9 +138,24 @@ export class BookingsService {
             )
           : [];
 
+        const trackingUrl = this.getTrackingUrl(booking.reference);
+
+        const driverDistanceMiles =
+          booking.driver && booking.pickupLat != null && booking.pickupLng != null
+            ? this.getDriverDistanceMiles(booking)
+            : null;
+
+        const etaMinutes =
+          booking.driver && booking.pickupLat != null && booking.pickupLng != null
+            ? this.getBookingEtaMinutes(booking)
+            : null;
+
         return {
           ...booking,
           suggestedDrivers,
+          trackingUrl,
+          driverDistanceMiles,
+          etaMinutes,
           pickupLatitude: booking.pickupLat ?? null,
           pickupLongitude: booking.pickupLng ?? null,
           dropoffLatitude: booking.dropoffLat ?? null,
@@ -181,6 +196,18 @@ export class BookingsService {
       throw new NotFoundException('Booking not found');
     }
 
+    const trackingUrl = this.getTrackingUrl(booking.reference);
+
+    const driverDistanceMiles =
+      booking.driver && booking.pickupLat != null && booking.pickupLng != null
+        ? this.getDriverDistanceMiles(booking)
+        : null;
+
+    const etaMinutes =
+      booking.driver && booking.pickupLat != null && booking.pickupLng != null
+        ? this.getBookingEtaMinutes(booking)
+        : null;
+
     return {
       reference: booking.reference,
       status: booking.status,
@@ -193,6 +220,9 @@ export class BookingsService {
       pickupTime: booking.pickupTime,
       quotedPrice: booking.quotedPrice,
       pricingMode: booking.pricingMode,
+      trackingUrl,
+      driverDistanceMiles,
+      etaMinutes,
 
       isAirportBooking: booking.isAirportBooking ?? false,
       airportCode: booking.airportCode ?? null,
@@ -510,13 +540,21 @@ export class BookingsService {
     this.realtime.bookingUpdated(refreshed.companyId, refreshed);
 
     if (input.autoDispatch) {
-      return this.autoDispatchService.startForBooking(
+      const autoDispatched = await this.autoDispatchService.startForBooking(
         refreshed.id,
         refreshed.companyId,
       );
+
+      return {
+        ...autoDispatched,
+        trackingUrl: this.getTrackingUrl(autoDispatched.reference),
+      };
     }
 
-    return refreshed;
+    return {
+      ...refreshed,
+      trackingUrl: this.getTrackingUrl(refreshed.reference),
+    };
   }
 
   async updateBooking(input: UpdateBookingInput) {
@@ -962,7 +1000,7 @@ export class BookingsService {
       updatedDriver = await this.releaseDriverIfSafe(previousDriverId);
     }
 
-    await this.appendTimeline(booking.id, 'BOOKING NO SHOW');
+    await this.appendTimeline(booking.id, this.timelineMessage.bookingNoShow());
 
     const refreshed = await this.findBookingWithRelations(
       booking.id,
@@ -1261,6 +1299,67 @@ export class BookingsService {
     return date;
   }
 
+  private getTrackingUrl(reference: string) {
+    const frontend =
+      process.env.FRONTEND_URL?.replace(/\/$/, '') || 'https://cabhq.co.uk';
+
+    return `${frontend}/track/${encodeURIComponent(reference)}`;
+  }
+
+  private getBookingEtaMinutes(booking: any) {
+    const distanceMiles = this.getDriverDistanceMiles(booking);
+
+    if (distanceMiles === null) {
+      return null;
+    }
+
+    const averageMph = 22;
+
+    return Math.max(1, Math.round((distanceMiles / averageMph) * 60));
+  }
+
+  private getDriverDistanceMiles(booking: any) {
+    if (
+      booking.driver?.latitude == null ||
+      booking.driver?.longitude == null ||
+      booking.pickupLat == null ||
+      booking.pickupLng == null
+    ) {
+      return null;
+    }
+
+    return this.haversineMiles(
+      Number(booking.driver.latitude),
+      Number(booking.driver.longitude),
+      Number(booking.pickupLat),
+      Number(booking.pickupLng),
+    );
+  }
+
+  private haversineMiles(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ) {
+    const toRad = (value: number) => (value * Math.PI) / 180;
+    const earthRadiusMiles = 3958.8;
+
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) *
+        Math.cos(toRad(lat2)) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return earthRadiusMiles * c;
+  }
+
   private readonly timelineMessage = {
     bookingCreated: (data: {
       reference: string;
@@ -1268,7 +1367,7 @@ export class BookingsService {
       dropoff: string;
       pickupTime: Date;
     }) =>
-      `BOOKING CREATED · ${data.reference} · ${data.pickup} → ${data.dropoff} · ${new Date(
+      `Booking created · ${data.reference} · ${data.pickup} → ${data.dropoff} · ${new Date(
         data.pickupTime,
       ).toLocaleString('en-GB')}`,
 
@@ -1277,7 +1376,7 @@ export class BookingsService {
       customerPhone: string | null;
       passengerCount: number | null;
     }) =>
-      `CUSTOMER CAPTURED${data.customerName ? ` · ${data.customerName}` : ''}${
+      `Customer captured${data.customerName ? ` · ${data.customerName}` : ''}${
         data.customerPhone ? ` · ${data.customerPhone}` : ''
       }${
         data.passengerCount != null
@@ -1290,8 +1389,8 @@ export class BookingsService {
       passengerName: string | null;
       passengerPhone: string | null;
     }) =>
-      `PASSENGER CAPTURED${
-        data.isThirdPartyBooking ? ' · THIRD PARTY BOOKING' : ''
+      `Passenger captured${
+        data.isThirdPartyBooking ? ' · third-party booking' : ''
       }${data.passengerName ? ` · ${data.passengerName}` : ''}${
         data.passengerPhone ? ` · ${data.passengerPhone}` : ''
       }`,
@@ -1306,7 +1405,7 @@ export class BookingsService {
       airline: string | null;
       meetAndGreet: boolean;
     }) =>
-      `AIRPORT DETAILS CAPTURED${
+      `Airport details captured${
         data.airportName ? ` · ${data.airportName}` : ''
       }${data.airportCode ? ` · ${data.airportCode}` : ''}${
         data.airportTerminal ? ` · Terminal ${data.airportTerminal}` : ''
@@ -1326,7 +1425,7 @@ export class BookingsService {
       distanceMiles: number | null;
       durationMinutes: number | null;
     }) =>
-      `PRICING CAPTURED · ${data.pricingMode} · £${data.quotedPrice.toFixed(
+      `Pricing captured · ${data.pricingMode} · £${data.quotedPrice.toFixed(
         2,
       )}${
         data.distanceMiles != null
@@ -1343,26 +1442,27 @@ export class BookingsService {
       previousDriverName: string | null;
     }) =>
       data.previousDriverId
-        ? `DRIVER ASSIGNED · ${data.driverName} [${data.driverId}] · replaced ${
+        ? `Driver assigned · ${data.driverName} · replaced ${
             data.previousDriverName ?? 'previous driver'
-          } [${data.previousDriverId}]`
-        : `DRIVER ASSIGNED · ${data.driverName} [${data.driverId}]`,
+          }`
+        : `Driver assigned · ${data.driverName}`,
 
     driverUnassigned: (data: {
       driverId: string;
       driverName: string | null;
-    }) =>
-      `DRIVER UNASSIGNED · ${data.driverName ?? 'Driver'} [${data.driverId}]`,
+    }) => `Driver unassigned · ${data.driverName ?? 'Driver'}`,
 
     bookingCancelled: (reason: string | null) =>
       reason?.trim()
-        ? `BOOKING CANCELLED · ${reason.trim()}`
-        : 'BOOKING CANCELLED',
+        ? `Booking cancelled · ${reason.trim()}`
+        : 'Booking cancelled',
+
+    bookingNoShow: () => 'Booking marked as no-show',
 
     statusChanged: (fromStatus: string, toStatus: string) =>
-      `STATUS CHANGED · ${fromStatus} → ${toStatus}`,
+      `Status changed · ${fromStatus} → ${toStatus}`,
 
     bookingEdited: (changes: string[]) =>
-      `BOOKING EDITED · ${changes.join(' · ')}`,
+      `Booking edited · ${changes.join(' · ')}`,
   };
 }
