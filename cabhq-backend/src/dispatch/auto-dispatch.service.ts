@@ -135,19 +135,17 @@ export class AutoDispatchService {
       },
     });
 
+    this.logger.log(
+      `Auto dispatch offered booking ${booking.reference} to ${nextDriver.name} (${nextDriver.id}) · score ${nextDriver.score} · ${
+        nextDriver.distanceMiles === Number.MAX_SAFE_INTEGER
+          ? 'distance unknown'
+          : `${nextDriver.distanceMiles.toFixed(2)} miles away`
+      } · ${nextDriver.scoreBreakdown.join(' | ')}`,
+    );
+
     await this.appendTimeline(
       booking.id,
-      `AUTO DISPATCH OFFERED · ${nextDriver.name} [${nextDriver.id}] · score ${
-        nextDriver.score
-      }${
-        nextDriver.distanceMiles === Number.MAX_SAFE_INTEGER
-          ? ' · distance unknown'
-          : ` · ${nextDriver.distanceMiles.toFixed(2)} miles away`
-      } · ${
-        nextDriver.scoreBreakdown.length > 0
-          ? nextDriver.scoreBreakdown.join(' | ')
-          : 'Auto scoring applied'
-      }`,
+      `Auto dispatch offered to ${nextDriver.name}`,
     );
 
     const refreshed = await this.findBookingWithRelations(
@@ -189,11 +187,15 @@ export class AutoDispatchService {
     });
 
     if (!dispatch.assignable) {
-      await this.appendTimeline(
-        booking.id,
-        `OFFER ACCEPT FAILED · driver no longer dispatchable · ${dispatch.blockedReasons.join(
+      this.logger.warn(
+        `Offer accept failed for booking ${booking.reference}: driver ${driverId} no longer dispatchable · ${dispatch.blockedReasons.join(
           ' | ',
         )}`,
+      );
+
+      await this.appendTimeline(
+        booking.id,
+        'Offer accept failed because the driver is no longer available',
       );
 
       throw new BadRequestException(
@@ -217,7 +219,7 @@ export class AutoDispatchService {
 
     await this.appendTimeline(
       booking.id,
-      `OFFER ACCEPTED · ${driver.name} [${driver.id}]`,
+      `${driver.name} accepted the booking`,
     );
 
     const refreshed = await this.findBookingWithRelations(
@@ -259,9 +261,11 @@ export class AutoDispatchService {
       throw new BadRequestException('Offer is not assigned to this driver');
     }
 
+    const driverName = booking.driver?.name ?? 'Driver';
+
     await this.appendTimeline(
       booking.id,
-      `OFFER REJECTED · ${booking.driver?.name ?? 'Driver'} [${driverId}]`,
+      `${driverName} rejected the booking`,
     );
 
     await this.clearBookingDriverAndRelease({
@@ -303,10 +307,7 @@ export class AutoDispatchService {
       },
     });
 
-    await this.appendTimeline(
-      booking.id,
-      'OFFER CANCELLED · dispatcher override',
-    );
+    await this.appendTimeline(booking.id, 'Offer cancelled by dispatcher');
 
     if (currentDriverId) {
       await this.releaseDriverIfSafe(currentDriverId);
@@ -381,11 +382,11 @@ export class AutoDispatchService {
         if (booking.status !== 'OFFERED') return;
         if (booking.driverId !== driverId) return;
 
+        const driverName = booking.driver?.name ?? 'Driver';
+
         await this.appendTimeline(
           booking.id,
-          `OFFER EXPIRED · ${
-            booking.driver?.name ?? 'Driver'
-          } [${driverId}]`,
+          `${driverName} did not respond in time`,
         );
 
         await this.clearBookingDriverAndRelease({
@@ -432,7 +433,7 @@ export class AutoDispatchService {
 
     for (const event of events) {
       const matches = event.message.match(
-        /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+        /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
       );
 
       if (!matches?.length) continue;
@@ -761,10 +762,7 @@ export class AutoDispatchService {
       },
     });
 
-    await this.appendTimeline(
-      bookingId,
-      `AUTO DISPATCH FAILED · ${reason}`,
-    );
+    await this.appendTimeline(bookingId, reason);
 
     const refreshed = await this.findBookingWithRelations(bookingId, companyId);
 
