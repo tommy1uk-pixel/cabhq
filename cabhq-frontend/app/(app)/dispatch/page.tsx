@@ -2845,6 +2845,7 @@ function BookingDrawer({
     !hasAssignedDriver &&
     ['BOOKED', 'NO_DRIVER', 'OFFERED'].includes(status);
   const [trackingCopied, setTrackingCopied] = useState(false);
+  const [customerMessageCopied, setCustomerMessageCopied] = useState(false);
 
   const trackingPath = `/track/${encodeURIComponent(booking.reference)}`;
   const trackingUrl =
@@ -2852,26 +2853,73 @@ function BookingDrawer({
       ? `${window.location.origin}${trackingPath}`
       : trackingPath;
 
-  async function copyTrackingLink() {
+  const customerMessage = [
+    `Hello ${booking.customerName || 'there'},`,
+    '',
+    `Your taxi booking ${booking.reference} is confirmed.`,
+    '',
+    `Pickup: ${getPickupLabel(booking)}`,
+    `Dropoff: ${getDropoffLabel(booking)}`,
+    `Pickup time: ${formatDateTime(getPickupTimeLabel(booking))}`,
+    booking.quotedPrice != null ? `Fare: ${formatPrice(booking.quotedPrice)}` : '',
+    '',
+    `You can track your booking live here:`,
+    trackingUrl,
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
+
+  const customerPhoneForWhatsApp = (booking.customerPhone || '')
+    .replace(/[^0-9+]/g, '')
+    .replace(/^0/, '44')
+    .replace(/^\+/, '');
+
+  const whatsappUrl = customerPhoneForWhatsApp
+    ? `https://wa.me/${customerPhoneForWhatsApp}?text=${encodeURIComponent(
+        customerMessage,
+      )}`
+    : `https://wa.me/?text=${encodeURIComponent(customerMessage)}`;
+
+  async function copyTextToClipboard(
+    text: string,
+    fallbackTitle: string,
+    onCopied: (value: boolean) => void,
+  ) {
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(trackingUrl);
+        await navigator.clipboard.writeText(text);
       } else if (typeof window !== 'undefined') {
-        window.prompt('Copy tracking link', trackingUrl);
+        window.prompt(fallbackTitle, text);
       }
 
-      setTrackingCopied(true);
+      onCopied(true);
 
       window.setTimeout(() => {
-        setTrackingCopied(false);
+        onCopied(false);
       }, 2500);
     } catch (error) {
-      console.error('Failed to copy tracking link:', error);
+      console.error(`Failed to copy ${fallbackTitle}:`, error);
 
       if (typeof window !== 'undefined') {
-        window.prompt('Copy tracking link', trackingUrl);
+        window.prompt(fallbackTitle, text);
       }
     }
+  }
+
+  async function copyTrackingLink() {
+    await copyTextToClipboard(
+      trackingUrl,
+      'Copy tracking link',
+      setTrackingCopied,
+    );
+  }
+
+  async function copyCustomerMessage() {
+    await copyTextToClipboard(
+      customerMessage,
+      'Copy customer message',
+      setCustomerMessageCopied,
+    );
   }
 
   const drawerMapPoints = [
@@ -2964,9 +3012,9 @@ function BookingDrawer({
           <section className="rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-5">
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div>
-                <h3 className="text-lg font-bold text-white">Customer Tracking Link</h3>
+                <h3 className="text-lg font-bold text-white">Customer Tracking & Message</h3>
                 <p className="mt-1 text-sm text-emerald-100/65">
-                  Share this link with the customer so they can track booking status, driver details and live GPS updates.
+                  Share the live tracking link or send a ready-made customer message by SMS or WhatsApp.
                 </p>
               </div>
 
@@ -2977,6 +3025,15 @@ function BookingDrawer({
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-[#07111f] p-4 text-xs text-white/65 break-all">
               {trackingUrl}
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+              <div className="text-xs font-black uppercase tracking-[0.18em] text-white/35">
+                Customer Message Preview
+              </div>
+              <pre className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-white/75">
+                {customerMessage}
+              </pre>
             </div>
 
             <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -2996,11 +3053,30 @@ function BookingDrawer({
               >
                 Open Tracking Page
               </a>
+
+              <button
+                type="button"
+                onClick={() => void copyCustomerMessage()}
+                className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm font-bold text-amber-200 transition hover:bg-amber-500/20"
+              >
+                {customerMessageCopied ? 'Message Copied' : 'Copy Customer Message'}
+              </button>
+
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-center text-sm font-bold text-green-200 transition hover:bg-green-500/20"
+              >
+                Open WhatsApp
+              </a>
             </div>
 
-            {trackingCopied ? (
+            {trackingCopied || customerMessageCopied ? (
               <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-semibold text-emerald-200">
-                Tracking link copied. You can now paste it into SMS, WhatsApp or email.
+                {customerMessageCopied
+                  ? 'Customer message copied. You can now paste it into SMS, WhatsApp or email.'
+                  : 'Tracking link copied. You can now paste it into SMS, WhatsApp or email.'}
               </div>
             ) : null}
           </section>

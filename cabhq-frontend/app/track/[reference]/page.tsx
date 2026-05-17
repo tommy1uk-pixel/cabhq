@@ -5,15 +5,6 @@ import 'leaflet/dist/leaflet.css';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
-import {
-  MapContainer,
-  Marker,
-  Polyline,
-  Popup,
-  TileLayer,
-  useMap,
-} from 'react-leaflet';
-import L from 'leaflet';
 
 type TrackingData = {
   reference: string;
@@ -73,6 +64,9 @@ type JourneyRoute = {
   driverToPickupDistance: number | null;
   pickupToDropoffDistance: number | null;
 };
+
+type LeafletModule = typeof import('leaflet');
+type ReactLeafletModule = typeof import('react-leaflet');
 
 const REFRESH_SECONDS = 8;
 
@@ -340,86 +334,6 @@ function cleanTimelineMessage(raw?: string | null) {
   return message.replace(uuidPattern, '').trim();
 }
 
-function makeCarIcon(heading?: number | null) {
-  const rotation = heading ?? 0;
-
-  return L.divIcon({
-    className: '',
-    html: `
-      <div style="
-        width: 50px;
-        height: 50px;
-        border-radius: 999px;
-        background: radial-gradient(circle at 30% 20%, #67e8f9, #0891b2 42%, #0f172a);
-        border: 3px solid white;
-        box-shadow: 0 16px 38px rgba(0,0,0,0.55), 0 0 28px rgba(6,182,212,0.65);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transform: rotate(${rotation}deg);
-      ">
-        <div style="
-          font-size: 25px;
-          line-height: 1;
-          transform: rotate(${-rotation}deg);
-        ">🚕</div>
-      </div>
-    `,
-    iconSize: [50, 50],
-    iconAnchor: [25, 25],
-    popupAnchor: [0, -25],
-  });
-}
-
-function makePinIcon(label: string, colour: string) {
-  return L.divIcon({
-    className: '',
-    html: `
-      <div style="
-        width: 44px;
-        height: 44px;
-        border-radius: 999px;
-        background: ${colour};
-        border: 3px solid white;
-        box-shadow: 0 14px 32px rgba(0,0,0,0.5), 0 0 22px ${colour};
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 20px;
-      ">
-        ${label}
-      </div>
-    `,
-    iconSize: [44, 44],
-    iconAnchor: [22, 22],
-    popupAnchor: [0, -22],
-  });
-}
-
-function FitMapBounds({ points }: { points: LatLngPoint[] }) {
-  const map = useMap();
-
-  useEffect(() => {
-    if (points.length === 0) return;
-
-    if (points.length === 1) {
-      map.setView(points[0], 15, {
-        animate: true,
-      });
-      return;
-    }
-
-    const bounds = L.latLngBounds(points);
-    map.fitBounds(bounds, {
-      padding: [55, 55],
-      animate: true,
-      maxZoom: 15,
-    });
-  }, [points, map]);
-
-  return null;
-}
-
 async function fetchRoute(
   from: LatLngPoint | null,
   to: LatLngPoint | null,
@@ -457,6 +371,33 @@ function LiveDriverMap({
   route: JourneyRoute;
   now: number;
 }) {
+  const [leaflet, setLeaflet] = useState<LeafletModule | null>(null);
+  const [reactLeaflet, setReactLeaflet] = useState<ReactLeafletModule | null>(
+    null,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadMapLibraries() {
+      const [leafletModule, reactLeafletModule] = await Promise.all([
+        import('leaflet'),
+        import('react-leaflet'),
+      ]);
+
+      if (cancelled) return;
+
+      setLeaflet(leafletModule);
+      setReactLeaflet(reactLeafletModule);
+    }
+
+    void loadMapLibraries();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const driverLat = data.driver?.latitude ?? null;
   const driverLng = data.driver?.longitude ?? null;
   const pickupLat = data.pickupLat ?? null;
@@ -496,14 +437,6 @@ function LiveDriverMap({
     route.pickupToDropoff,
   ]);
 
-  const carIcon = useMemo(
-    () => makeCarIcon(data.driver?.heading ?? null),
-    [data.driver?.heading],
-  );
-
-  const pickupIcon = useMemo(() => makePinIcon('P', '#0891b2'), []);
-  const dropoffIcon = useMemo(() => makePinIcon('D', '#059669'), []);
-
   const fallbackCenter: LatLngPoint =
     driverPoint || pickupPoint || dropoffPoint || [51.5072, -0.1276];
 
@@ -516,6 +449,121 @@ function LiveDriverMap({
         </p>
       </section>
     );
+  }
+
+  if (!leaflet || !reactLeaflet) {
+    return (
+      <section className="rounded-3xl border border-cyan-500/20 bg-[#0b1220] p-6">
+        <h2 className="text-xl font-black">Live journey map</h2>
+        <p className="mt-3 text-white/60">Loading map...</p>
+      </section>
+    );
+  }
+
+  const {
+    MapContainer,
+    Marker,
+    Polyline,
+    Popup,
+    TileLayer,
+    useMap,
+  } = reactLeaflet;
+
+  const carIcon = leaflet.divIcon({
+    className: '',
+    html: `
+      <div style="
+        width: 50px;
+        height: 50px;
+        border-radius: 999px;
+        background: radial-gradient(circle at 30% 20%, #67e8f9, #0891b2 42%, #0f172a);
+        border: 3px solid white;
+        box-shadow: 0 16px 38px rgba(0,0,0,0.55), 0 0 28px rgba(6,182,212,0.65);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transform: rotate(${data.driver?.heading ?? 0}deg);
+      ">
+        <div style="
+          font-size: 25px;
+          line-height: 1;
+          transform: rotate(${-(data.driver?.heading ?? 0)}deg);
+        ">🚕</div>
+      </div>
+    `,
+    iconSize: [50, 50],
+    iconAnchor: [25, 25],
+    popupAnchor: [0, -25],
+  });
+
+  const pickupIcon = leaflet.divIcon({
+    className: '',
+    html: `
+      <div style="
+        width: 44px;
+        height: 44px;
+        border-radius: 999px;
+        background: #0891b2;
+        border: 3px solid white;
+        box-shadow: 0 14px 32px rgba(0,0,0,0.5), 0 0 22px #0891b2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        color: white;
+        font-weight: 900;
+      ">P</div>
+    `,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+    popupAnchor: [0, -22],
+  });
+
+  const dropoffIcon = leaflet.divIcon({
+    className: '',
+    html: `
+      <div style="
+        width: 44px;
+        height: 44px;
+        border-radius: 999px;
+        background: #059669;
+        border: 3px solid white;
+        box-shadow: 0 14px 32px rgba(0,0,0,0.5), 0 0 22px #059669;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        color: white;
+        font-weight: 900;
+      ">D</div>
+    `,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+    popupAnchor: [0, -22],
+  });
+
+  function FitMapBounds({ points }: { points: LatLngPoint[] }) {
+    const map = useMap();
+
+    useEffect(() => {
+      if (points.length === 0) return;
+
+      if (points.length === 1) {
+        map.setView(points[0], 15, {
+          animate: true,
+        });
+        return;
+      }
+
+      const bounds = leaflet.latLngBounds(points);
+      map.fitBounds(bounds, {
+        padding: [55, 55],
+        animate: true,
+        maxZoom: 15,
+      });
+    }, [points, map]);
+
+    return null;
   }
 
   return (
@@ -674,30 +722,6 @@ function LiveDriverMap({
           value={formatGpsAge(data.driver?.lastLocationAt, now)}
           hint={formatDateTime(data.driver?.lastLocationAt)}
         />
-      </div>
-
-      <div className="flex flex-wrap gap-3 px-6 pb-6">
-        {driverPoint ? (
-          <a
-            href={`https://www.google.com/maps?q=${driverPoint[0]},${driverPoint[1]}`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-5 py-3 text-sm font-bold text-cyan-200 transition hover:bg-cyan-500/20"
-          >
-            Open driver location
-          </a>
-        ) : null}
-
-        {pickupPoint ? (
-          <a
-            href={`https://www.google.com/maps/dir/?api=1&destination=${pickupPoint[0]},${pickupPoint[1]}&travelmode=driving`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-5 py-3 text-sm font-bold text-emerald-200 transition hover:bg-emerald-500/20"
-          >
-            Navigate to pickup
-          </a>
-        ) : null}
       </div>
     </section>
   );
