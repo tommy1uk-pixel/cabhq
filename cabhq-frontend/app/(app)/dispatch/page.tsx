@@ -3309,37 +3309,49 @@ function StatusButtons({
 }
 
 
-function cleanTimelineText(raw?: string | null) {
-  const message = (raw || '').trim();
-
-  if (!message) return 'Timeline event';
-
-  const withoutIds = message
+function extractTimelineName(value: string, label: string) {
+  return value
+    .replace(new RegExp(`^${label}\\s*[·-]\\s*`, 'i'), '')
     .replace(/\s*\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]/gi, '')
-    .replace(/\s*·\s*score\s+\d+[\s\S]*$/i, '')
-    .replace(/\s*·\s*[+-]\d+\s+[A-Z0-9_<=]+[\s\S]*$/i, '')
+    .replace(/\s*[·-]\s*score\s+\d+[\s\S]*$/i, '')
+    .replace(/\s*[·-]\s*\d+(?:\.\d+)?\s*miles\s+away[\s\S]*$/i, '')
     .replace(/\s*\|\s*[+-]\d+\s+[A-Z0-9_<=]+[\s\S]*$/i, '')
+    .replace(/\s*[·-]\s*[+-]\d+\s+[A-Z0-9_<=]+[\s\S]*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanTimelineText(raw?: string | null) {
+  const original = (raw || '').trim();
+
+  if (!original) return 'Timeline event';
+
+  const withoutIds = original
+    .replace(/\s*\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]/gi, '')
+    .replace(/\s+/g, ' ')
     .trim();
 
   const upper = withoutIds.toUpperCase();
 
   if (upper.startsWith('AUTO DISPATCH OFFERED')) {
-    const driver = withoutIds.split('·')[1]?.trim();
-    return driver ? `Auto dispatch offered to ${driver}` : 'Auto dispatch offered to nearest available driver';
+    const driver = extractTimelineName(original, 'AUTO DISPATCH OFFERED');
+    return driver
+      ? `Auto dispatch offered to ${driver}`
+      : 'Auto dispatch offered to nearest available driver';
   }
 
   if (upper.startsWith('OFFER ACCEPTED')) {
-    const driver = withoutIds.split('·')[1]?.trim();
+    const driver = extractTimelineName(original, 'OFFER ACCEPTED');
     return driver ? `${driver} accepted the booking` : 'Driver accepted the booking';
   }
 
   if (upper.startsWith('OFFER REJECTED')) {
-    const driver = withoutIds.split('·')[1]?.trim();
+    const driver = extractTimelineName(original, 'OFFER REJECTED');
     return driver ? `${driver} rejected the booking` : 'Driver rejected the booking';
   }
 
   if (upper.startsWith('OFFER EXPIRED')) {
-    const driver = withoutIds.split('·')[1]?.trim();
+    const driver = extractTimelineName(original, 'OFFER EXPIRED');
     return driver ? `${driver} did not respond in time` : 'Driver did not respond in time';
   }
 
@@ -3348,7 +3360,7 @@ function cleanTimelineText(raw?: string | null) {
   }
 
   if (upper.startsWith('AUTO DISPATCH FAILED')) {
-    const reason = withoutIds.split('·')[1]?.trim();
+    const reason = withoutIds.replace(/^AUTO DISPATCH FAILED\s*[·-]\s*/i, '').trim();
     return reason || 'Auto dispatch could not find an available driver';
   }
 
@@ -3362,25 +3374,31 @@ function cleanTimelineText(raw?: string | null) {
 
   if (upper.startsWith('PRICING CAPTURED')) {
     const priceMatch = withoutIds.match(/£\s*\d+(?:\.\d{1,2})?/);
-    return priceMatch ? `Price captured: ${priceMatch[0]}` : 'Price captured';
+    return priceMatch ? `Price captured: ${priceMatch[0].replace(/\s/g, '')}` : 'Price captured';
   }
 
   if (upper.startsWith('PASSENGER CAPTURED')) {
-    return withoutIds.replace(/^PASSENGER CAPTURED\s*·\s*/i, 'Passenger captured: ');
+    return withoutIds
+      .replace(/^PASSENGER CAPTURED\s*[·-]\s*/i, 'Passenger captured: ')
+      .trim();
   }
 
   if (upper.startsWith('CUSTOMER CAPTURED')) {
-    return withoutIds.replace(/^CUSTOMER CAPTURED\s*·\s*/i, 'Customer captured: ');
+    return withoutIds
+      .replace(/^CUSTOMER CAPTURED\s*[·-]\s*/i, 'Customer captured: ')
+      .trim();
   }
 
   if (upper.startsWith('BOOKING CREATED')) {
-    const parts = withoutIds.split('·').map((part) => part.trim()).filter(Boolean);
-    if (parts.length >= 3) return `Booking created: ${parts[2]}`;
-    return 'Booking created';
+    return withoutIds
+      .replace(/^BOOKING CREATED\s*[·-]\s*/i, 'Booking created: ')
+      .replace(/\s*[·-]\s*\d{1,2}\/\d{1,2}\/\d{4},?\s*\d{1,2}:\d{2}(?::\d{2})?$/i, '')
+      .trim();
   }
 
   return withoutIds
-    .replace(/\s+/g, ' ')
+    .replace(/\s*[·-]\s*score\s+\d+[\s\S]*$/i, '')
+    .replace(/\s*\|\s*[+-]\d+\s+[A-Z0-9_<=]+[\s\S]*$/i, '')
     .replace(/_/g, ' ')
     .trim();
 }
