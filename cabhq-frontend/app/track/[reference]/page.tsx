@@ -1132,11 +1132,11 @@ export default function TrackingPage() {
         setSocketConnected(true);
 
         socket.emit('tracking:join', {
-          bookingId: data.reference,
+          bookingId: data?.reference || reference,
         });
 
         socket.emit('tracking:viewed', {
-          bookingId: data.reference,
+          bookingId: data?.reference || reference,
         });
       });
 
@@ -1214,14 +1214,14 @@ export default function TrackingPage() {
 
       if (socket) {
         socket.emit('tracking:leave', {
-          bookingId: data.reference,
+          bookingId: data?.reference || reference,
         });
 
         socket.removeAllListeners();
         socket.disconnect();
       }
     };
-  }, [data?.reference]);
+  }, [data?.reference, reference]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
