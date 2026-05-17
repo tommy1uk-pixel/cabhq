@@ -510,6 +510,140 @@ function formatGpsAge(value?: string | null, now = Date.now()) {
   return `${hours}h ago`;
 }
 
+function getLiveEtaMinutes(
+  etaMinutes?: number | null,
+  lastLocationAt?: string | null,
+  now = Date.now(),
+) {
+  if (etaMinutes == null) return null;
+
+  if (!lastLocationAt) return etaMinutes;
+
+  const last = new Date(lastLocationAt).getTime();
+
+  if (Number.isNaN(last)) return etaMinutes;
+
+  const elapsedMinutes = Math.floor((now - last) / 60000);
+
+  return Math.max(1, etaMinutes - elapsedMinutes);
+}
+
+function getDriverPickupInsight(
+  etaMinutes?: number | null,
+  distanceMiles?: number | null,
+  lastLocationAt?: string | null,
+  now = Date.now(),
+) {
+  const liveEta = getLiveEtaMinutes(etaMinutes, lastLocationAt, now);
+  const gpsAge = getGpsAgeSeconds(lastLocationAt, now);
+
+  if (liveEta != null && distanceMiles != null) {
+    if (distanceMiles <= 0.1) {
+      return {
+        label: 'Driver at pickup',
+        tone: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200',
+      };
+    }
+
+    if (liveEta <= 3) {
+      return {
+        label: `Driver nearby · ${liveEta} min`,
+        tone: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200',
+      };
+    }
+
+    return {
+      label: `ETA ${liveEta} mins · ${distanceMiles.toFixed(1)} mi`,
+      tone: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200',
+    };
+  }
+
+  if (gpsAge <= 60) {
+    return {
+      label: 'GPS live',
+      tone: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200',
+    };
+  }
+
+  if (gpsAge <= 300) {
+    return {
+      label: `GPS ${formatGpsAge(lastLocationAt, now)}`,
+      tone: 'border-amber-500/25 bg-amber-500/10 text-amber-200',
+    };
+  }
+
+  return {
+    label: 'GPS stale',
+    tone: 'border-red-500/25 bg-red-500/10 text-red-200',
+  };
+}
+
+function getTrackingUrl(reference?: string | null) {
+  if (!reference) return '';
+
+  if (typeof window === 'undefined') {
+    return `/track/${encodeURIComponent(reference)}`;
+  }
+
+  return `${window.location.origin}/track/${encodeURIComponent(reference)}`;
+}
+
+async function copyTextToClipboard(value: string) {
+  if (!value) return;
+
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '-9999px';
+
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+}
+
+function normalisePhoneForWhatsApp(value?: string | null) {
+  const raw = (value || '').trim();
+
+  if (!raw) return '';
+
+  const cleaned = raw.replace(/[^0-9+]/g, '');
+
+  if (cleaned.startsWith('+')) {
+    return cleaned.replace(/^\+/, '');
+  }
+
+  if (cleaned.startsWith('0')) {
+    return `44${cleaned.slice(1)}`;
+  }
+
+  return cleaned;
+}
+
+function buildCustomerTrackingMessage(booking: Booking) {
+  const trackingUrl = getTrackingUrl(booking.reference);
+
+  return [
+    `Hi ${booking.customerName || 'there'},`,
+    '',
+    `Your taxi booking ${booking.reference} is confirmed.`,
+    '',
+    `Pickup: ${getPickupLabel(booking)}`,
+    `Dropoff: ${getDropoffLabel(booking)}`,
+    `Pickup time: ${formatDateTime(getPickupTimeLabel(booking))}`,
+    '',
+    'Live tracking link:',
+    trackingUrl,
+  ].join('\n');
+}
+
 function getOfferInfo(booking: Booking, now = Date.now()) {
   const status = (booking.status || '').toUpperCase();
 
@@ -699,6 +833,7 @@ export default function DispatchPage() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [alertsUnlocked, setAlertsUnlocked] = useState(false);
   const [latestDispatchAlert, setLatestDispatchAlert] = useState<string | null>(null);
+  const [copiedAction, setCopiedAction] = useState<string | null>(null);
 
   const mapRef = useRef<LeafletMap | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -1756,6 +1891,12 @@ export default function DispatchPage() {
           </div>
         ) : null}
 
+        {copiedAction ? (
+          <div className="mb-6 rounded-3xl border border-emerald-500/25 bg-emerald-500/10 px-5 py-4 text-sm font-bold text-emerald-200">
+            {copiedAction}
+          </div>
+        ) : null}
+
         <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-9">
           <Card label="Bookings" value={stats.bookings} hint="Total jobs" />
           <Card label="Live Jobs" value={stats.live} hint="Dispatch active" />
@@ -2681,6 +2822,10 @@ function DispatchBoard({
                           .slice(0, 2)
                           .map((suggested, index) => {
                             const key = `${booking.id}:${suggested.id}`;
+                            const status = (suggested.status || 'UNKNOWN').replace(
+                              /_/g,
+                              ' ',
+                            );
 
                             return (
                               <button
@@ -2689,26 +2834,52 @@ function DispatchBoard({
                                   onAssignDriver(booking.id, suggested.id)
                                 }
                                 disabled={assigningKey === key || !canDispatch}
-                                className="block w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-left text-xs text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+                                className="block w-full rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-3 text-left text-xs text-emerald-200 transition hover:bg-emerald-500/20 disabled:opacity-50"
                               >
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="font-semibold">
+                                  <span className="font-semibold text-white">
                                     #{index + 1} {suggested.name}
                                   </span>
-                                  {suggested.score != null ? (
-                                    <span className="rounded-full bg-black/25 px-2 py-0.5 text-[10px] text-emerald-100/80">
-                                      {suggested.score}
+
+                                  <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-200">
+                                    Recommended
+                                  </span>
+                                </div>
+
+                                <div className="mt-3 flex flex-wrap gap-2">
+                                  {suggested.distanceMiles != null ? (
+                                    <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[11px] font-semibold text-cyan-200">
+                                      {suggested.distanceMiles.toFixed(1)} miles away
+                                    </span>
+                                  ) : (
+                                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-white/50">
+                                      Distance unknown
+                                    </span>
+                                  )}
+
+                                  <span
+                                    className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${
+                                      suggested.status === 'AVAILABLE'
+                                        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                                        : 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+                                    }`}
+                                  >
+                                    {status}
+                                  </span>
+
+                                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-white/65">
+                                    GPS {formatGpsAge(suggested.lastLocationAt, now)}
+                                  </span>
+
+                                  {suggested.vehicle ? (
+                                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-white/65">
+                                      {getVehicleLabel(suggested.vehicle)}
                                     </span>
                                   ) : null}
                                 </div>
 
-                                <div className="mt-1 text-[11px] text-emerald-100/70">
-                                  {formatDistance(suggested.distanceMiles)} •{' '}
-                                  {formatGpsAge(suggested.lastLocationAt, now)}{' '}
-                                  •{' '}
-                                  {assigningKey === key
-                                    ? 'Assigning...'
-                                    : 'Assign'}
+                                <div className="mt-3 text-[11px] font-semibold text-emerald-100/80">
+                                  {assigningKey === key ? 'Assigning driver...' : 'Click to assign driver'}
                                 </div>
                               </button>
                             );

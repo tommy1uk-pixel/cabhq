@@ -20,6 +20,21 @@ type TrackingData = {
   pricingMode?: string | null;
   distanceMiles?: number | null;
   durationMinutes?: number | null;
+  trackingUrl?: string | null;
+  driverDistanceMiles?: number | null;
+  etaMinutes?: number | null;
+
+  isAirportBooking?: boolean;
+  airportCode?: string | null;
+  airportName?: string | null;
+  airportTerminal?: string | null;
+  flightNumber?: string | null;
+  flightDirection?: string | null;
+  flightDateTime?: string | null;
+  airline?: string | null;
+  meetAndGreet?: boolean | null;
+  airportNotes?: string | null;
+
   company?: {
     id: string;
     name: string;
@@ -68,7 +83,7 @@ type JourneyRoute = {
 type LeafletModule = typeof import('leaflet');
 type ReactLeafletModule = typeof import('react-leaflet');
 
-const REFRESH_SECONDS = 8;
+const REFRESH_SECONDS = 10;
 
 function formatDateTime(value?: string | null) {
   if (!value) return '—';
@@ -107,6 +122,106 @@ function formatPrice(value?: number | null) {
 function formatDistance(value?: number | null) {
   if (value == null) return '—';
   return `${Number(value).toFixed(1)} miles`;
+}
+
+function getTrackingUrl(data?: TrackingData | null) {
+  if (data?.trackingUrl) return data.trackingUrl;
+
+  if (!data?.reference) return '';
+
+  if (typeof window === 'undefined') {
+    return `/track/${encodeURIComponent(data.reference)}`;
+  }
+
+  return `${window.location.origin}/track/${encodeURIComponent(data.reference)}`;
+}
+
+async function copyTrackingLink(data?: TrackingData | null) {
+  const url = getTrackingUrl(data);
+
+  if (!url) return false;
+
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(url);
+    return true;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = url;
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '-9999px';
+
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+
+  return true;
+}
+
+function isAirportTracking(data?: TrackingData | null) {
+  return Boolean(
+    data?.isAirportBooking ||
+      data?.airportCode ||
+      data?.airportName ||
+      data?.airportTerminal ||
+      data?.flightNumber ||
+      data?.flightDirection ||
+      data?.flightDateTime ||
+      data?.airline ||
+      data?.meetAndGreet ||
+      data?.airportNotes,
+  );
+}
+
+function getAirportDirectionLabel(value?: string | null) {
+  const normalised = (value || '').toUpperCase();
+
+  if (normalised === 'ARRIVAL') return 'Airport pickup';
+  if (normalised === 'DEPARTURE') return 'Airport dropoff';
+  if (normalised === 'TRANSFER') return 'Airport transfer';
+
+  return normalised ? normalised.replace(/_/g, ' ') : 'Airport booking';
+}
+
+function getDriverInsight(
+  liveEta: number | null,
+  distanceMiles?: number | null,
+  status?: string | null,
+) {
+  const normalised = (status || '').toUpperCase();
+
+  if (normalised === 'ARRIVED') return 'Driver is at pickup';
+  if (normalised === 'ON_JOB') return 'Passenger is onboard';
+  if (normalised === 'COMPLETED') return 'Journey completed';
+
+  if (liveEta != null) {
+    if (liveEta <= 1) return 'Driver arriving now';
+    if (liveEta <= 3) return `Driver nearby · approx ${liveEta} mins`;
+    return `Driver arriving in approx ${liveEta} mins`;
+  }
+
+  if (distanceMiles != null) {
+    return `Driver is ${distanceMiles.toFixed(1)} miles from pickup`;
+  }
+
+  return 'Calculating driver ETA';
+}
+
+function getGpsTone(value?: string | null, now = Date.now()) {
+  const seconds = getGpsAgeSeconds(value, now);
+
+  if (seconds <= 60) {
+    return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
+  }
+
+  if (seconds <= 300) {
+    return 'border-amber-500/20 bg-amber-500/10 text-amber-300';
+  }
+
+  return 'border-red-500/20 bg-red-500/10 text-red-300';
 }
 
 function statusLabel(status?: string | null) {
@@ -239,6 +354,42 @@ function cleanTimelineMessage(raw?: string | null) {
 
   const uuidPattern =
     /\s*\[[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\]/gi;
+
+  if (message.toLowerCase().startsWith('driver assigned')) {
+    return message.replace(uuidPattern, '').trim();
+  }
+
+  if (message.toLowerCase().startsWith('driver unassigned')) {
+    return message.replace(uuidPattern, '').trim();
+  }
+
+  if (message.toLowerCase().startsWith('booking created')) {
+    return message.replace(uuidPattern, '').trim();
+  }
+
+  if (message.toLowerCase().startsWith('customer captured')) {
+    return message.replace(uuidPattern, '').trim();
+  }
+
+  if (message.toLowerCase().startsWith('passenger captured')) {
+    return message.replace(uuidPattern, '').trim();
+  }
+
+  if (message.toLowerCase().startsWith('pricing captured')) {
+    return message.replace(uuidPattern, '').trim();
+  }
+
+  if (message.toLowerCase().startsWith('airport details captured')) {
+    return message.replace(uuidPattern, '').trim();
+  }
+
+  if (message.toLowerCase().startsWith('status changed')) {
+    return message.replace(uuidPattern, '').trim();
+  }
+
+  if (message.toLowerCase().startsWith('booking marked as no-show')) {
+    return 'Booking marked as no-show';
+  }
 
   if (message.startsWith('AUTO DISPATCH OFFERED')) {
     const driver = message
@@ -399,11 +550,13 @@ function LiveDriverMap({
   vehicle,
   route,
   now,
+  liveEta,
 }: {
   data: TrackingData;
   vehicle: string;
   route: JourneyRoute;
   now: number;
+  liveEta: number | null;
 }) {
   const [leaflet, setLeaflet] = useState<LeafletModule | null>(null);
   const [reactLeaflet, setReactLeaflet] = useState<ReactLeafletModule | null>(
@@ -581,13 +734,18 @@ function LiveDriverMap({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <div className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-emerald-300">
+          <div
+            className={`rounded-full border px-3 py-2 text-xs font-black uppercase tracking-[0.18em] ${getGpsTone(
+              data.driver?.lastLocationAt,
+              now,
+            )}`}
+          >
             GPS {formatGpsAge(data.driver?.lastLocationAt, now)}
           </div>
 
-          {route.driverToPickupEta != null ? (
+          {liveEta != null ? (
             <div className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-cyan-200">
-              ETA {route.driverToPickupEta} mins
+              ETA {liveEta} mins
             </div>
           ) : null}
         </div>
@@ -696,12 +854,8 @@ function LiveDriverMap({
       <div className="grid gap-3 p-6 text-sm text-white/60 md:grid-cols-4">
         <MetricTile
           label="Driver to pickup"
-          value={
-            route.driverToPickupEta != null
-              ? `${route.driverToPickupEta} mins`
-              : 'Waiting'
-          }
-          hint={formatDistance(route.driverToPickupDistance)}
+          value={liveEta != null ? `${liveEta} mins` : 'Waiting'}
+          hint={formatDistance(route.driverToPickupDistance ?? data.driverDistanceMiles)}
         />
         <MetricTile
           label="Pickup to dropoff"
@@ -961,6 +1115,43 @@ export default function TrackingPage() {
   const tone = statusTone(data?.status);
   const driverPhone = data?.driver?.phone?.trim() || '';
 
+  const etaSource = route.driverToPickupEta ?? data?.etaMinutes ?? null;
+  const distanceSource =
+    route.driverToPickupDistance ?? data?.driverDistanceMiles ?? null;
+
+  const liveEta =
+    etaSource != null
+      ? Math.max(
+          1,
+          etaSource -
+            Math.floor(
+              (Date.now() -
+                new Date(data?.driver?.lastLocationAt || 0).getTime()) /
+                60000,
+            ),
+        )
+      : null;
+
+  const arrivalMessage = getDriverInsight(
+    liveEta,
+    distanceSource,
+    data?.status,
+  );
+
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopyTrackingLink() {
+    const copiedOk = await copyTrackingLink(data);
+
+    if (!copiedOk) return;
+
+    setCopied(true);
+
+    window.setTimeout(() => {
+      setCopied(false);
+    }, 2500);
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-[#05070c] px-5 py-10 text-white">
@@ -1032,16 +1223,55 @@ export default function TrackingPage() {
                     Updating...
                   </div>
                 ) : null}
+
+                {data.driver?.lastLocationAt ? (
+                  <div
+                    className={`inline-flex rounded-full border px-4 py-2 text-sm font-bold ${getGpsTone(
+                      data.driver.lastLocationAt,
+                      now,
+                    )}`}
+                  >
+                    GPS {formatGpsAge(data.driver.lastLocationAt, now)}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => void handleCopyTrackingLink()}
+                  className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-5 py-3 text-sm font-bold text-cyan-200 transition hover:bg-cyan-500/20"
+                >
+                  {copied ? 'Tracking Link Copied' : 'Copy Tracking Link'}
+                </button>
+
+                <a
+                  href={getTrackingUrl(data)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-bold text-white/80 transition hover:bg-white/10"
+                >
+                  Open Tracking Link
+                </a>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-4 md:min-w-[240px]">
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-4 md:min-w-[260px]">
               <div className="text-xs font-black uppercase tracking-[0.18em] text-white/35">
                 Current update
               </div>
               <div className="mt-2 text-lg font-black">
                 {customerStatusMessage(data.status)}
               </div>
+
+              {['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ON_JOB'].includes(
+                data.status,
+              ) || liveEta != null ? (
+                <div className="mt-3 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-bold text-cyan-100">
+                  {arrivalMessage}
+                </div>
+              ) : null}
+
               <div className="mt-2 text-sm text-white/50">
                 Pickup {formatTimeOnly(data.pickupTime)}
               </div>
@@ -1051,7 +1281,7 @@ export default function TrackingPage() {
 
         <JourneyProgress status={data.status} />
 
-        <LiveDriverMap data={data} vehicle={vehicle} route={route} now={now} />
+        <LiveDriverMap data={data} vehicle={vehicle} route={route} now={now} liveEta={liveEta} />
 
         <section className="grid gap-5 md:grid-cols-3">
           <MetricTile
