@@ -360,6 +360,40 @@ async function fetchRoute(
   }
 }
 
+function FitMapBounds({
+  points,
+  leaflet,
+  useMap,
+}: {
+  points: LatLngPoint[];
+  leaflet: LeafletModule;
+  useMap: ReactLeafletModule['useMap'];
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (points.length === 0) return;
+
+    if (points.length === 1) {
+      map.setView(points[0], 15, {
+        animate: true,
+      });
+
+      return;
+    }
+
+    const bounds = leaflet.latLngBounds(points);
+
+    map.fitBounds(bounds, {
+      padding: [55, 55],
+      animate: true,
+      maxZoom: 15,
+    });
+  }, [points, map, leaflet]);
+
+  return null;
+}
+
 function LiveDriverMap({
   data,
   vehicle,
@@ -460,14 +494,8 @@ function LiveDriverMap({
     );
   }
 
-  const {
-    MapContainer,
-    Marker,
-    Polyline,
-    Popup,
-    TileLayer,
-    useMap,
-  } = reactLeaflet;
+  const { MapContainer, Marker, Polyline, Popup, TileLayer, useMap } =
+    reactLeaflet;
 
   const carIcon = leaflet.divIcon({
     className: '',
@@ -542,30 +570,6 @@ function LiveDriverMap({
     popupAnchor: [0, -22],
   });
 
-  function FitMapBounds({ points }: { points: LatLngPoint[] }) {
-    const map = useMap();
-
-    useEffect(() => {
-      if (points.length === 0) return;
-
-      if (points.length === 1) {
-        map.setView(points[0], 15, {
-          animate: true,
-        });
-        return;
-      }
-
-      const bounds = leaflet.latLngBounds(points);
-      map.fitBounds(bounds, {
-        padding: [55, 55],
-        animate: true,
-        maxZoom: 15,
-      });
-    }, [points, map]);
-
-    return null;
-  }
-
   return (
     <section className="overflow-hidden rounded-3xl border border-cyan-500/20 bg-[#0b1220] shadow-[0_0_55px_rgba(6,182,212,0.08)]">
       <div className="flex flex-col gap-4 p-6 md:flex-row md:items-center md:justify-between">
@@ -601,7 +605,11 @@ function LiveDriverMap({
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          <FitMapBounds points={mapPoints} />
+          <FitMapBounds
+            points={mapPoints}
+            leaflet={leaflet}
+            useMap={useMap}
+          />
 
           {route.driverToPickup.length >= 2 ? (
             <Polyline
