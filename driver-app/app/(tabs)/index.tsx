@@ -1,6 +1,5 @@
-import '../lib/background-location';
+import '../../lib/background-location';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
@@ -18,286 +17,40 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { LOCATION_TASK_NAME } from '../lib/background-location';
+
+import { LOCATION_TASK_NAME } from '../../lib/background-location';
+import {
+  DEFAULT_API_BASE_URL,
+  apiFetch,
+  bootstrapDriver,
+  loginDriver,
+  updateDriverLocation,
+} from '../../lib/driver-api';
+import {
+  clearStoredAuth,
+  getCurrentMapJob,
+  loadStoredAuth,
+  normalizeJobStatus,
+  persistDriverMapState,
+  savePin,
+  saveToken,
+  saveUsername,
+} from '../../lib/driver-storage';
+import type {
+  Booking,
+  BootstrapResponse,
+  Driver,
+  LocationPayload,
+} from '../../lib/driver-types';
 
 LogBox.ignoreLogs(['Unable to activate keep awake']);
 
-const DEFAULT_API_BASE_URL = 'https://cabhq-production.up.railway.app';
-const DEFAULT_COMPANY_ID = 'fb1239ad-b2bd-4458-b0c7-7e4bd213c837';
 const OFFER_TIMEOUT_SECONDS = 90;
-
-const STORAGE_KEYS = {
-  username: 'cabhq_driver_username',
-  pin: 'cabhq_driver_pin',
-  token: 'cabhq_driver_token',
-  mapState: 'cabhq_driver_map_state',
-};
-
-type Driver = {
-  id: string;
-  name: string;
-  username?: string | null;
-  phone?: string | null;
-  email?: string | null;
-  status: string;
-  pin?: string | null;
-  licenceNumber?: string | null;
-  badgeExpiry?: string | null;
-  dbsExpiry?: string | null;
-  licenceExpiry?: string | null;
-  latitude?: number | null;
-  longitude?: number | null;
-  heading?: number | null;
-  speed?: number | null;
-  lastLocationAt?: string | null;
-  dispatch?: {
-    assignable: boolean;
-    available?: boolean;
-    blockedReasons: string[];
-  };
-  compliance?: {
-    blocked: boolean;
-    overallStatus: string;
-  };
-  shift?: DriverShift | null;
-};
-
-type DriverShift = {
-  id: string;
-  driverId: string;
-  companyId: string;
-  startedAt: string;
-  endedAt?: string | null;
-  startStatus?: string | null;
-  endStatus?: string | null;
-  notes?: string | null;
-  active: boolean;
-  durationMinutes: number;
-  summary: {
-    totalJobs: number;
-    completedJobs: number;
-    cancelledJobs?: number;
-    activeJobs: number;
-  };
-};
-
-type Booking = {
-  id: string;
-  reference: string;
-  pickup: string;
-  dropoff: string;
-  pickupLat?: number | null;
-  pickupLng?: number | null;
-  dropoffLat?: number | null;
-  dropoffLng?: number | null;
-  pickupLatitude?: number | null;
-  pickupLongitude?: number | null;
-  dropoffLatitude?: number | null;
-  dropoffLongitude?: number | null;
-  routeCoordinates?: Array<[number, number]> | Array<{ latitude: number; longitude: number }>;
-  pickupTime: string;
-  status: string;
-  quotedPrice?: number | null;
-  pricingMode?: string | null;
-  trackingUrl?: string | null;
-  driverDistanceMiles?: number | null;
-  etaMinutes?: number | null;
-  etaConfidence?: 'LIVE_GPS' | 'ESTIMATED' | 'UNAVAILABLE' | string | null;
-  driverGpsAgeSeconds?: number | null;
-  customerTrackingMessage?: string | null;
-
-  isAirportBooking?: boolean;
-  airportCode?: string | null;
-  airportName?: string | null;
-  airportTerminal?: string | null;
-  flightNumber?: string | null;
-  flightDirection?: string | null;
-  flightDateTime?: string | null;
-  airline?: string | null;
-  meetAndGreet?: boolean | null;
-  airportNotes?: string | null;
-
-  driverId?: string | null;
-  pricing?: {
-    quotedPrice?: number | null;
-  };
-  events?: Array<{
-    id: string;
-    message: string;
-    createdAt: string;
-  }>;
-  offer?: {
-    isActive?: boolean;
-    timeoutSeconds?: number;
-    offeredAt?: string | null;
-    expiresAt?: string | null;
-    secondsRemaining?: number;
-    expired?: boolean;
-  };
-};
-
-type BootstrapResponse = {
-  driver: Driver;
-  offer: Booking | null;
-  activeJobs: Booking[];
-  completedJobs?: Booking[];
-  currentJob?: Booking | null;
-  map?: {
-    driver?: Driver | null;
-    activeJob?: Booking | null;
-    activeOffer?: Booking | null;
-    activeJobs?: Booking[];
-    updatedAt?: string;
-  };
-  home?: {
-    hasActiveOffer?: boolean;
-    hasActiveJob?: boolean;
-    activeOfferSecondsRemaining?: number;
-    activeOfferExpiresAt?: string | null;
-    onShift?: boolean;
-    shiftStartedAt?: string | null;
-  };
-  currentShift?: {
-    shift: DriverShift | null;
-  } | null;
-};
-
-type DriverLoginResponse = {
-  token?: string;
-  accessToken?: string;
-  access_token?: string;
-  driverToken?: string;
-  driver?: Driver;
-};
-
-type LocationPayload = {
-  latitude: number;
-  longitude: number;
-  heading?: number | null;
-  speed?: number | null;
-};
-
-type DriverMapState = {
-  driver: Driver | null;
-  activeJob: Booking | null;
-  activeOffer: Booking | null;
-  activeJobs: Booking[];
-  updatedAt: string;
-};
-
-async function parseResponse(response: Response) {
-  const text = await response.text();
-
-  if (!text) return null;
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { message: text };
-  }
-}
-
-function extractErrorMessage(data: unknown, fallback: string) {
-  if (typeof data === 'object' && data !== null && 'message' in data) {
-    const rawMessage = (data as { message?: unknown }).message;
-
-    if (Array.isArray(rawMessage)) return rawMessage.join(', ');
-    if (typeof rawMessage === 'string' && rawMessage.trim()) return rawMessage;
-  }
-
-  return fallback;
-}
-
-async function apiFetch<T>(
-  baseUrl: string,
-  path: string,
-  token: string,
-  options?: RequestInit,
-): Promise<T> {
-  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-
-  const headers = new Headers(options?.headers || {});
-  headers.set('Authorization', `Bearer ${token}`);
-
-  const isFormData =
-    typeof FormData !== 'undefined' && options?.body instanceof FormData;
-
-  if (!isFormData && !headers.has('Content-Type')) {
-    headers.set('Content-Type', 'application/json');
-  }
-
-  const response = await fetch(`${normalizedBaseUrl}${normalizedPath}`, {
-    ...options,
-    headers,
-  });
-
-  const data = await parseResponse(response);
-
-  if (!response.ok) {
-    throw new Error(
-      extractErrorMessage(data, `Request failed (${response.status})`),
-    );
-  }
-
-  return data as T;
-}
-
-async function loginDriver(
-  baseUrl: string,
-  username: string,
-  pin: string,
-): Promise<DriverLoginResponse> {
-  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
-
-  const primaryResponse = await fetch(`${normalizedBaseUrl}/auth/driver-login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      companyId: DEFAULT_COMPANY_ID,
-      username: username.trim().toLowerCase(),
-      pin: pin.trim(),
-    }),
-  });
-
-  const primaryData = await parseResponse(primaryResponse);
-
-  if (primaryResponse.ok) {
-    return primaryData as DriverLoginResponse;
-  }
-
-  const fallbackResponse = await fetch(`${normalizedBaseUrl}/driver-app/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      phone: username.trim(),
-      pin: pin.trim(),
-    }),
-  });
-
-  const fallbackData = await parseResponse(fallbackResponse);
-
-  if (!fallbackResponse.ok) {
-    throw new Error(
-      extractErrorMessage(
-        fallbackData,
-        extractErrorMessage(primaryData, `Login failed (${primaryResponse.status})`),
-      ),
-    );
-  }
-
-  return fallbackData as DriverLoginResponse;
-}
 
 function formatDateTime(value?: string | null) {
   if (!value) return '—';
 
   const date = new Date(value);
-
   if (Number.isNaN(date.getTime())) return '—';
 
   return date.toLocaleString('en-GB', {
@@ -312,7 +65,6 @@ function formatDate(value?: string | null) {
   if (!value) return '—';
 
   const date = new Date(value);
-
   if (Number.isNaN(date.getTime())) return '—';
 
   return date.toLocaleDateString('en-GB', {
@@ -370,7 +122,9 @@ function getEtaLabel(booking?: Booking | null) {
   return 'ETA pending';
 }
 
-function getEtaTone(booking?: Booking | null): 'green' | 'amber' | 'red' | 'cyan' | 'slate' {
+function getEtaTone(
+  booking?: Booking | null,
+): 'green' | 'amber' | 'red' | 'cyan' | 'slate' {
   if (!booking) return 'slate';
 
   const confidence = (booking.etaConfidence || '').toUpperCase();
@@ -378,7 +132,7 @@ function getEtaTone(booking?: Booking | null): 'green' | 'amber' | 'red' | 'cyan
   if (booking.etaMinutes != null && booking.etaMinutes <= 3) return 'green';
   if (confidence === 'LIVE_GPS') return 'cyan';
   if (confidence === 'ESTIMATED') return 'amber';
-  if (booking.etaConfidence === 'UNAVAILABLE') return 'slate';
+  if (confidence === 'UNAVAILABLE') return 'slate';
 
   return 'slate';
 }
@@ -419,50 +173,6 @@ function getAirportSummary(job: Booking) {
   return parts.length ? parts.join(' · ') : 'Airport booking';
 }
 
-function getTrackingUrl(job?: Booking | null) {
-  return job?.trackingUrl || '';
-}
-
-async function openTrackingLink(job: Booking) {
-  const url = getTrackingUrl(job);
-
-  if (!url) return;
-
-  try {
-    await Linking.openURL(url);
-  } catch (error) {
-    console.log('Failed to open tracking link', error);
-  }
-}
-
-async function shareTrackingMessage(job: Booking) {
-  const message =
-    job.customerTrackingMessage ||
-    [
-      `Booking ${job.reference}`,
-      `Pickup: ${job.pickup}`,
-      `Dropoff: ${job.dropoff}`,
-      `Pickup time: ${formatDateTime(job.pickupTime)}`,
-      job.etaMinutes != null ? `Driver ETA: approx ${job.etaMinutes} mins` : null,
-      job.trackingUrl ? `Track live: ${job.trackingUrl}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-  const smsUrl = `sms:?body=${encodeURIComponent(message)}`;
-
-  try {
-    await Linking.openURL(smsUrl);
-  } catch (error) {
-    console.log('Failed to open tracking message', error);
-  }
-}
-
-
-function normalizeJobStatus(status?: string | null) {
-  return (status || 'UNKNOWN').toUpperCase();
-}
-
 function getBookingPrice(booking?: Booking | any) {
   return (
     booking?.quotedPrice ??
@@ -471,59 +181,6 @@ function getBookingPrice(booking?: Booking | any) {
     booking?.price ??
     null
   );
-}
-
-function getBookingLatLng(booking: Booking | null, type: 'pickup' | 'dropoff') {
-  if (!booking) return null;
-
-  const lat =
-    type === 'pickup'
-      ? booking.pickupLat ?? booking.pickupLatitude ?? null
-      : booking.dropoffLat ?? booking.dropoffLatitude ?? null;
-
-  const lng =
-    type === 'pickup'
-      ? booking.pickupLng ?? booking.pickupLongitude ?? null
-      : booking.dropoffLng ?? booking.dropoffLongitude ?? null;
-
-  if (lat == null || lng == null) return null;
-  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return null;
-
-  return {
-    latitude: Number(lat),
-    longitude: Number(lng),
-  };
-}
-
-function getCurrentMapJob(activeJobs: Booking[]) {
-  const priority = ['EN_ROUTE', 'ARRIVED', 'ON_JOB', 'ACCEPTED', 'OFFERED'];
-
-  return (
-    [...activeJobs].sort((a, b) => {
-      const aIndex = priority.indexOf(normalizeJobStatus(a.status));
-      const bIndex = priority.indexOf(normalizeJobStatus(b.status));
-
-      return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
-    })[0] ?? null
-  );
-}
-
-async function persistDriverMapState(
-  driver: Driver | null,
-  activeOffer: Booking | null,
-  activeJobs: Booking[],
-) {
-  const activeJob = getCurrentMapJob(activeJobs);
-
-  const mapState: DriverMapState = {
-    driver,
-    activeJob,
-    activeOffer,
-    activeJobs,
-    updatedAt: new Date().toISOString(),
-  };
-
-  await AsyncStorage.setItem(STORAGE_KEYS.mapState, JSON.stringify(mapState));
 }
 
 function getJobActionConfig(status?: string | null) {
@@ -636,6 +293,37 @@ async function openWazeNavigation(
   }
 }
 
+async function openTrackingLink(job: Booking) {
+  if (!job.trackingUrl) return;
+
+  try {
+    await Linking.openURL(job.trackingUrl);
+  } catch (error) {
+    console.log('Failed to open tracking link', error);
+  }
+}
+
+async function shareTrackingMessage(job: Booking) {
+  const message =
+    job.customerTrackingMessage ||
+    [
+      `Booking ${job.reference}`,
+      `Pickup: ${job.pickup}`,
+      `Dropoff: ${job.dropoff}`,
+      `Pickup time: ${formatDateTime(job.pickupTime)}`,
+      job.etaMinutes != null ? `Driver ETA: approx ${job.etaMinutes} mins` : null,
+      job.trackingUrl ? `Track live: ${job.trackingUrl}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+  try {
+    await Linking.openURL(`sms:?body=${encodeURIComponent(message)}`);
+  } catch (error) {
+    console.log('Failed to open tracking message', error);
+  }
+}
+
 function Badge({
   label,
   tone,
@@ -661,7 +349,7 @@ function Badge({
         backgroundColor: styles.backgroundColor,
       }}
     >
-      <Text style={{ color: styles.color, fontSize: 12, fontWeight: '700' }}>
+      <Text style={{ color: styles.color, fontSize: 12, fontWeight: '800' }}>
         {label}
       </Text>
     </View>
@@ -691,7 +379,7 @@ function PrimaryButton({
         alignItems: 'center',
       }}
     >
-      <Text style={{ color: 'white', fontWeight: '700', fontSize: 15 }}>
+      <Text style={{ color: 'white', fontWeight: '800', fontSize: 15 }}>
         {label}
       </Text>
     </TouchableOpacity>
@@ -715,7 +403,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
         style={{
           color: 'white',
           fontSize: 14,
-          fontWeight: '600',
+          fontWeight: '700',
           flexShrink: 1,
           textAlign: 'right',
         }}
@@ -754,16 +442,16 @@ function SectionCard({
           gap: 8,
         }}
       >
-        <Text style={{ color: 'white', fontSize: 18, fontWeight: '700' }}>
+        <Text style={{ color: 'white', fontSize: 18, fontWeight: '800' }}>
           {title}
         </Text>
         {right}
       </View>
+
       {children}
     </View>
   );
 }
-
 
 function TrackingMetaStrip({ job }: { job: Booking }) {
   const hasMeta =
@@ -791,7 +479,10 @@ function TrackingMetaStrip({ job }: { job: Booking }) {
       ) : null}
 
       {job.driverGpsAgeSeconds != null ? (
-        <Badge label={`GPS ${getGpsAgeLabel(job.driverGpsAgeSeconds)}`} tone={job.driverGpsAgeSeconds <= 90 ? 'green' : 'amber'} />
+        <Badge
+          label={`GPS ${getGpsAgeLabel(job.driverGpsAgeSeconds)}`}
+          tone={job.driverGpsAgeSeconds <= 90 ? 'green' : 'amber'}
+        />
       ) : null}
 
       {job.etaConfidence ? (
@@ -820,6 +511,7 @@ function AirportJobStrip({ job }: { job: Booking }) {
           <Text style={{ color: '#67e8f9', fontSize: 12, fontWeight: '900' }}>
             {getAirportDirectionLabel(job.flightDirection).toUpperCase()}
           </Text>
+
           <Text style={{ color: 'white', fontSize: 15, fontWeight: '900', marginTop: 5 }}>
             {getAirportSummary(job)}
           </Text>
@@ -874,11 +566,11 @@ function LoginScreen({
             borderColor: '#1e293b',
           }}
         >
-          <Text style={{ color: '#64748b', fontSize: 12, fontWeight: '700', letterSpacing: 1.5 }}>
+          <Text style={{ color: '#64748b', fontSize: 12, fontWeight: '800', letterSpacing: 1.5 }}>
             CABHQ DRIVER APP
           </Text>
 
-          <Text style={{ color: 'white', fontSize: 32, fontWeight: '800', marginTop: 10 }}>
+          <Text style={{ color: 'white', fontSize: 32, fontWeight: '900', marginTop: 10 }}>
             Driver Login
           </Text>
 
@@ -888,9 +580,10 @@ function LoginScreen({
 
           <View style={{ marginTop: 24, gap: 14 }}>
             <View>
-              <Text style={{ color: '#cbd5e1', marginBottom: 8, fontWeight: '600' }}>
+              <Text style={{ color: '#cbd5e1', marginBottom: 8, fontWeight: '700' }}>
                 Username
               </Text>
+
               <TextInput
                 value={username}
                 onChangeText={(value) => setUsername(value.toLowerCase())}
@@ -911,9 +604,10 @@ function LoginScreen({
             </View>
 
             <View>
-              <Text style={{ color: '#cbd5e1', marginBottom: 8, fontWeight: '600' }}>
+              <Text style={{ color: '#cbd5e1', marginBottom: 8, fontWeight: '700' }}>
                 PIN
               </Text>
+
               <TextInput
                 value={pin}
                 onChangeText={setPin}
@@ -938,7 +632,7 @@ function LoginScreen({
 
           {error ? (
             <View style={{ marginTop: 16, backgroundColor: '#3b0a0a', borderRadius: 14, padding: 14 }}>
-              <Text style={{ color: '#fecaca', fontSize: 14, fontWeight: '700' }}>
+              <Text style={{ color: '#fecaca', fontSize: 14, fontWeight: '800' }}>
                 {error}
               </Text>
             </View>
@@ -955,7 +649,7 @@ function LoginScreen({
               alignItems: 'center',
             }}
           >
-            <Text style={{ color: 'white', fontSize: 16, fontWeight: '800' }}>
+            <Text style={{ color: 'white', fontSize: 16, fontWeight: '900' }}>
               {loading ? 'Signing in...' : 'Sign in'}
             </Text>
           </TouchableOpacity>
@@ -982,7 +676,7 @@ function IncomingOfferScreen({
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#020617' }}>
-      <View style={{ flex: 1, padding: 20, justifyContent: 'center' }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, padding: 20, justifyContent: 'center' }}>
         <View
           style={{
             backgroundColor: '#111827',
@@ -1020,7 +714,7 @@ function IncomingOfferScreen({
             <Text style={{ color: 'white', fontSize: 42, fontWeight: '900' }}>
               {secondsRemaining}
             </Text>
-            <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '700' }}>
+            <Text style={{ color: '#94a3b8', fontSize: 11, fontWeight: '800' }}>
               seconds
             </Text>
           </View>
@@ -1038,14 +732,14 @@ function IncomingOfferScreen({
 
           <View style={{ marginTop: 22, gap: 12 }}>
             <View style={{ backgroundColor: '#07111f', borderRadius: 18, padding: 16 }}>
-              <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '800' }}>PICKUP</Text>
+              <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '900' }}>PICKUP</Text>
               <Text style={{ color: 'white', fontSize: 17, fontWeight: '800', marginTop: 6 }}>
                 {offer.pickup}
               </Text>
             </View>
 
             <View style={{ backgroundColor: '#07111f', borderRadius: 18, padding: 16 }}>
-              <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '800' }}>DROPOFF</Text>
+              <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '900' }}>DROPOFF</Text>
               <Text style={{ color: 'white', fontSize: 17, fontWeight: '800', marginTop: 6 }}>
                 {offer.dropoff}
               </Text>
@@ -1053,14 +747,14 @@ function IncomingOfferScreen({
 
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1, backgroundColor: '#07111f', borderRadius: 18, padding: 16 }}>
-                <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '800' }}>FARE</Text>
+                <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '900' }}>FARE</Text>
                 <Text style={{ color: '#6ee7b7', fontSize: 22, fontWeight: '900', marginTop: 6 }}>
                   {formatCurrency(getBookingPrice(offer))}
                 </Text>
               </View>
 
               <View style={{ flex: 1, backgroundColor: '#07111f', borderRadius: 18, padding: 16 }}>
-                <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '800' }}>PRICING</Text>
+                <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '900' }}>PRICING</Text>
                 <Text style={{ color: 'white', fontSize: 16, fontWeight: '800', marginTop: 8 }}>
                   {offer.pricingMode || '—'}
                 </Text>
@@ -1084,7 +778,7 @@ function IncomingOfferScreen({
             />
           </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -1121,27 +815,13 @@ function JobCard({
         backgroundColor: status === 'ON_JOB' ? '#1c1205' : '#07111f',
       }}
     >
-      <View
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 12,
-        }}
-      >
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <View style={{ flex: 1 }}>
           <Text style={{ color: 'white', fontSize: 18, fontWeight: '900' }}>
             {job.reference}
           </Text>
 
-          <Text
-            style={{
-              color: '#67e8f9',
-              fontSize: 13,
-              marginTop: 5,
-              fontWeight: '800',
-            }}
-          >
+          <Text style={{ color: '#67e8f9', fontSize: 13, marginTop: 5, fontWeight: '800' }}>
             Pickup: {formatDateTime(job.pickupTime)}
           </Text>
         </View>
@@ -1150,52 +830,16 @@ function JobCard({
       </View>
 
       <View style={{ marginTop: 16, gap: 12 }}>
-        <View
-          style={{
-            backgroundColor: '#0f172a',
-            borderRadius: 16,
-            padding: 14,
-            borderWidth: 1,
-            borderColor: '#1e293b',
-          }}
-        >
-          <Text style={{ color: '#93c5fd', fontSize: 12, fontWeight: '900' }}>
-            PICKUP
-          </Text>
-          <Text
-            style={{
-              color: 'white',
-              fontSize: 16,
-              marginTop: 6,
-              fontWeight: '800',
-              lineHeight: 22,
-            }}
-          >
+        <View style={{ backgroundColor: '#0f172a', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#1e293b' }}>
+          <Text style={{ color: '#93c5fd', fontSize: 12, fontWeight: '900' }}>PICKUP</Text>
+          <Text style={{ color: 'white', fontSize: 16, marginTop: 6, fontWeight: '800', lineHeight: 22 }}>
             {job.pickup || '—'}
           </Text>
         </View>
 
-        <View
-          style={{
-            backgroundColor: '#0f172a',
-            borderRadius: 16,
-            padding: 14,
-            borderWidth: 1,
-            borderColor: '#1e293b',
-          }}
-        >
-          <Text style={{ color: '#c4b5fd', fontSize: 12, fontWeight: '900' }}>
-            DROPOFF
-          </Text>
-          <Text
-            style={{
-              color: 'white',
-              fontSize: 16,
-              marginTop: 6,
-              fontWeight: '800',
-              lineHeight: 22,
-            }}
-          >
+        <View style={{ backgroundColor: '#0f172a', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#1e293b' }}>
+          <Text style={{ color: '#c4b5fd', fontSize: 12, fontWeight: '900' }}>DROPOFF</Text>
+          <Text style={{ color: 'white', fontSize: 16, marginTop: 6, fontWeight: '800', lineHeight: 22 }}>
             {job.dropoff || '—'}
           </Text>
         </View>
@@ -1205,52 +849,16 @@ function JobCard({
       <AirportJobStrip job={job} />
 
       <View style={{ marginTop: 14, flexDirection: 'row', gap: 10 }}>
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: '#0f172a',
-            borderRadius: 16,
-            padding: 14,
-            borderWidth: 1,
-            borderColor: '#1e293b',
-          }}
-        >
-          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '900' }}>
-            FARE
-          </Text>
-          <Text
-            style={{
-              color: '#6ee7b7',
-              fontSize: 22,
-              fontWeight: '900',
-              marginTop: 6,
-            }}
-          >
+        <View style={{ flex: 1, backgroundColor: '#0f172a', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#1e293b' }}>
+          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '900' }}>FARE</Text>
+          <Text style={{ color: '#6ee7b7', fontSize: 22, fontWeight: '900', marginTop: 6 }}>
             {formatCurrency(getBookingPrice(job))}
           </Text>
         </View>
 
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: '#0f172a',
-            borderRadius: 16,
-            padding: 14,
-            borderWidth: 1,
-            borderColor: '#1e293b',
-          }}
-        >
-          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '900' }}>
-            PRICING
-          </Text>
-          <Text
-            style={{
-              color: 'white',
-              fontSize: 16,
-              fontWeight: '800',
-              marginTop: 8,
-            }}
-          >
+        <View style={{ flex: 1, backgroundColor: '#0f172a', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#1e293b' }}>
+          <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '900' }}>PRICING</Text>
+          <Text style={{ color: 'white', fontSize: 16, fontWeight: '800', marginTop: 8 }}>
             {job.pricingMode || '—'}
           </Text>
         </View>
@@ -1276,13 +884,7 @@ function JobCard({
               alignItems: 'center',
             }}
           >
-            <Text
-              style={{
-                color: '#bfdbfe',
-                fontWeight: '900',
-                fontSize: 13,
-              }}
-            >
+            <Text style={{ color: '#bfdbfe', fontWeight: '900', fontSize: 13 }}>
               Google Pickup
             </Text>
           </TouchableOpacity>
@@ -1305,13 +907,7 @@ function JobCard({
               alignItems: 'center',
             }}
           >
-            <Text
-              style={{
-                color: '#fde68a',
-                fontWeight: '900',
-                fontSize: 13,
-              }}
-            >
+            <Text style={{ color: '#fde68a', fontWeight: '900', fontSize: 13 }}>
               Waze Pickup
             </Text>
           </TouchableOpacity>
@@ -1337,13 +933,7 @@ function JobCard({
                 alignItems: 'center',
               }}
             >
-              <Text
-                style={{
-                  color: '#ddd6fe',
-                  fontWeight: '900',
-                  fontSize: 13,
-                }}
-              >
+              <Text style={{ color: '#ddd6fe', fontWeight: '900', fontSize: 13 }}>
                 Google Dropoff
               </Text>
             </TouchableOpacity>
@@ -1366,13 +956,7 @@ function JobCard({
                 alignItems: 'center',
               }}
             >
-              <Text
-                style={{
-                  color: '#a7f3d0',
-                  fontWeight: '900',
-                  fontSize: 13,
-                }}
-              >
+              <Text style={{ color: '#a7f3d0', fontWeight: '900', fontSize: 13 }}>
                 Waze Dropoff
               </Text>
             </TouchableOpacity>
@@ -1475,6 +1059,7 @@ function CompletedJobCard({ job }: { job: Booking }) {
             {formatDateTime(job.pickupTime)}
           </Text>
         </View>
+
         <Text style={{ color: '#6ee7b7', fontSize: 16, fontWeight: '900' }}>
           {formatCurrency(getBookingPrice(job))}
         </Text>
@@ -1483,6 +1068,7 @@ function CompletedJobCard({ job }: { job: Booking }) {
       <Text style={{ color: '#d1fae5', fontSize: 13, marginTop: 10 }}>
         {job.pickup}
       </Text>
+
       <Text style={{ color: '#a7f3d0', fontSize: 13, marginTop: 4 }}>
         → {job.dropoff}
       </Text>
@@ -1527,6 +1113,7 @@ function SummaryTile({
       <Text style={{ color: '#94a3b8', fontSize: 12, fontWeight: '800' }}>
         {label}
       </Text>
+
       <Text style={{ color, fontSize: 24, fontWeight: '900', marginTop: 8 }}>
         {value}
       </Text>
@@ -1581,7 +1168,11 @@ function DriverDashboard({
   const onShift = Boolean(driver.shift?.active);
   const driverStatus = (driver.status || 'UNKNOWN').toUpperCase();
   const isOnlineStatus = ['ONLINE', 'AVAILABLE', 'ON_DUTY'].includes(driverStatus);
-  const hasGps = Boolean(driver.latitude != null && driver.longitude != null && driver.lastLocationAt);
+  const hasGps = Boolean(
+    driver.latitude != null &&
+      driver.longitude != null &&
+      driver.lastLocationAt,
+  );
 
   const completedTotal = completedJobs.reduce((sum, job: any) => {
     const price =
@@ -1622,7 +1213,9 @@ function DriverDashboard({
     <SafeAreaView style={{ flex: 1, backgroundColor: '#020617' }}>
       <ScrollView
         contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
         <View
           style={{
@@ -1635,15 +1228,20 @@ function DriverDashboard({
         >
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ color: '#64748b', fontSize: 12, fontWeight: '700' }}>
+              <Text style={{ color: '#64748b', fontSize: 12, fontWeight: '800' }}>
                 DRIVER APP
               </Text>
-              <Text style={{ color: 'white', fontSize: 28, fontWeight: '800', marginTop: 6 }}>
+
+              <Text style={{ color: 'white', fontSize: 28, fontWeight: '900', marginTop: 6 }}>
                 {driver.name || 'Driver'}
               </Text>
+
               <Text style={{ color: '#94a3b8', fontSize: 14, marginTop: 6 }}>
-                {driver.username ? `@${driver.username}` : driver.email || driver.phone || 'No contact details'}
+                {driver.username
+                  ? `@${driver.username}`
+                  : driver.email || driver.phone || 'No contact details'}
               </Text>
+
               <Text style={{ color: '#64748b', fontSize: 12, marginTop: 8 }}>
                 {backendUrl}
               </Text>
@@ -1659,7 +1257,7 @@ function DriverDashboard({
                 paddingVertical: 10,
               }}
             >
-              <Text style={{ color: 'white', fontWeight: '700' }}>
+              <Text style={{ color: 'white', fontWeight: '800' }}>
                 Disconnect
               </Text>
             </TouchableOpacity>
@@ -1669,7 +1267,13 @@ function DriverDashboard({
             <Badge label={onShift ? 'ON SHIFT' : 'OFF SHIFT'} tone={onShift ? 'cyan' : 'slate'} />
             <Badge
               label={driverStatus.replace('_', ' ')}
-              tone={isOnlineStatus ? 'green' : driverStatus === 'BUSY' || driverStatus === 'OFFERED' ? 'cyan' : 'amber'}
+              tone={
+                isOnlineStatus
+                  ? 'green'
+                  : driverStatus === 'BUSY' || driverStatus === 'OFFERED'
+                    ? 'cyan'
+                    : 'amber'
+              }
             />
             <Badge label={hasGps ? 'GPS LIVE' : 'NO GPS'} tone={hasGps ? 'green' : 'red'} />
             <Badge label={driver.compliance?.overallStatus || 'VALID'} tone={complianceTone} />
@@ -1763,9 +1367,10 @@ function DriverDashboard({
 
           {blockedReasons.length > 0 ? (
             <View style={{ marginTop: 14, backgroundColor: '#3b0a0a', borderRadius: 14, padding: 14 }}>
-              <Text style={{ color: '#fecaca', fontSize: 12, fontWeight: '800', marginBottom: 8 }}>
+              <Text style={{ color: '#fecaca', fontSize: 12, fontWeight: '900', marginBottom: 8 }}>
                 BLOCKED REASONS
               </Text>
+
               {blockedReasons.map((reason) => (
                 <Text key={reason} style={{ color: '#fee2e2', fontSize: 14, marginBottom: 6 }}>
                   • {reason}
@@ -1895,15 +1500,11 @@ export default function DriverHomeTab() {
   useEffect(() => {
     void (async () => {
       try {
-        const [storedUsername, storedPin, storedToken] = await Promise.all([
-          AsyncStorage.getItem(STORAGE_KEYS.username),
-          AsyncStorage.getItem(STORAGE_KEYS.pin),
-          AsyncStorage.getItem(STORAGE_KEYS.token),
-        ]);
+        const stored = await loadStoredAuth();
 
-        if (storedUsername) setUsername(storedUsername);
-        if (storedPin) setPin(storedPin);
-        if (storedToken) setToken(storedToken);
+        if (stored.username) setUsername(stored.username);
+        if (stored.pin) setPin(stored.pin);
+        if (stored.token) setToken(stored.token);
       } catch (error) {
         console.log('Failed to load saved login values', error);
       } finally {
@@ -1914,17 +1515,17 @@ export default function DriverHomeTab() {
 
   useEffect(() => {
     if (hydrating) return;
-    void AsyncStorage.setItem(STORAGE_KEYS.username, username);
+    void saveUsername(username);
   }, [username, hydrating]);
 
   useEffect(() => {
     if (hydrating) return;
-    void AsyncStorage.setItem(STORAGE_KEYS.pin, pin);
+    void savePin(pin);
   }, [pin, hydrating]);
 
   useEffect(() => {
     if (hydrating) return;
-    void AsyncStorage.setItem(STORAGE_KEYS.token, token);
+    void saveToken(token);
   }, [token, hydrating]);
 
   const loadDashboard = useCallback(
@@ -1935,11 +1536,7 @@ export default function DriverHomeTab() {
         throw new Error('Driver login is required');
       }
 
-      const bootstrap = await apiFetch<BootstrapResponse>(
-        trimmedBackendUrl,
-        '/driver-app/me/bootstrap',
-        currentToken,
-      );
+      const bootstrap = await bootstrapDriver(trimmedBackendUrl, currentToken);
 
       if (!bootstrap?.driver?.id) {
         throw new Error('Bootstrap response did not contain a driver profile');
@@ -1950,19 +1547,6 @@ export default function DriverHomeTab() {
         ? bootstrap.activeJobs
         : [];
 
-      if (bootstrap.map) {
-        await AsyncStorage.setItem(
-          STORAGE_KEYS.mapState,
-          JSON.stringify({
-            driver: bootstrap.map.driver ?? bootstrap.driver,
-            activeJob: bootstrap.map.activeJob ?? bootstrap.currentJob ?? getCurrentMapJob(nextActiveJobs),
-            activeOffer: bootstrap.map.activeOffer ?? nextOffer,
-            activeJobs: bootstrap.map.activeJobs ?? nextActiveJobs,
-            updatedAt: bootstrap.map.updatedAt ?? new Date().toISOString(),
-          }),
-        );
-      }
-
       setDriver({
         ...bootstrap.driver,
         shift: bootstrap.currentShift?.shift ?? bootstrap.driver.shift ?? null,
@@ -1970,6 +1554,12 @@ export default function DriverHomeTab() {
 
       setActiveOffer(nextOffer);
       setActiveJobs(nextActiveJobs);
+
+      await persistDriverMapState(
+        bootstrap.map?.driver ?? bootstrap.driver,
+        bootstrap.map?.activeOffer ?? nextOffer,
+        bootstrap.map?.activeJobs ?? nextActiveJobs,
+      );
 
       if (Array.isArray(bootstrap.completedJobs)) {
         setCompletedJobs(bootstrap.completedJobs);
@@ -2016,19 +1606,10 @@ export default function DriverHomeTab() {
         throw new Error('No driver token available for GPS');
       }
 
-      const result = await apiFetch<{ driver?: Driver; bootstrap?: BootstrapResponse; autoArrived?: { changed?: boolean; status?: string } }>(
+      const result = await updateDriverLocation(
         trimmedBackendUrl,
-        '/driver-app/me/location',
         currentToken,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-            heading: coords.heading ?? null,
-            speed: coords.speed ?? null,
-          }),
-        },
+        coords,
       );
 
       socketRef.current?.emit('driver:location', {
@@ -2237,32 +1818,23 @@ export default function DriverHomeTab() {
       setLocationStatus(`Realtime error: ${error.message}`);
     });
 
-    socket.on('driver:location:saved', () => {
-      void loadDashboard().catch((error) => console.log(error));
+    const reloadEvents = [
+      'driver:location:saved',
+      'booking:created',
+      'booking:updated',
+      'booking:assigned',
+      'booking:status_changed',
+      'driver:updated',
+    ];
+
+    reloadEvents.forEach((event) => {
+      socket.on(event, () => {
+        void loadDashboard().catch((error) => console.log(error));
+      });
     });
 
     socket.on('booking:offer_created', () => {
       void playOfferAlert();
-      void loadDashboard().catch((error) => console.log(error));
-    });
-
-    socket.on('booking:created', () => {
-      void loadDashboard().catch((error) => console.log(error));
-    });
-
-    socket.on('booking:updated', () => {
-      void loadDashboard().catch((error) => console.log(error));
-    });
-
-    socket.on('booking:assigned', () => {
-      void loadDashboard().catch((error) => console.log(error));
-    });
-
-    socket.on('booking:status_changed', () => {
-      void loadDashboard().catch((error) => console.log(error));
-    });
-
-    socket.on('driver:updated', () => {
       void loadDashboard().catch((error) => console.log(error));
     });
 
@@ -2291,7 +1863,7 @@ export default function DriverHomeTab() {
       }
 
       setToken(nextToken);
-      await AsyncStorage.setItem(STORAGE_KEYS.token, nextToken);
+      await saveToken(nextToken);
 
       await loadDashboard(nextToken);
       setConnected(true);
@@ -2509,12 +2081,7 @@ export default function DriverHomeTab() {
     socketRef.current = null;
 
     await stopLocationTracking();
-
-    await Promise.all([
-      AsyncStorage.removeItem(STORAGE_KEYS.username),
-      AsyncStorage.removeItem(STORAGE_KEYS.pin),
-      AsyncStorage.removeItem(STORAGE_KEYS.token),
-    ]);
+    await clearStoredAuth();
 
     setUsername('');
     setPin('');
