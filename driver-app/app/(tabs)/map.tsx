@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   Linking,
   Platform,
   Pressable,
@@ -100,6 +102,52 @@ const DEFAULT_REGION: Region = {
 const MAP_STATE_KEY = 'cabhq_driver_map_state';
 const OLD_LOCATION_KEY = 'cabhq_driver_location';
 const OLD_BOOKING_KEY = 'cabhq_active_booking';
+
+const DARK_MAP_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#cbd5e1' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#020617' }] },
+  {
+    featureType: 'administrative',
+    elementType: 'geometry',
+    stylers: [{ color: '#334155' }],
+  },
+  {
+    featureType: 'poi',
+    elementType: 'geometry',
+    stylers: [{ color: '#111827' }],
+  },
+  {
+    featureType: 'poi.park',
+    elementType: 'geometry',
+    stylers: [{ color: '#052e1b' }],
+  },
+  {
+    featureType: 'road',
+    elementType: 'geometry',
+    stylers: [{ color: '#1e293b' }],
+  },
+  {
+    featureType: 'road',
+    elementType: 'geometry.stroke',
+    stylers: [{ color: '#334155' }],
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'geometry',
+    stylers: [{ color: '#0e7490' }],
+  },
+  {
+    featureType: 'transit',
+    elementType: 'geometry',
+    stylers: [{ color: '#1e293b' }],
+  },
+  {
+    featureType: 'water',
+    elementType: 'geometry',
+    stylers: [{ color: '#082f49' }],
+  },
+];
 
 function normaliseStatus(status?: string | null) {
   return (status || 'WAITING').toUpperCase().replace(/_/g, ' ');
@@ -322,8 +370,8 @@ function regionForPoints(points: Coordinate[]): Region {
     return {
       latitude: points[0].latitude,
       longitude: points[0].longitude,
-      latitudeDelta: 0.03,
-      longitudeDelta: 0.03,
+      latitudeDelta: 0.025,
+      longitudeDelta: 0.025,
     };
   }
 
@@ -338,8 +386,8 @@ function regionForPoints(points: Coordinate[]): Region {
   return {
     latitude: (minLat + maxLat) / 2,
     longitude: (minLng + maxLng) / 2,
-    latitudeDelta: Math.max(0.025, (maxLat - minLat) * 1.7),
-    longitudeDelta: Math.max(0.025, (maxLng - minLng) * 1.7),
+    latitudeDelta: Math.max(0.025, (maxLat - minLat) * 1.8),
+    longitudeDelta: Math.max(0.025, (maxLng - minLng) * 1.8),
   };
 }
 
@@ -528,14 +576,111 @@ function SmallPill({
   );
 }
 
+function AddressCard({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: string;
+}) {
+  if (!value) return null;
+
+  return (
+    <View
+      style={{
+        marginTop: 10,
+        padding: 12,
+        borderRadius: 16,
+        backgroundColor: '#020617',
+        borderWidth: 1,
+        borderColor: 'rgba(148,163,184,0.22)',
+      }}
+    >
+      <Text
+        style={{
+          color: accent,
+          fontSize: 11,
+          fontWeight: '900',
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+        }}
+      >
+        {label}
+      </Text>
+
+      <Text
+        style={{
+          color: '#f8fafc',
+          marginTop: 6,
+          fontSize: 14,
+          fontWeight: '700',
+          lineHeight: 20,
+        }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function CustomMarker({
+  title,
+  color,
+  inner,
+}: {
+  title: string;
+  color: string;
+  inner: string;
+}) {
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <View
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 17,
+          backgroundColor: color,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: 3,
+          borderColor: '#f8fafc',
+          shadowColor: '#000',
+          shadowOpacity: 0.35,
+          shadowRadius: 8,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 6,
+        }}
+      >
+        <Text style={{ color: inner, fontSize: 14, fontWeight: '900' }}>
+          {title}
+        </Text>
+      </View>
+      <View
+        style={{
+          width: 3,
+          height: 12,
+          backgroundColor: color,
+          borderRadius: 3,
+          marginTop: -2,
+        }}
+      />
+    </View>
+  );
+}
+
 export default function DriverMapTab() {
   const mapRef = useRef<MapView | null>(null);
+  const pulse = useRef(new Animated.Value(0)).current;
+  const panelAnim = useRef(new Animated.Value(0)).current;
 
   const [driverLocation, setDriverLocation] =
     useState<StoredLocation | null>(null);
 
   const [booking, setBooking] = useState<StoredBooking | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [followDriver, setFollowDriver] = useState(true);
 
   async function loadMapState() {
     try {
@@ -587,10 +732,35 @@ export default function DriverMapTab() {
 
     const interval = setInterval(() => {
       void loadMapState();
-    }, 4000);
+    }, 3000);
 
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1150,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+      ]),
+    ).start();
+
+    Animated.timing(panelAnim, {
+      toValue: 1,
+      duration: 450,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [panelAnim, pulse]);
 
   const pickupCoords = useMemo(
     () => getBookingCoordinate(booking, 'pickup'),
@@ -626,8 +796,10 @@ export default function DriverMapTab() {
   useEffect(() => {
     if (!mapRef.current || mapPoints.length === 0) return;
 
-    mapRef.current.animateToRegion(regionForPoints(mapPoints), 500);
-  }, [mapPoints]);
+    if (followDriver || booking) {
+      mapRef.current.animateToRegion(regionForPoints(mapPoints), 650);
+    }
+  }, [mapPoints, followDriver, booking]);
 
   const driverToPickupLine =
     driverLocation && pickupCoords
@@ -647,38 +819,47 @@ export default function DriverMapTab() {
   const etaTone = getEtaTone(booking);
   const hasAirport = isAirportBooking(booking);
 
+  const pulseScale = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 2.8],
+  });
+
+  const pulseOpacity = pulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.45, 0],
+  });
+
+  const panelTranslate = panelAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [36, 0],
+  });
+
   return (
-    <SafeAreaView
-      style={{
-        flex: 1,
-        backgroundColor: '#020617',
-      }}
-    >
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#020617' }}>
       <View
         style={{
           paddingHorizontal: 16,
           paddingTop: 12,
           paddingBottom: 10,
           backgroundColor: '#020617',
+          borderBottomWidth: 1,
+          borderBottomColor: 'rgba(148,163,184,0.14)',
         }}
       >
         <Text
           style={{
             color: 'white',
-            fontSize: 28,
+            fontSize: 27,
             fontWeight: '900',
+            letterSpacing: -0.4,
           }}
+          numberOfLines={1}
         >
           Live Driver Map
         </Text>
 
-        <Text
-          style={{
-            color: '#94a3b8',
-            marginTop: 4,
-          }}
-        >
-          GPS, ETA, airport jobs, pickup/dropoff and live navigation
+        <Text style={{ color: '#94a3b8', marginTop: 4, fontWeight: '600' }}>
+          GPS, ETA, airport jobs and live navigation
         </Text>
       </View>
 
@@ -687,12 +868,14 @@ export default function DriverMapTab() {
           mapRef.current = ref;
         }}
         provider={PROVIDER_GOOGLE}
+        customMapStyle={DARK_MAP_STYLE}
         style={{ flex: 1 }}
         initialRegion={DEFAULT_REGION}
         showsUserLocation
         showsMyLocationButton
         showsCompass
         rotateEnabled
+        onPanDrag={() => setFollowDriver(false)}
       >
         {driverLocation ? (
           <Marker
@@ -702,9 +885,39 @@ export default function DriverMapTab() {
             }}
             title="Driver"
             description={`GPS ${getGpsAge(driverLocation.lastLocationAt)}`}
-            pinColor="#06b6d4"
+            anchor={{ x: 0.5, y: 0.5 }}
             rotation={driverLocation.heading ?? 0}
-          />
+          >
+            <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+              <Animated.View
+                style={{
+                  position: 'absolute',
+                  width: 30,
+                  height: 30,
+                  borderRadius: 15,
+                  backgroundColor: '#06b6d4',
+                  opacity: pulseOpacity,
+                  transform: [{ scale: pulseScale }],
+                }}
+              />
+              <View
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  backgroundColor: '#06b6d4',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderWidth: 3,
+                  borderColor: '#ecfeff',
+                }}
+              >
+                <Text style={{ color: '#020617', fontSize: 15, fontWeight: '900' }}>
+                  ●
+                </Text>
+              </View>
+            </View>
+          </Marker>
         ) : null}
 
         {pickupCoords ? (
@@ -712,8 +925,9 @@ export default function DriverMapTab() {
             coordinate={pickupCoords}
             title="Pickup"
             description={getBookingAddress(booking, 'pickup') || 'Pickup'}
-            pinColor="#22c55e"
-          />
+          >
+            <CustomMarker title="P" color="#22c55e" inner="#052e1b" />
+          </Marker>
         ) : null}
 
         {dropoffCoords ? (
@@ -721,335 +935,445 @@ export default function DriverMapTab() {
             coordinate={dropoffCoords}
             title="Dropoff"
             description={getBookingAddress(booking, 'dropoff') || 'Dropoff'}
-            pinColor="#ef4444"
-          />
+          >
+            <CustomMarker title="D" color="#ef4444" inner="#450a0a" />
+          </Marker>
         ) : null}
 
         {storedRoute.length >= 2 ? (
-          <Polyline
-            coordinates={storedRoute}
-            strokeWidth={6}
-            strokeColor={booking?.status === 'ON_JOB' ? '#22c55e' : '#06b6d4'}
-          />
+          <>
+            <Polyline
+              coordinates={storedRoute}
+              strokeWidth={9}
+              strokeColor="rgba(2,6,23,0.85)"
+            />
+            <Polyline
+              coordinates={storedRoute}
+              strokeWidth={5}
+              strokeColor={booking?.status === 'ON_JOB' ? '#22c55e' : '#06b6d4'}
+            />
+          </>
         ) : null}
 
         {storedRoute.length < 2 && driverToPickupLine.length >= 2 ? (
-          <Polyline
-            coordinates={driverToPickupLine}
-            strokeWidth={5}
-            strokeColor="#06b6d4"
-          />
+          <>
+            <Polyline
+              coordinates={driverToPickupLine}
+              strokeWidth={8}
+              strokeColor="rgba(2,6,23,0.85)"
+            />
+            <Polyline
+              coordinates={driverToPickupLine}
+              strokeWidth={4}
+              strokeColor="#06b6d4"
+              lineDashPattern={[10, 8]}
+            />
+          </>
         ) : null}
 
         {storedRoute.length < 2 && pickupToDropoffLine.length >= 2 ? (
-          <Polyline
-            coordinates={pickupToDropoffLine}
-            strokeWidth={5}
-            strokeColor="#22c55e"
-          />
+          <>
+            <Polyline
+              coordinates={pickupToDropoffLine}
+              strokeWidth={8}
+              strokeColor="rgba(2,6,23,0.85)"
+            />
+            <Polyline
+              coordinates={pickupToDropoffLine}
+              strokeWidth={4}
+              strokeColor="#22c55e"
+            />
+          </>
         ) : null}
       </MapView>
 
-      <ScrollView
+      <View
+        style={{
+          position: 'absolute',
+          top: 92,
+          right: 14,
+          gap: 10,
+        }}
+      >
+        <Pressable
+          onPress={() => {
+            setFollowDriver(true);
+            if (mapPoints.length > 0) {
+              mapRef.current?.animateToRegion(regionForPoints(mapPoints), 500);
+            }
+          }}
+          style={{
+            backgroundColor: '#020617',
+            borderWidth: 1,
+            borderColor: 'rgba(148,163,184,0.3)',
+            borderRadius: 999,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+          }}
+        >
+          <Text style={{ color: '#e2e8f0', fontWeight: '900', fontSize: 12 }}>
+            RECENTER
+          </Text>
+        </Pressable>
+
+        <View
+          style={{
+            backgroundColor: followDriver ? '#052e1b' : '#1e293b',
+            borderWidth: 1,
+            borderColor: followDriver ? '#059669' : '#334155',
+            borderRadius: 999,
+            paddingHorizontal: 12,
+            paddingVertical: 9,
+          }}
+        >
+          <Text
+            style={{
+              color: followDriver ? '#6ee7b7' : '#cbd5e1',
+              fontWeight: '900',
+              fontSize: 11,
+            }}
+          >
+            {followDriver ? 'FOLLOW ON' : 'FREE MAP'}
+          </Text>
+        </View>
+      </View>
+
+      <Animated.View
         style={{
           position: 'absolute',
           left: 0,
           right: 0,
           bottom: 0,
-          maxHeight: hasAirport ? 390 : 330,
+          maxHeight: hasAirport ? 430 : 360,
+          opacity: panelAnim,
+          transform: [{ translateY: panelTranslate }],
         }}
-        contentContainerStyle={{
-          paddingHorizontal: 16,
-          paddingBottom: 24,
-        }}
-        showsVerticalScrollIndicator={false}
       >
-        <View
-          style={{
-            backgroundColor: '#07111f',
-            borderRadius: 24,
-            padding: 16,
-            borderWidth: 1,
-            borderColor: 'rgba(255,255,255,0.08)',
-            shadowColor: '#000',
-            shadowOpacity: 0.35,
-            shadowRadius: 18,
-            shadowOffset: { width: 0, height: 8 },
-            elevation: 8,
+        <ScrollView
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingBottom: 24,
           }}
+          showsVerticalScrollIndicator={false}
         >
           <View
             style={{
-              flexDirection: 'row',
-              justifyContent: 'space-between',
-              gap: 12,
-              alignItems: 'flex-start',
+              alignSelf: 'center',
+              width: 46,
+              height: 5,
+              borderRadius: 999,
+              backgroundColor: 'rgba(226,232,240,0.55)',
+              marginBottom: 10,
             }}
-          >
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  color: 'white',
-                  fontSize: 18,
-                  fontWeight: '900',
-                }}
-              >
-                {booking?.reference || 'No Active Booking'}
-              </Text>
-
-              <Text
-                style={{
-                  color: tone.text,
-                  marginTop: 6,
-                  fontWeight: '900',
-                }}
-              >
-                {tone.label}
-              </Text>
-            </View>
-
-            <SmallPill
-              label={driverLocation ? 'GPS LIVE' : 'NO GPS'}
-              bg={driverLocation ? '#052e1b' : '#3b0a0a'}
-              text={driverLocation ? '#6ee7b7' : '#fca5a5'}
-              border={driverLocation ? '#059669' : '#ef4444'}
-            />
-          </View>
+          />
 
           <View
             style={{
-              flexDirection: 'row',
-              flexWrap: 'wrap',
-              gap: 8,
-              marginTop: 12,
+              backgroundColor: 'rgba(7,17,31,0.97)',
+              borderRadius: 26,
+              padding: 16,
+              borderWidth: 1,
+              borderColor: 'rgba(255,255,255,0.1)',
+              shadowColor: '#000',
+              shadowOpacity: 0.45,
+              shadowRadius: 22,
+              shadowOffset: { width: 0, height: 10 },
+              elevation: 10,
             }}
           >
-            <SmallPill
-              label={getEtaLabel(booking)}
-              bg={etaTone.bg}
-              text={etaTone.text}
-              border={etaTone.border}
-            />
-
-            {booking?.driverDistanceMiles != null ? (
-              <SmallPill
-                label={`${formatDistance(booking.driverDistanceMiles)} to pickup`}
-                bg="#082f49"
-                text="#bfdbfe"
-                border="#2563eb"
-              />
-            ) : null}
-
-            {booking?.driverGpsAgeSeconds != null ? (
-              <SmallPill
-                label={`GPS ${booking.driverGpsAgeSeconds}s old`}
-                bg={booking.driverGpsAgeSeconds <= 90 ? '#052e1b' : '#451a03'}
-                text={booking.driverGpsAgeSeconds <= 90 ? '#6ee7b7' : '#fde68a'}
-                border={booking.driverGpsAgeSeconds <= 90 ? '#059669' : '#f59e0b'}
-              />
-            ) : null}
-          </View>
-
-          {lastUpdatedAt ? (
-            <Text
-              style={{
-                color: '#64748b',
-                marginTop: 8,
-                fontSize: 12,
-                fontWeight: '700',
-              }}
-            >
-              Map updated {getGpsAge(lastUpdatedAt)}
-            </Text>
-          ) : null}
-
-          {hasAirport ? (
             <View
               style={{
-                marginTop: 14,
-                backgroundColor: '#082f49',
-                borderRadius: 18,
-                padding: 14,
-                borderWidth: 1,
-                borderColor: '#075985',
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                gap: 12,
+                alignItems: 'flex-start',
               }}
             >
-              <Text
-                style={{
-                  color: '#67e8f9',
-                  fontSize: 12,
-                  fontWeight: '900',
-                }}
-              >
-                {getAirportDirectionLabel(booking?.flightDirection).toUpperCase()}
-              </Text>
-
-              <Text
-                style={{
-                  color: 'white',
-                  marginTop: 6,
-                  fontSize: 15,
-                  fontWeight: '900',
-                }}
-              >
-                {getAirportSummary(booking)}
-              </Text>
-
-              {booking?.flightDateTime ? (
+              <View style={{ flex: 1 }}>
                 <Text
                   style={{
-                    color: '#bfdbfe',
-                    marginTop: 8,
-                    fontSize: 13,
-                    fontWeight: '700',
-                  }}
-                >
-                  Flight time: {formatDateTime(booking.flightDateTime)}
-                </Text>
-              ) : null}
-
-              {booking?.meetAndGreet ? (
-                <Text
-                  style={{
-                    color: '#fde68a',
-                    marginTop: 8,
-                    fontSize: 13,
+                    color: '#f8fafc',
+                    fontSize: 19,
                     fontWeight: '900',
                   }}
                 >
-                  Meet & Greet required
+                  {booking?.reference || 'No Active Booking'}
                 </Text>
-              ) : null}
 
-              {booking?.airportNotes ? (
                 <Text
                   style={{
-                    color: '#dbeafe',
-                    marginTop: 8,
-                    fontSize: 13,
-                    lineHeight: 19,
+                    color: tone.text,
+                    marginTop: 6,
+                    fontWeight: '900',
                   }}
                 >
-                  {booking.airportNotes}
+                  {tone.label}
                 </Text>
+              </View>
+
+              <SmallPill
+                label={driverLocation ? 'GPS LIVE' : 'NO GPS'}
+                bg={driverLocation ? '#052e1b' : '#3b0a0a'}
+                text={driverLocation ? '#6ee7b7' : '#fca5a5'}
+                border={driverLocation ? '#059669' : '#ef4444'}
+              />
+            </View>
+
+            <View
+              style={{
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                gap: 8,
+                marginTop: 12,
+              }}
+            >
+              <SmallPill
+                label={getEtaLabel(booking)}
+                bg={etaTone.bg}
+                text={etaTone.text}
+                border={etaTone.border}
+              />
+
+              {booking?.driverDistanceMiles != null ? (
+                <SmallPill
+                  label={`${formatDistance(booking.driverDistanceMiles)} to pickup`}
+                  bg="#082f49"
+                  text="#bfdbfe"
+                  border="#2563eb"
+                />
+              ) : null}
+
+              {booking?.driverGpsAgeSeconds != null ? (
+                <SmallPill
+                  label={`GPS ${booking.driverGpsAgeSeconds}s old`}
+                  bg={booking.driverGpsAgeSeconds <= 90 ? '#052e1b' : '#451a03'}
+                  text={
+                    booking.driverGpsAgeSeconds <= 90 ? '#6ee7b7' : '#fde68a'
+                  }
+                  border={
+                    booking.driverGpsAgeSeconds <= 90 ? '#059669' : '#f59e0b'
+                  }
+                />
               ) : null}
             </View>
-          ) : null}
 
-          {getBookingAddress(booking, 'pickup') ? (
-            <Text
-              style={{
-                color: 'white',
-                marginTop: 14,
-                fontWeight: '700',
-                lineHeight: 20,
-              }}
-            >
-              Pickup: {getBookingAddress(booking, 'pickup')}
-            </Text>
-          ) : null}
-
-          {getBookingAddress(booking, 'dropoff') ? (
-            <Text
-              style={{
-                color: '#cbd5e1',
-                marginTop: 6,
-                fontWeight: '600',
-                lineHeight: 20,
-              }}
-            >
-              Dropoff: {getBookingAddress(booking, 'dropoff')}
-            </Text>
-          ) : null}
-
-          {nextDestination ? (
-            <View style={{ marginTop: 14, gap: 10 }}>
-              <Pressable
-                onPress={() =>
-                  void openGoogleNavigation(
-                    nextDestination.address,
-                    nextDestination.coords,
-                  )
-                }
+            {lastUpdatedAt ? (
+              <Text
                 style={{
-                  backgroundColor: nextDestination.color,
-                  paddingVertical: 14,
-                  borderRadius: 14,
-                  alignItems: 'center',
+                  color: '#64748b',
+                  marginTop: 8,
+                  fontSize: 12,
+                  fontWeight: '700',
                 }}
               >
-                <Text
-                  style={{
-                    color: '#020617',
-                    fontWeight: '900',
-                  }}
-                >
-                  {nextDestination.googleLabel}
-                </Text>
-              </Pressable>
+                Map updated {getGpsAge(lastUpdatedAt)}
+              </Text>
+            ) : null}
 
-              <Pressable
-                onPress={() =>
-                  void openWazeNavigation(
-                    nextDestination.address,
-                    nextDestination.coords,
-                  )
-                }
+            {hasAirport ? (
+              <View
                 style={{
-                  backgroundColor: nextDestination.bg,
+                  marginTop: 14,
+                  backgroundColor: '#082f49',
+                  borderRadius: 18,
+                  padding: 14,
                   borderWidth: 1,
-                  borderColor: nextDestination.color,
-                  paddingVertical: 14,
-                  borderRadius: 14,
-                  alignItems: 'center',
+                  borderColor: '#075985',
                 }}
               >
                 <Text
                   style={{
-                    color: nextDestination.text,
+                    color: '#67e8f9',
+                    fontSize: 12,
                     fontWeight: '900',
                   }}
                 >
-                  {nextDestination.wazeLabel}
+                  {getAirportDirectionLabel(
+                    booking?.flightDirection,
+                  ).toUpperCase()}
                 </Text>
-              </Pressable>
 
-              {booking?.trackingUrl ? (
-                <Pressable
-                  onPress={() => void openTrackingLink(booking)}
+                <Text
                   style={{
-                    backgroundColor: '#083344',
+                    color: 'white',
+                    marginTop: 6,
+                    fontSize: 15,
+                    fontWeight: '900',
+                  }}
+                >
+                  {getAirportSummary(booking)}
+                </Text>
+
+                {booking?.flightDateTime ? (
+                  <Text
+                    style={{
+                      color: '#bfdbfe',
+                      marginTop: 8,
+                      fontSize: 13,
+                      fontWeight: '700',
+                    }}
+                  >
+                    Flight time: {formatDateTime(booking.flightDateTime)}
+                  </Text>
+                ) : null}
+
+                {booking?.meetAndGreet ? (
+                  <Text
+                    style={{
+                      color: '#fde68a',
+                      marginTop: 8,
+                      fontSize: 13,
+                      fontWeight: '900',
+                    }}
+                  >
+                    Meet & Greet required
+                  </Text>
+                ) : null}
+
+                {booking?.airportNotes ? (
+                  <Text
+                    style={{
+                      color: '#dbeafe',
+                      marginTop: 8,
+                      fontSize: 13,
+                      lineHeight: 19,
+                    }}
+                  >
+                    {booking.airportNotes}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
+            <AddressCard
+              label="Pickup"
+              value={getBookingAddress(booking, 'pickup')}
+              accent="#22c55e"
+            />
+
+            <AddressCard
+              label="Dropoff"
+              value={getBookingAddress(booking, 'dropoff')}
+              accent="#ef4444"
+            />
+
+            {nextDestination ? (
+              <View style={{ marginTop: 14, gap: 10 }}>
+                <Pressable
+                  onPress={() =>
+                    void openGoogleNavigation(
+                      nextDestination.address,
+                      nextDestination.coords,
+                    )
+                  }
+                  style={{
+                    backgroundColor: nextDestination.color,
+                    paddingVertical: 15,
+                    borderRadius: 16,
+                    alignItems: 'center',
+                    shadowColor: nextDestination.color,
+                    shadowOpacity: 0.25,
+                    shadowRadius: 14,
+                    shadowOffset: { width: 0, height: 5 },
+                    elevation: 6,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: '#020617',
+                      fontWeight: '900',
+                    }}
+                  >
+                    {nextDestination.googleLabel}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() =>
+                    void openWazeNavigation(
+                      nextDestination.address,
+                      nextDestination.coords,
+                    )
+                  }
+                  style={{
+                    backgroundColor: nextDestination.bg,
                     borderWidth: 1,
-                    borderColor: '#06b6d4',
-                    paddingVertical: 14,
-                    borderRadius: 14,
+                    borderColor: nextDestination.color,
+                    paddingVertical: 15,
+                    borderRadius: 16,
                     alignItems: 'center',
                   }}
                 >
                   <Text
                     style={{
-                      color: '#a5f3fc',
+                      color: nextDestination.text,
                       fontWeight: '900',
                     }}
                   >
-                    Open Customer Tracking
+                    {nextDestination.wazeLabel}
                   </Text>
                 </Pressable>
-              ) : null}
-            </View>
-          ) : (
-            <Text
-              style={{
-                color: '#94a3b8',
-                marginTop: 14,
-                lineHeight: 20,
-              }}
-            >
-              Waiting for an active booking with pickup/dropoff coordinates.
-            </Text>
-          )}
-        </View>
-      </ScrollView>
+
+                {booking?.trackingUrl ? (
+                  <Pressable
+                    onPress={() => void openTrackingLink(booking)}
+                    style={{
+                      backgroundColor: '#083344',
+                      borderWidth: 1,
+                      borderColor: '#06b6d4',
+                      paddingVertical: 15,
+                      borderRadius: 16,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: '#a5f3fc',
+                        fontWeight: '900',
+                      }}
+                    >
+                      Open Customer Tracking
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : (
+              <View
+                style={{
+                  marginTop: 14,
+                  padding: 14,
+                  borderRadius: 18,
+                  backgroundColor: '#020617',
+                  borderWidth: 1,
+                  borderColor: 'rgba(148,163,184,0.18)',
+                }}
+              >
+                <Text
+                  style={{
+                    color: '#e2e8f0',
+                    fontWeight: '900',
+                    fontSize: 14,
+                  }}
+                >
+                  Standing by for next job
+                </Text>
+
+                <Text
+                  style={{
+                    color: '#94a3b8',
+                    marginTop: 6,
+                    lineHeight: 20,
+                    fontWeight: '600',
+                  }}
+                >
+                  Waiting for an active booking with pickup and dropoff
+                  coordinates. New offers will appear here when assigned.
+                </Text>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </Animated.View>
     </SafeAreaView>
   );
 }
