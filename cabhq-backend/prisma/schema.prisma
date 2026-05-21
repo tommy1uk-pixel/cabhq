@@ -261,11 +261,25 @@ model Booking {
   status     String
   pickupTime DateTime
 
-  pricingMode     String?
+    pricingMode     String?
   quotedPrice     Float?
   calculatedFare  Float?
+
   distanceMiles   Float?
   durationMinutes Float?
+
+  routeDistanceMiles   Float?
+  routeDurationMinutes Int?
+
+  routeCoordinates Json?
+
+  driverDistanceMiles Float?
+  etaMinutes         Int?
+  etaConfidence      String?
+
+  trackingUrl String?
+
+  lastRouteRefreshAt DateTime?
 
   isAirportBooking Boolean   @default(false)
   airportCode      String?

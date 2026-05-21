@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AutoDispatchService } from '../dispatch/auto-dispatch.service';
 import { LocationsService } from '../locations/locations.service';
+import { RoutingService } from '../routing/routing.service';
 
 type CreateBookingInput = {
   companyId: string;
@@ -121,6 +122,7 @@ export class BookingsService {
     private readonly realtime: RealtimeService,
     private readonly autoDispatchService: AutoDispatchService,
     private readonly locationsService: LocationsService,
+    private readonly routingService: RoutingService,
   ) {}
 
   async list(companyId: string) {
@@ -371,6 +373,13 @@ export class BookingsService {
       dropoffLng = dropoffCoords.longitude ?? null;
     }
 
+    const routeData = await this.buildRouteData({
+      pickupLat,
+      pickupLng,
+      dropoffLat,
+      dropoffLng,
+    });
+
     const airportNotes = this.cleanString(input.airportNotes);
     const airportCode = this.cleanUpperString(input.airportCode);
     const airportName = this.cleanString(input.airportName);
@@ -412,6 +421,10 @@ export class BookingsService {
         calculatedFare: input.calculatedFare ?? null,
         distanceMiles: input.distanceMiles ?? null,
         durationMinutes: input.durationMinutes ?? null,
+        routeDistanceMiles: routeData.distanceMiles,
+        routeDurationMinutes: routeData.durationMinutes,
+        routeCoordinates: routeData.routeCoordinates,
+        lastRouteRefreshAt: routeData.routeCoordinates.length > 0 ? new Date() : null,
         customerName: bookerName,
         customerPhone: bookerPhone,
         isThirdPartyBooking,
@@ -735,6 +748,54 @@ export class BookingsService {
       }
     }
 
+    const pickupOrDropoffChanged =
+      updateData.pickup !== undefined || updateData.dropoff !== undefined;
+
+    if (pickupOrDropoffChanged) {
+      const nextPickup = String(updateData.pickup ?? booking.pickup);
+      const nextDropoff = String(updateData.dropoff ?? booking.dropoff);
+
+      let pickupLat = booking.pickupLat ?? null;
+      let pickupLng = booking.pickupLng ?? null;
+      let dropoffLat = booking.dropoffLat ?? null;
+      let dropoffLng = booking.dropoffLng ?? null;
+
+      if (updateData.pickup !== undefined) {
+        const pickupCoords = await this.locationsService.geocodeAddress(
+          nextPickup,
+        );
+
+        pickupLat = pickupCoords.latitude ?? null;
+        pickupLng = pickupCoords.longitude ?? null;
+        updateData.pickupLat = pickupLat;
+        updateData.pickupLng = pickupLng;
+      }
+
+      if (updateData.dropoff !== undefined) {
+        const dropoffCoords = await this.locationsService.geocodeAddress(
+          nextDropoff,
+        );
+
+        dropoffLat = dropoffCoords.latitude ?? null;
+        dropoffLng = dropoffCoords.longitude ?? null;
+        updateData.dropoffLat = dropoffLat;
+        updateData.dropoffLng = dropoffLng;
+      }
+
+      const routeData = await this.buildRouteData({
+        pickupLat,
+        pickupLng,
+        dropoffLat,
+        dropoffLng,
+      });
+
+      updateData.routeDistanceMiles = routeData.distanceMiles;
+      updateData.routeDurationMinutes = routeData.durationMinutes;
+      updateData.routeCoordinates = routeData.routeCoordinates;
+      updateData.lastRouteRefreshAt =
+        routeData.routeCoordinates.length > 0 ? new Date() : null;
+    }
+
     if (Object.keys(updateData).length === 0) {
       return this.findBookingWithRelations(booking.id, booking.companyId);
     }
@@ -1006,6 +1067,25 @@ export class BookingsService {
     }
 
     return refreshed;
+  }
+
+  private async buildRouteData(input: {
+    pickupLat: number | null;
+    pickupLng: number | null;
+    dropoffLat: number | null;
+    dropoffLng: number | null;
+  }) {
+    try {
+      return await this.routingService.getRoute(input);
+    } catch (error) {
+      console.log('Failed to build booking route', error);
+
+      return {
+        distanceMiles: null,
+        durationMinutes: null,
+        routeCoordinates: [],
+      };
+    }
   }
 
   private bookingInclude() {
