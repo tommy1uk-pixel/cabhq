@@ -13,6 +13,7 @@ import type { Booking, Driver } from '@/lib/driver-types';
 import { Badge } from './Badge';
 import { CompletedJobCard } from './CompletedJobCard';
 import { DetailRow } from './DetailRow';
+import { DriverLiveMap } from './DriverLiveMap';
 import { IncomingOfferScreen } from './IncomingOfferScreen';
 import { JobCard } from './JobCard';
 import { PrimaryButton } from './PrimaryButton';
@@ -23,6 +24,7 @@ function formatDateTime(value?: string | null) {
   if (!value) return '—';
 
   const date = new Date(value);
+
   if (Number.isNaN(date.getTime())) return '—';
 
   return date.toLocaleString('en-GB', {
@@ -37,6 +39,7 @@ function formatDate(value?: string | null) {
   if (!value) return '—';
 
   const date = new Date(value);
+
   if (Number.isNaN(date.getTime())) return '—';
 
   return date.toLocaleDateString('en-GB', {
@@ -195,7 +198,14 @@ export function DriverDashboard({
             }}
           >
             <View style={{ flex: 1 }}>
-              <Text style={{ color: '#64748b', fontSize: 12, fontWeight: '800' }}>
+              <Text
+                style={{
+                  color: '#64748b',
+                  fontSize: 12,
+                  fontWeight: '800',
+                  letterSpacing: 1,
+                }}
+              >
                 DRIVER APP
               </Text>
 
@@ -298,6 +308,10 @@ export function DriverDashboard({
             />
           </View>
         </View>
+
+        <SectionCard title="Live Driver Map">
+          <DriverLiveMap driver={driver} activeJobs={activeJobs} />
+        </SectionCard>
 
         <SectionCard title="Today Summary">
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
